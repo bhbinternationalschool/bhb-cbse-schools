@@ -100,6 +100,7 @@ import {
   listFutureConcessionCandidates,
   type FutureConcessionCandidate,
 } from "@/lib/counterConcession";
+import { issueSeriesNumber } from "@/lib/numberSeries";
 import { lazyNamedTabPanel } from "@/components/ui/lazyTabPanel";
 import {
   useDemoSession,
@@ -1146,7 +1147,7 @@ export function FeeTakeWorkspace() {
    * scrolled to April must not reprice April: that month is billed, often
    * collected, and its receipt would stop matching the money taken.
    */
-  function changeHeadDiscount(due: FeeDueLine, rupees: string) {
+  async function changeHeadDiscount(due: FeeDueLine, rupees: string) {
     if (!masters || !sis) return;
     const student = sis.students.find((st) => st.id === due.studentId);
     if (!student || !due.feeHeadId) return;
@@ -1167,7 +1168,7 @@ export function FeeTakeWorkspace() {
     const paise = Math.round(
       (Number(rupees.replace(/[^\d.]/g, "")) || 0) * 100,
     );
-    const res = changeStandingDiscount({
+    const res = await changeStandingDiscount({
       studentId: due.studentId,
       studentName: student.fullName,
       feeHeadId: due.feeHeadId,
@@ -1443,6 +1444,7 @@ export function FeeTakeWorkspace() {
   }
 
   const refCheckBusy = useRef(false);
+  const collectBusy = useRef(false);
 
   /**
    * Look at the typed payment references before anything is saved: a date
@@ -1554,16 +1556,19 @@ export function FeeTakeWorkspace() {
         return;
       }
       if (chosen.length > 0) {
-        executeCollect(new Set(chosen.map((c) => c.key)));
+        void executeCollect(new Set(chosen.map((c) => c.key)));
         return;
       }
     }
 
-    executeCollect(futureConcessionPrompt?.selected ?? new Set());
+    void executeCollect(futureConcessionPrompt?.selected ?? new Set());
   }
 
-  function executeCollect(applyFutureKeys: Set<string>) {
+  async function executeCollect(applyFutureKeys: Set<string>) {
     if (!selectedStudent || !sis) return;
+    // One collection at a time: the receipt number is asked of the server
+    // first, and a second click meanwhile must not start another.
+    if (collectBusy.current) return;
     setFutureConcessionPrompt(null);
 
     let futureConcessionMsg = "";
@@ -1585,6 +1590,26 @@ export function FeeTakeWorkspace() {
         failCollect(check.error);
         return;
       }
+    }
+    // The receipt number comes from the SERVER (data-layer 2.2e): max(the
+    // RECEIPT counter, the highest receipt on record + 1) — never this tab's
+    // copy of the counter, which lagged the records (production 27 Oct: the
+    // counter at 701, receipts on record to RCV-00710). Asked BEFORE anything
+    // is saved, so an unanswered request leaves nothing half done.
+    let issuedReceiptNo: string | undefined;
+    if (collectTarget > 0) {
+      collectBusy.current = true;
+      let issued: Awaited<ReturnType<typeof issueSeriesNumber>>;
+      try {
+        issued = await issueSeriesNumber("RECEIPT", ay);
+      } finally {
+        collectBusy.current = false;
+      }
+      if (!issued.ok && issued.kind === "failed") {
+        failCollect(`Not saved — the server did not give the next receipt number (${issued.message}). Try again.`);
+        return;
+      }
+      if (issued.ok) issuedReceiptNo = issued.formatted;
     }
     const undoWaivers = () => {
       for (const id of waiverAdjustmentIds) voidFeeAdjustment(id, session.fullName);
@@ -1616,7 +1641,7 @@ export function FeeTakeWorkspace() {
     // Future-month grants apply AFTER the receipt exists (paid path), so
     // each grant carries its source receipt and dies with it on void. The
     // discount-only path has no receipt — grants apply immediately there.
-    const applyFutureGrants = (voucher?: { id: string; receiptNo: string }) => {
+    const applyFutureGrants = async (voucher?: { id: string; receiptNo: string }) => {
       if (applyFutureKeys.size === 0 || !masters || counterDiscountPaise <= 0) {
         return;
       }
@@ -1627,7 +1652,7 @@ export function FeeTakeWorkspace() {
         householdBundle.map((r) => r.student),
         ay,
       );
-      const futureResult = applyFutureConcessionsFromCounter({
+      const futureResult = await applyFutureConcessionsFromCounter({
         candidates,
         applyKeys: applyFutureKeys,
         reason: counterDiscountReason.trim() || "Counter concession",
@@ -1669,7 +1694,7 @@ export function FeeTakeWorkspace() {
     if (collectTarget <= 0) {
       if (counterDiscountPaise > 0) {
         if (storeSlices.length > 0) void discountStoreLines(`DISC-${Date.now()}`, storeSlices);
-        applyFutureGrants();
+        await applyFutureGrants();
         setSelectedKeys(new Set());
         setCollectAmountRupees("");
         setLineDiscountRupees({});
@@ -1734,6 +1759,7 @@ export function FeeTakeWorkspace() {
       note: [note.trim(), discountNote, chequeNote].filter(Boolean).join(" · "),
       backdatePolicy: masters?.feeBackdatePolicy,
       mayBackdate,
+      issuedReceiptNo,
     });
     if (!result.ok) {
       undoWaivers();
@@ -1752,7 +1778,7 @@ export function FeeTakeWorkspace() {
     // Bind this receipt's counter waivers to it, so voiding takes them back.
     linkAdjustmentsToVoucher(waiverAdjustmentIds, result.voucher.id);
 
-    applyFutureGrants({
+    await applyFutureGrants({
       id: result.voucher.id,
       receiptNo: result.voucher.receiptNo,
     });
@@ -2460,7 +2486,7 @@ export function FeeTakeWorkspace() {
               lineDiscountRupees={lineDiscountRupees}
               recurringEligible={recurringEligible}
               recurringChosen={recurringDueKeys}
-              onChangeHeadDiscount={changeHeadDiscount}
+              onChangeHeadDiscount={(d, r) => void changeHeadDiscount(d, r)}
               onToggleRecurring={(dueKey, on) => {
                 setRecurringDueKeys((prev) => {
                   const next = new Set(prev);
@@ -2672,10 +2698,10 @@ export function FeeTakeWorkspace() {
           }}
           onCancel={() => {
             setFutureConcessionPrompt(null);
-            executeCollect(new Set());
+            void executeCollect(new Set());
           }}
           onConfirm={() => {
-            executeCollect(futureConcessionPrompt.selected);
+            void executeCollect(futureConcessionPrompt.selected);
           }}
         />
       ) : null}

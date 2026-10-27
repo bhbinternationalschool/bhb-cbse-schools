@@ -32,12 +32,12 @@ import {
   resolveStudentFeeGroupId,
   resolveStructureLinesForClass,
   resolveSiblingTierValue,
-  saveMasters,
   shouldBillMidYearLine,
   concessionAmountFromValue,
   type MastersState,
 } from "@/lib/masters";
 import {
+  laterSeriesNumber,
   persistSeriesUse,
   suggestFromSeriesCode,
 } from "@/lib/numberSeries";
@@ -3412,6 +3412,21 @@ export function nextReceiptNo(
   return `${series}/${ayCode}/${String(max + 1).padStart(4, "0")}`;
 }
 
+/**
+ * The receipt number to use: the server-issued one (or this copy's suggestion,
+ * when later — this tab may hold a receipt the server has not seen yet), and
+ * never one already on a receipt this copy holds. Exported for its self-test.
+ */
+export function chooseReceiptNo(
+  issued: string | undefined,
+  local: string,
+  fees: Pick<FeesState, "vouchers">,
+): string {
+  const pick = issued?.trim() ? laterSeriesNumber(issued.trim(), local) : local;
+  const taken = new Set(fees.vouchers.map((v) => v.receiptNo));
+  return taken.has(pick) ? local : pick;
+}
+
 export function receiptSeriesOf(receiptNo: string): FeeReceiptSeries | "" {
   if (receiptNo.startsWith("R/")) return "R";
   if (receiptNo.startsWith("F/") || receiptNo.startsWith("REC/")) return "F";
@@ -3479,6 +3494,15 @@ export function collectPayment(input: {
   receiptSeries?: FeeReceiptSeries;
   manualBookSeries?: string;
   manualBookLeaf?: string;
+  /**
+   * The receipt number the SERVER issued for this receipt (data-layer 2.2e:
+   * POST /api/data/masters.number-series/next, or nextSeriesNumberServer on
+   * a server route) — max(the counter, the highest receipt on record + 1).
+   * The receipt takes the later of it and this copy's own suggestion, and
+   * never a number this copy already holds. Absent: this copy's suggestion
+   * (the callers not yet moved — see COMMAND.md 2.2e).
+   */
+  issuedReceiptNo?: string;
   /** Skip the manual-book paper-age soft check when confirmed by the UI. */
   allowBackdate?: boolean;
   /**
@@ -3677,10 +3701,10 @@ export function collectPayment(input: {
 
   const voucher: CollectionVoucher = {
     id: id("rcv"),
-    receiptNo: nextReceiptNo(
+    receiptNo: chooseReceiptNo(
+      input.issuedReceiptNo,
+      nextReceiptNo(fees, input.academicYearCode ?? DEFAULT_AY, input.receiptSeries ?? "F"),
       fees,
-      input.academicYearCode ?? DEFAULT_AY,
-      input.receiptSeries ?? "F",
     ),
     schoolReceiptNo: manualRef,
     source,
@@ -3930,24 +3954,29 @@ export function voidVoucher(voucherId: string): boolean {
  * (`[v:<id>]`, written when the counter's "save for future months" applied).
  * Rejection, not deletion: the grant stays on file with the void note, so
  * Concessions shows why the discount stopped.
+ *
+ * Data-layer 2.2e: the grants are read FROM THE SERVER and only those are
+ * patched (status + note), one all-or-none batch at each grant's `_rev` —
+ * never the tab's whole book. A grant this tab never loaded is revoked too.
+ * On the server this does nothing: the server routes that void a receipt
+ * (refunds) revoke through lib/data/server/mastersLibWrites.server, because
+ * a "save" here only ever changed that process's mirror copy.
  */
 function revokeGrantsFromVoidedReceipt(voucher: CollectionVoucher): void {
-  const masters = loadMasters();
-  const marker = `[v:${voucher.id}]`;
-  const grants = masters.concessionGrants ?? [];
-  let changed = false;
-  const next = grants.map((g) => {
-    if (g.status === "rejected" || !g.reason.includes(marker)) return g;
-    changed = true;
-    return {
-      ...g,
-      status: "rejected" as const,
-      reason: `${g.reason} · auto-revoked — receipt ${voucher.receiptNo} voided ${new Date().toISOString().slice(0, 10)}`,
-    };
-  });
-  if (changed) {
-    void trackServerWork(saveMasters({ ...masters, concessionGrants: next }));
-  }
+  if (typeof window === "undefined") return;
+  void trackServerWork(
+    import("@/lib/data/client/mastersLibWrites")
+      .then(({ revokeVoucherGrants }) => revokeVoucherGrants({ id: voucher.id, receiptNo: voucher.receiptNo }))
+      .then((out) => {
+        if (out.ok) return;
+        const message = `Receipt ${voucher.receiptNo} was voided, but the concession it granted was NOT revoked (${out.message}). Revoke it in Masters → Concessions.`;
+        console.warn(`[fees] ${message}`);
+        void import("@/components/shell/Toast")
+          .then(({ pushToast }) => pushToast({ kind: "error", message, durationMs: 0 }))
+          .catch(() => undefined);
+      })
+      .catch(() => undefined),
+  );
 }
 
 /**

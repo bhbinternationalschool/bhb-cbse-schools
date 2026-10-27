@@ -27,7 +27,6 @@ import {
   newId,
   normalizeConcessionGrant,
   normalizeConcessionRule,
-  saveMasters,
   type ConcessionGrant,
   type ConcessionRule,
   type MastersState,
@@ -318,6 +317,7 @@ export async function awardReferralForLead(input: {
   }
 
   let masters = loadMasters();
+  const loaded = masters;
   if (policy.maxPerSession > 0) {
     const mine = (masters.concessionGrants ?? []).filter(
       (g) =>
@@ -350,12 +350,18 @@ export async function awardReferralForLead(input: {
     siblingChildNo: null,
   });
 
-  const saved = await saveMasters({
-    ...masters,
-    concessionGrants: [...(masters.concessionGrants ?? []), grant],
-  });
+  // The reward rule (if new) and the grant, as element writes in one
+  // all-or-none batch (data-layer 2.2e) — never the tab's whole book.
+  const { diffMastersLists } = await import("@/lib/data/mastersElementChanges");
+  const { writeMastersChanges } = await import("@/lib/data/client/mastersLibWrites");
+  const saved = await writeMastersChanges(
+    diffMastersLists(loaded, { ...masters, concessionGrants: [...(masters.concessionGrants ?? []), grant] }, ["concessions", "concessionGrants"], {
+      // The reward rule's id is fixed per policy: already stored = use it.
+      ifAbsent: true,
+    }),
+  );
   if (!saved.ok) {
-    return { ok: false, error: `Could not save the reward (${saved.reason})` };
+    return { ok: false, error: `Could not save the reward (${saved.message})` };
   }
 
   return {

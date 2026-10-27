@@ -76,9 +76,22 @@ export function makeErpQueryClient(): QueryClient {
   });
 }
 
+/** The provider's client (one per tab), for lib/ writers that run outside React (data-layer 2.2e). */
+let tabQueryClient: QueryClient | null = null;
+
+/**
+ * Invalidate these desks' queries in this tab from outside React — a lib/
+ * writer (the fee counter's concession grant, a voided receipt's revoke)
+ * after its element write. No provider mounted: nothing to invalidate.
+ */
+export function invalidateTabDesks(desks: readonly string[]): string[] {
+  return tabQueryClient ? invalidateDesks(tabQueryClient, desks) : [];
+}
+
 /** One query client for this tab, and the versions poll that keeps it honest. */
 export function ErpQueryProvider({ children }: { children: React.ReactNode }) {
   const [client] = useState(makeErpQueryClient);
+  tabQueryClient = client;
   return (
     <QueryClientProvider client={client}>
       <VersionsPoller />

@@ -277,3 +277,56 @@ export async function fetchSeriesNext(
     return null;
   }
 }
+
+export type IssuedSeriesNumber =
+  | { ok: true; formatted: string; next: number }
+  /** The series is not in Masters: the caller's own built-in numbering applies. */
+  | { ok: false; kind: "not_configured"; message: string }
+  | { ok: false; kind: "failed"; message: string };
+
+/**
+ * The number to issue NOW (data-layer 2.2e: the fee counter's receipt, the
+ * SRN at enrolment) — from POST /api/data/masters.number-series/next, never
+ * from the tab's copy of the counter: the server answers max(counter, highest
+ * on record + 1) and lifts a lagging counter. A failed answer is a refusal to
+ * issue ("failed"), not a licence to guess; "not_configured" (404) means the
+ * school has no such series in Masters.
+ */
+export async function issueSeriesNumber(
+  code: string,
+  academicYearCode: string | undefined,
+  deps: { post?: typeof fetch } = {},
+): Promise<IssuedSeriesNumber> {
+  if (typeof window === "undefined" && !deps.post) {
+    return { ok: false, kind: "failed", message: "numbers are issued from the browser here" };
+  }
+  try {
+    const res = await (deps.post ?? fetch)(`/api/data/${encodeURIComponent("masters.number-series")}/next`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ series: code, ...(academicYearCode ? { ay: academicYearCode } : {}) }),
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; next?: number; formatted?: string; message?: string } | null;
+    if (res.status === 404 && body?.ok === false) return { ok: false, kind: "not_configured", message: body.message ?? `No ${code} series` };
+    if (!res.ok || !body?.ok || typeof body.next !== "number" || typeof body.formatted !== "string") {
+      return { ok: false, kind: "failed", message: body?.message ?? `HTTP ${res.status}` };
+    }
+    return { ok: true, formatted: body.formatted, next: body.next };
+  } catch (e) {
+    return { ok: false, kind: "failed", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * The later of two numbers of one series (same prefix, numeric tail): the
+ * server's answer and what this tab would have offered. The tab may know of a
+ * number it issued a moment ago that the server has not seen yet, so the
+ * answer is never LOWER than the tab's; it is never lower than the server's
+ * either. Different prefixes: the server's (`issued`) wins.
+ */
+export function laterSeriesNumber(issued: string, local: string): string {
+  const m1 = issued.match(/^(.*?)(\d+)$/);
+  const m2 = local.match(/^(.*?)(\d+)$/);
+  if (!m1 || !m2 || m1[1] !== m2[1]) return issued;
+  return Number(m2[2]) > Number(m1[2]) ? local : issued;
+}

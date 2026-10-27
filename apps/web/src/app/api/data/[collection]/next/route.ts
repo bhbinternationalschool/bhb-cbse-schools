@@ -12,11 +12,9 @@
  * Any other collection here is a 404.
  */
 import { NextResponse } from "next/server";
-import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
 import { requireStaffApi } from "@/lib/apiRouteAuth.server";
-import { maxIssuedNumber, nextOf, SERIES_ISSUER, seriesIssuedOnRecord, seriesPrefix } from "@/lib/data/server/numberSeriesIssued";
-import { bumpNumberSeries, readNumberSeries } from "@/lib/data/server/repo";
-import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
+import { SERIES_ISSUER } from "@/lib/data/server/numberSeriesIssued";
+import { nextSeriesNumberServer } from "@/lib/data/server/numberSeriesNext.server";
 import { hasPermission, type RbacModule } from "@/lib/rbac";
 import { withBuildCheck } from "@/lib/staleBuild.server";
 
@@ -42,40 +40,16 @@ export const POST = withBuildCheck(async (req: Request, ctx: RouteCtx) => {
   if (!series) return fail(400, "invalid", "series (a code or id) is required");
   if (ay !== null && !/^\d{4}-\d{2}$/.test(ay)) return fail(400, "invalid", "ay must be an academic year like 2026-27");
 
-  let stored: Record<string, unknown> | null;
-  try {
-    stored = await readNumberSeries(series);
-  } catch (e) {
-    return fail(503, "unavailable", `Could not read the number series (${e instanceof Error ? e.message : String(e)}).`);
-  }
-  if (!stored) return fail(404, "not_found", `No number series ${series} in Masters.`);
-  const code = String(stored.code ?? "");
-  if (!auth.viaMirrorSecret) {
+  // The rule lives in lib/data/server/numberSeriesNext.server (data-layer
+  // 2.2e: the mobile fee counter issues receipts by it too).
+  const out = await nextSeriesNumberServer(series, ay, (code) => {
+    if (auth.viaMirrorSecret) return null;
     const { session, masters, rbac } = auth.ctx;
     const issuers: readonly RbacModule[] = ["masters", ...(SERIES_ISSUER[code] ?? [])];
-    if (!issuers.some((m) => hasPermission(session, masters, m, "edit", rbac))) {
-      return fail(403, "auth", `Issuing ${code || series} numbers needs edit on ${issuers.join(" or ")}.`);
-    }
-  }
-
-  const current = nextOf(stored, ay);
-  const prefix = seriesPrefix(stored, ay);
-  let next = current;
-  let lifted = false;
-  if (seriesIssuedOnRecord(code)) {
-    const issued = await maxIssuedNumber(code, prefix);
-    // Unknown is not "none": without the records the number may be in use.
-    if (!issued.ok) return fail(503, "unavailable", `Could not read the ${code} numbers on record — not offering one (${issued.error}).`);
-    if (issued.max + 1 > current) {
-      console.warn(`[number-series] ${code}: counter ${current} behind the records (${prefix}${issued.max}) — lifting to ${issued.max + 1}`);
-      const out = await bumpNumberSeries(code || series, issued.max, ay);
-      if (!out.ok) return fail(out.status, out.kind, out.message);
-      next = issued.max + 1;
-      lifted = true;
-      clearDeskProbeCache("masters-desk-rows");
-      invalidateServerMastersCache();
-    }
-  }
-  const pad = Number(stored.padWidth) > 0 ? Math.floor(Number(stored.padWidth)) : 0;
-  return NextResponse.json({ ok: true, series: code, next, formatted: `${prefix}${String(next).padStart(pad, "0")}`, lifted });
+    return issuers.some((m) => hasPermission(session, masters, m, "edit", rbac))
+      ? null
+      : `Issuing ${code || series} numbers needs edit on ${issuers.join(" or ")}.`;
+  });
+  if (!out.ok) return fail(out.status, out.kind, out.message);
+  return NextResponse.json(out);
 });

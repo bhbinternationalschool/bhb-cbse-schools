@@ -257,6 +257,15 @@ export async function POST(request: Request) {
     // it is allowed to use it.
     const mayBackdate = canBackdateReceipt(ctx.session, masters);
 
+    // The receipt number from the records, not this instance's copy
+    // (data-layer 2.2e): max(the RECEIPT counter, the highest receipt on
+    // record + 1). No such series in Masters = the built-in numbering.
+    const { nextSeriesNumberServer, recordSeriesUseServer } = await import("@/lib/data/server/numberSeriesNext.server");
+    const issued = await nextSeriesNumberServer("RECEIPT", ay);
+    if (!issued.ok && issued.status !== 404) {
+      throw new ApiError("server_error", `Could not issue a receipt number — nothing was saved (${issued.message})`, 503);
+    }
+
     const result = collectPayment({
       householdId,
       lines,
@@ -272,6 +281,7 @@ export async function POST(request: Request) {
       transactionId: clientRef,
       source: "counter",
       receiptSeries: "F",
+      issuedReceiptNo: issued.ok ? issued.formatted : undefined,
     });
     if (!result.ok) throw new ApiError("bad_request", result.error, 400);
 
@@ -284,6 +294,7 @@ export async function POST(request: Request) {
         503,
       );
     }
+    if (issued.ok) await recordSeriesUseServer("RECEIPT", ay, result.voucher.receiptNo);
 
     // The family hears about it now, without anybody pressing anything.
     // AFTER the push, so the receipt is durable before the parent is told it

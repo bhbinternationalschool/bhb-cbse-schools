@@ -646,6 +646,10 @@ export async function applyCashgramView(view: CashgramView): Promise<{ applied: 
       const pushed = (await pushFeesRemoteServer(loadFees())).ok;
       if (!pushed) {
         await update(row.cashgramId, { last_error: "Receipt voided here but the save to the database failed — check the receipt" });
+      } else {
+        // Its counter-discount grants die with it, in the database (data-layer 2.2e).
+        const { revokeVoucherGrantsServer } = await import("@/lib/data/server/mastersLibWrites.server");
+        await revokeVoucherGrantsServer({ id: v.id, receiptNo: v.receiptNo });
       }
     }
   }

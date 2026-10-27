@@ -16,13 +16,31 @@ import {
   isAllSessionsConcession,
   loadMasters,
   newId,
-  saveMasters,
   type ConcessionGrant,
   type ConcessionGround,
   type ConcessionRule,
   type MastersState,
 } from "@/lib/masters";
 import type { SisStudent } from "@/lib/sis";
+import { diffMastersLists } from "@/lib/data/mastersElementChanges";
+
+/**
+ * Write this action's concession changes — the new counter rule (if one was
+ * minted) and the grants created or ended — as element writes, one
+ * all-or-none batch (data-layer 2.2e). Before, the tab's WHOLE book went back
+ * to the server (saveMasters) and nobody awaited it: a refused or stale save
+ * left the clerk told "future grant approved" for a grant that never landed.
+ */
+async function writeConcessionChanges(
+  before: MastersState,
+  after: MastersState,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const changes = diffMastersLists(before, after, ["concessions", "concessionGrants"]);
+  if (changes.length === 0) return { ok: true };
+  const { writeMastersChanges } = await import("@/lib/data/client/mastersLibWrites");
+  const out = await writeMastersChanges(changes);
+  return out.ok ? { ok: true } : { ok: false, error: `Not saved — ${out.message}` };
+}
 
 export type FutureConcessionCandidate = {
   /** Stable key for UI selection */
@@ -378,7 +396,7 @@ function grantNeedsPrincipal(rule: ConcessionRule, discountPaise: number): boole
   return discountPaise > rule.autoApproveMaxPaise;
 }
 
-export function applyFutureConcessionsFromCounter(input: {
+export async function applyFutureConcessionsFromCounter(input: {
   candidates: FutureConcessionCandidate[];
   applyKeys: Set<string>;
   reason: string;
@@ -413,7 +431,7 @@ export function applyFutureConcessionsFromCounter(input: {
    * field that stops the hole getting deeper.
    */
   ground?: ConcessionGround | "";
-}):
+}): Promise<
   | {
       ok: true;
       granted: number;
@@ -423,7 +441,8 @@ export function applyFutureConcessionsFromCounter(input: {
       /** Heads refused because a discount is already on them. */
       blocked: string[];
     }
-  | { ok: false; error: string } {
+  | { ok: false; error: string }
+> {
   if (input.applyKeys.size === 0) {
     return {
       ok: true, granted: 0, skipped: 0, pending: 0, ruleLabels: [], blocked: [],
@@ -431,6 +450,7 @@ export function applyFutureConcessionsFromCounter(input: {
   }
 
   let masters = loadMasters();
+  const loaded = masters;
   const grants = [...(masters.concessionGrants ?? [])];
   const reason = input.reason.trim() || "Counter discount at Fee Take";
   let granted = 0;
@@ -519,7 +539,8 @@ export function applyFutureConcessionsFromCounter(input: {
     else granted += 1;
   }
 
-  saveMasters({ ...masters, concessionGrants: grants });
+  const saved = await writeConcessionChanges(loaded, { ...masters, concessionGrants: grants });
+  if (!saved.ok) return saved;
 
   return { ok: true, granted, skipped, pending, ruleLabels, blocked };
 }
@@ -540,7 +561,7 @@ export function applyFutureConcessionsFromCounter(input: {
  * `fromDueOn` is the due date of the month the change takes effect from, which
  * the caller reads off the line the clerk is looking at.
  */
-export function changeStandingDiscount(input: {
+export async function changeStandingDiscount(input: {
   studentId: string;
   studentName: string;
   feeHeadId: string;
@@ -560,9 +581,10 @@ export function changeStandingDiscount(input: {
    * field that stops the hole getting deeper.
    */
   ground?: ConcessionGround | "";
-}):
+}): Promise<
   | { ok: true; endedGrantId: string | null; newGrantId: string | null }
-  | { ok: false; error: string } {
+  | { ok: false; error: string }
+> {
   if (!input.fromDueOn) {
     return { ok: false, error: "No month to start the change from" };
   }
@@ -571,6 +593,7 @@ export function changeStandingDiscount(input: {
   }
 
   let masters = loadMasters();
+  const loaded = masters;
   const grants = [...(masters.concessionGrants ?? [])];
 
   // Every grant still in force on or after the month we are changing from —
@@ -626,7 +649,8 @@ export function changeStandingDiscount(input: {
   // Zero means "remove the discount" — the old grant is closed and nothing
   // replaces it.
   if (input.newDiscountPaise === 0) {
-    saveMasters({ ...masters, concessionGrants: grants });
+    const saved = await writeConcessionChanges(loaded, { ...masters, concessionGrants: grants });
+    if (!saved.ok) return saved;
     return { ok: true, endedGrantId, newGrantId: null };
   }
 
@@ -658,7 +682,8 @@ export function changeStandingDiscount(input: {
   };
   grants.push(row);
 
-  saveMasters({ ...masters, concessionGrants: grants });
+  const saved = await writeConcessionChanges(loaded, { ...masters, concessionGrants: grants });
+  if (!saved.ok) return saved;
   return { ok: true, endedGrantId, newGrantId: row.id };
 }
 

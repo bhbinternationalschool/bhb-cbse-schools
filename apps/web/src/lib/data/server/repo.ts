@@ -515,6 +515,26 @@ export async function readSliceElements(src: SliceSource, ids: readonly string[]
   return out;
 }
 
+/**
+ * Every stored element of one list slice (data-layer 2.2e: a voided receipt's
+ * grants are found by their marker on the server). Throws on a failed read —
+ * unknown is never an empty list.
+ */
+export async function readSliceList(src: SliceSource): Promise<Row[]> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) throw new Error("Supabase tenant not configured");
+  const { data, error } = await ctx.sb
+    .from(src.table)
+    .select("payload")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("slice_key", src.key)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const payload = (data as { payload?: unknown } | null)?.payload;
+  if (payload != null && !Array.isArray(payload)) throw new Error(`${src.key}: the stored slice is not a list`);
+  return ((payload as unknown[] | null) ?? []).filter((e): e is Row => !!e && typeof e === "object" && !Array.isArray(e));
+}
+
 /** A missing kernel function is unavailable — the code fails closed (§0). */
 function rpcFailure(
   error: { code?: string; message: string },

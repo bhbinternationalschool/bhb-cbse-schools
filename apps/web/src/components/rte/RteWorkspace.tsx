@@ -1,4 +1,5 @@
 "use client";
+import { issueSeriesNumber } from "@/lib/numberSeries";
 import { useEffect, useMemo, useState } from "react";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import Link from "next/link";
@@ -940,7 +941,7 @@ export function RteWorkspace({
                         <button
                           type="button"
                           className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-[#dc2626] hover:bg-[#dc2626]/10"
-                          onClick={() => {
+                          onClick={async () => {
                             if (
                               !window.confirm(
                                 `Remove RTE from ${s.fullName}? Fee type reverts and all RTE head waivers are dropped.`,
@@ -948,7 +949,7 @@ export function RteWorkspace({
                             ) {
                               return;
                             }
-                            const r = removeRteFromStudent({
+                            const r = await removeRteFromStudent({
                               studentId: s.id,
                               by: session.fullName,
                             });
@@ -1256,8 +1257,17 @@ function AppTableRow({
                 id: "to-sis",
                 label: "Send to SIS",
                 hidden: () => !(isAdmitted && !needsFee),
-                onSelect: (a) => {
-                  const r = sendAllottedRteToSis({ applicationId: a.id, by: actorName });
+                onSelect: async (a) => {
+                  // The SRN from the server (data-layer 2.2e), never this tab's copy alone.
+                  const srnIssued = await issueSeriesNumber("SRN", undefined);
+                  if (!srnIssued.ok && srnIssued.kind === "failed") {
+                    return onError(`Not sent — the server did not give the next SRN (${srnIssued.message}). Try again.`);
+                  }
+                  const r = sendAllottedRteToSis({
+                    applicationId: a.id,
+                    by: actorName,
+                    issuedSrn: srnIssued.ok ? srnIssued.formatted : undefined,
+                  });
                   if (!r.ok) return onError(r.error);
                   onRefresh();
                   onFlash(`SIS ${r.admissionNo} · RTE/EWS tags`);

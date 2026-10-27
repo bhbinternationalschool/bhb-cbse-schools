@@ -576,8 +576,8 @@ export function FeeReportsPanel({
               <button
                 type="button"
                 className="rounded-lg border border-[rgba(32,48,80,0.2)] px-3 py-2 text-xs font-semibold"
-                onClick={() => {
-                  const r = preparePreviousSessionFeeSetup(
+                onClick={async () => {
+                  const r = await preparePreviousSessionFeeSetup(
                     masters ?? undefined,
                   );
                   if (!r.ok) {

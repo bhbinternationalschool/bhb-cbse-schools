@@ -427,6 +427,14 @@ export async function applyRefundOutcome(event: CashfreeRefundEvent): Promise<Ap
   const { loadFees } = await import("@/lib/fees");
   const { pushFeesRemoteServer } = await import("@/lib/feesPersistence.server");
   const pushed = (await pushFeesRemoteServer(loadFees())).ok;
+  // The grants this receipt's counter discount created die with it — from
+  // the database (data-layer 2.2e; before, the shared void "saved" the revoke
+  // into this process's copy only). Only once the void itself reached the DB.
+  if (pushed) {
+    const receiptNo = loadFees().vouchers.find((v) => v.id === voucherId)?.receiptNo ?? voucherId;
+    const { revokeVoucherGrantsServer } = await import("@/lib/data/server/mastersLibWrites.server");
+    await revokeVoucherGrantsServer({ id: voucherId, receiptNo });
+  }
 
   await ctx.sb
     .from("cashfree_refunds")
