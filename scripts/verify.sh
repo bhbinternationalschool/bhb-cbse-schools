@@ -582,6 +582,7 @@ SELFTESTS=(
   test:masters-element-commit
   test:masters-lib-writes
   test:staff-book-commit
+  test:staff-own-doc-url
   test:desk-feature-rev
   test:staff-requests
   test:survey-team-plan

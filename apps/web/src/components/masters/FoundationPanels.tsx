@@ -1974,12 +1974,16 @@ export function StaffMastersPanel({
       name: depName.trim(),
       isActive: true,
     };
-    commit(
-      { ...state, departments: [...state.departments, row] },
-      `Department ${row.code}`,
-    );
-    setDepCode("");
-    setDepName("");
+    const [code, name] = [depCode, depName];
+    // The fields clear only after the server confirmed (2.2d follow-up): a
+    // refused save keeps what was typed.
+    commit({ ...state, departments: [...state.departments, row] }, `Department ${row.code}`, {
+      onDone: (saved) => {
+        if (!saved) return;
+        setDepCode((c) => (c === code ? "" : c));
+        setDepName((n) => (n === name ? "" : n));
+      },
+    });
   }
 
   function addDes() {
@@ -1991,12 +1995,14 @@ export function StaffMastersPanel({
       departmentId: desDep || null,
       isActive: true,
     };
-    commit(
-      { ...state, designations: [...state.designations, row] },
-      `Designation ${row.code}`,
-    );
-    setDesCode("");
-    setDesName("");
+    const [code, name] = [desCode, desName];
+    commit({ ...state, designations: [...state.designations, row] }, `Designation ${row.code}`, {
+      onDone: (saved) => {
+        if (!saved) return;
+        setDesCode((c) => (c === code ? "" : c));
+        setDesName((n) => (n === name ? "" : n));
+      },
+    });
   }
 
   const deptCols: DataTableColumn<(typeof activeDepts)[number]>[] = [

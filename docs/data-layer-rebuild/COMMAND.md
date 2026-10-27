@@ -1709,6 +1709,70 @@ nothing. Number series: a jump of more than 50 is refused unless the records hol
 numbers do move the series).
 The certificates clerk / counter can move only their own series.
 
+*(2.2d built 22–26 Oct 2026, PR #713 — the staff editor, the profile form, staff setup and staff doc verification write
+rows; merged 27 Oct; no migration. Written after the merge from the code and the post-merge review.)* **What exists.**
+- **The staff screens' save** (`lib/data/client/staffBookPlan.ts`, pure; `staffBookWrites.ts`): Staff → Roster
+  (mark active / inactive, Remove), the profile form, Allocate teaching, Doc verify, the import and Masters → Staff
+  setup still build the next book from the one on screen; `planStaffBookCommit` turns the difference into stated writes
+  of `sis.departments` / `sis.designations` / `sis.staff` (2.2b), each laid on the record AS STORED NOW (read just
+  before): a changed field is sent only when the stored value is still the one shown (else a conflict naming the
+  field, nothing sent); untouched fields are never sent; teacher / vehicle / duty links merge link by link and
+  documents document by document; bank, UPI, Aadhaar, PAN, pay and a login change go apart to
+  `POST /api/data/sis.staff/sensitive` after the rows; a member gone from the book = a SOFT delete (who, from the
+  session); a new one = an upsert with no base. "Saved" only after the server confirmed. Masters → Staff setup routes
+  departments / designations through the same save (`MastersWorkspace`, `STAFF_SETUP_KEYS`), never `saveMasters`.
+- **Removed staff** (Staff → Roster, staff · edit holders): `GET /api/data/sis.staff?removed=1`, who and when, Restore
+  (= an upsert `{deleted_at: null}` at the removed row's revision).
+- **My docs** (`POST /api/v1/staff/me/docs`, new): a member submits their OWN document for the office's check — the
+  staff id from the session, only that document key laid on the stored record; a photo also becomes their photoUrl.
+  Before, the web "My docs" tab saved through the whole-book Masters save, which a member without Masters · edit never
+  sent ("Submitted", nothing saved).
+- **The old staff-roster POST answers 410** ("reload — nothing was saved"); its protected-field judging
+  (`rosterSaveRefusal`, `prepareRosterRows`) and the browser's stamped roster push (`pushStaffSlice`,
+  `scheduleStaffSync`, `staffRowStamps.selftest`) are deleted. GET and the soft-remove DELETE stay.
+- **/staff follows other devices**: when the versions poll refetches the staff list, the page copy's roster is re-read
+  from the server (server wins). Ratchets: `save_masters_call_sites` 17 → 11, `load_masters_calls_src` 348 → 347,
+  `selftest_readfilesync_files` 89 → 88.
+**Proof (as merged).** `test:staff-book-commit` (plan + commit with a fake server); `staff-editor-writes.spec` (office
+without Masters · edit saves designation + a blank mobile — one `sis.staff` request, said after the 200; a refused set
+mobile shows the reason, never "updated"; Remove → reload → gone, soft, restorable; staff-0: an empty roster answer + a
+fee-head save writes no staff); `propagation.spec` via the kernel; `staff-kernel.acceptance` trimmed to the kernel.
+**Review (post-merge, 27 Oct) found:** (1) *security* — `me/docs` took `fileUrl` from the body (only `data:` blocked):
+any URL could become a member's photo, shown to the office as an image and a link in Doc verify; (2) the import sent
+bank / ID / pay as a second request capped at 50 records — a user without "Bank, ID & pay details" got the rows saved
+but "The import was not saved", and a holder's import of > 50 such rows was refused whole; (3) two RBAC help texts
+still described the staff-roster POST / `saveMasters`; (4) each save re-read the ~136 KB roster twice (the save's
+bridge, then again on the staff list's refetch); Allocate teaching cleared the ticks before the answer; Removed staff
+showed the remover's id; (5) no end-to-end test of staff setup from Masters, the import, Allocate teaching, Doc-verify
+approve, `me/docs`, or a holder's save needing both writes. The import's **"Clear roster and import this file only"
+was removed on purpose**: as row writes it would soft-remove every member not in the file — whole-roster wipes are what
+this rebuild removes (it never removed anyone on the server before either: the old save wrote only the rows it named).
+
+*(2.2d follow-ups built 27 Oct 2026, PR #714 — fix/data-layer-2.2d-followups; no migration.)*
+- **`me/docs` takes only the school's own upload path** (`lib/staffOwnDocUrl.ts`): `/api/documents/staff/<own id>/<this
+  docKey>` (what `/api/documents/upload` returns) or `/api/file/staff/<own folder>/<file>` (the private-media path the
+  staff app's photo / signature routes build with `privateMediaUrl`). Anything else — another host or scheme, `//`, a
+  query or fragment, `..` (literal or encoded), a backslash, another member's id or folder, another document's key —
+  is 400, nothing written, logged.
+- **The import says what saved.** The bank / ID / pay details go to the sensitive route ≤ 50 records a request
+  (`SENSITIVE_CHUNK`). The route's person refusal (`STAFF_SENSITIVE_NO_AUTHORITY`, now one shared text) stops at once:
+  "N staff saved; bank/ID/pay details for M were not changed — they need the accountant/owner." Any other refusal of a
+  chunk is retried record by record, so every record that can land lands and each miss is named with its reason. The
+  profile form (one record) keeps "Saved, except the bank, ID, pay or login details — …".
+- **One roster read per save:** `useStaffBookWrites` waits for the staff queries to answer again
+  (`refetchDesks`, `lib/data/client/hooks.tsx` — the versions poll then holds this write's version), then re-reads the
+  roster once; /staff skips the staff-list answers that arrive while its own save or restore runs.
+- **Allocate teaching** clears the ticked subjects / the class-teacher choice only after the server confirmed, and
+  sends nothing new while a save runs. **Removed staff** shows who removed them by name (fallback: the id / e-mail).
+- **Help texts** (`lib/rbacFeatureCatalog/people.ts`): roster, allocate and doc-verify now name the kernel paths.
+**Proof.** Self-tests: `test:staff-own-doc-url` (new; 26 accepted/refused references), `test:staff-book-commit` +1 (60
+records → 1 row request + 50 + 10; a person refusal → the exact sentence, no retries; a chunk refusal → 52 requests, the
+one record named; the one-record wording). Spec `staff-followups.spec` (staff-sensitive project): me/docs refusals and
+the own path; Doc-verify approve on the screen; Masters → Staff setup department + designation; Allocate teaching
+(a mocked 503 keeps the tick, a saved one clears it, exactly one `GET staff-roster` in the 25 s after the save); the
+office's import message; the owner's 51-member import (51 / 50 / 1); the owner's profile save needing both writes.
+Fail-on-old results: see the PR.
+
 *(2.2e built 27 Oct 2026, PR #716 — fee setup and the concession-grant writers write Masters elements; the counter's
 receipt number and the enrolment SRN come from the server; no migration. MONEY — the director approves.)* **What exists.**
 - **The Masters fee setup is element writes** (`lib/data/client/mastersElementPlan.ts`: `FEE_LIST_KEYS` — fee-head

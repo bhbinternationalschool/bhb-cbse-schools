@@ -126,6 +126,12 @@ export type MastersCommitOpts = {
    * not silently overwritten.
    */
   objectBases?: Partial<Record<string, string | undefined>>;
+  /**
+   * Called once with the save's outcome — true only after the server
+   * confirmed every write of the action (or nothing needed saving). A panel
+   * clears its form only then (2.2d follow-up: Staff setup's Add fields).
+   */
+  onDone?: (saved: boolean) => void;
 };
 
 export type StaffLinkChange = {

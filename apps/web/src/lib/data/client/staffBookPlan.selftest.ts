@@ -200,6 +200,66 @@ void (async () => {
   assert.equal(refused.ok ? "" : refused.kind, "auth");
   assert.match(refused.ok ? "" : refused.message, /^Not saved — Missing permission staff\.edit/, "the server's reason, said");
   console.log("  ✓ commitStaffBook: nothing sent for an unchanged roster; one kernel write; a refusal says the server's reason");
+
+  /* 9. An import with bank details (2.2d follow-up): the rows land in one write, the details go to the
+        sensitive route ≤ 50 a request; a person refusal is said precisely; a chunk's refusal is retried
+        record by record and each miss is named. */
+  {
+    const { STAFF_SENSITIVE_NO_AUTHORITY } = await import("@/lib/staffProtectedFields");
+    const { SENSITIVE_CHUNK } = await import("./staffBookWrites");
+    assert.equal(SENSITIVE_CHUNK, 50, "the route's own cap (staffSensitive.parseSensitiveOps)");
+    const fresh = Array.from({ length: 60 }, (_, i) => rec(`n${i}`, { fullName: `New ${i}`, empCode: `N-${i}`, bankAccountNo: `1000${i}` }));
+    let sensitive: (ops: { id: string }[]) => { status: number; body: unknown } = (ops) => ({
+      status: 200,
+      body: { ok: true, results: ops.map((o) => ({ id: o.id, status: "applied", revision: T1 })), versions: Object.fromEntries(ops.map((o) => [o.id, T1])) },
+    });
+    const posts: { url: string; ids: string[] }[] = [];
+    g.fetch = async (url: string, init?: { method?: string; body?: string }) => {
+      if (!init?.method || init.method === "GET") {
+        return { ok: true, status: 200, json: async () => ({ ok: true, rows: [row(A)], nextCursor: null }) };
+      }
+      const ops = (JSON.parse(init.body!) as { ops: { id: string }[] }).ops;
+      posts.push({ url, ids: ops.map((o) => o.id) });
+      const a = url.endsWith("/sensitive")
+        ? sensitive(ops)
+        : { status: 200, body: { ok: true, results: ops.map((o) => ({ id: o.id, status: "applied", revision: T1 })), versions: Object.fromEntries(ops.map((o) => [o.id, T1])) } };
+      return { ok: a.status < 300, status: a.status, json: async () => a.body };
+    };
+
+    // A holder: 60 records' details in two requests (50 + 10), every one stored.
+    const held = await commitStaffBook({ staff: [A] }, { staff: [A, ...fresh] });
+    assert.ok(held.ok, held.ok ? "" : held.message);
+    assert.deepEqual(posts.map((p) => [p.url, p.ids.length]), [["/api/data/sis.staff", 60], ["/api/data/sis.staff/sensitive", 50], ["/api/data/sis.staff/sensitive", 10]]);
+
+    // No "Bank, ID & pay details": the rows are saved and the screen says exactly what was not.
+    posts.length = 0;
+    sensitive = () => ({ status: 403, body: { ok: false, kind: "auth", message: STAFF_SENSITIVE_NO_AUTHORITY } });
+    const plain = await commitStaffBook({ staff: [A] }, { staff: [A, ...fresh] });
+    assert.ok(!plain.ok && plain.partial && plain.needsAuthority);
+    assert.equal(plain.ok ? "" : plain.message, "60 staff saved; bank/ID/pay details for 60 were not changed — they need the accountant/owner.");
+    assert.equal(plain.ok ? 0 : plain.savedStaff, 60);
+    assert.deepEqual(posts.map((p) => p.url), ["/api/data/sis.staff", "/api/data/sis.staff/sensitive"], "a person refusal stops at once — no retries");
+
+    // A holder whose chunk is refused for one record: retried one by one; the rest land, the one is named.
+    posts.length = 0;
+    sensitive = (ops) =>
+      ops.some((o) => o.id === "n7")
+        ? { status: 409, body: { ok: false, kind: "conflict", message: "n7: stale", conflicts: [] } }
+        : { status: 200, body: { ok: true, results: ops.map((o) => ({ id: o.id, status: "applied", revision: T1 })), versions: Object.fromEntries(ops.map((o) => [o.id, T1])) } };
+    const one = await commitStaffBook({ staff: [A] }, { staff: [A, ...fresh] });
+    assert.ok(!one.ok && one.partial && !one.needsAuthority);
+    assert.deepEqual(one.ok ? [] : one.sensitiveMissed!.map((m) => m.id), ["n7"]);
+    assert.match(one.ok ? "" : one.message, /^60 staff saved; bank\/ID\/pay details for 1 were not changed \(details for 59 were saved\): New 7 \(N-7\) — someone changed this record/);
+    const sens = posts.filter((p) => p.url.endsWith("/sensitive"));
+    assert.equal(sens.length, 1 + 50 + 1, "chunk 1 refused → its 50 one by one; chunk 2 (10) at once");
+
+    // The profile form (one record): the old wording stays.
+    posts.length = 0;
+    sensitive = () => ({ status: 403, body: { ok: false, kind: "auth", message: STAFF_SENSITIVE_NO_AUTHORITY } });
+    const form = await commitStaffBook({ staff: [A] }, { staff: [{ ...A, fullName: "Renamed", bankAccountNo: "999" }] });
+    assert.equal(form.ok ? "" : form.message, `Saved, except the bank, ID, pay or login details — ${STAFF_SENSITIVE_NO_AUTHORITY}`);
+    console.log("  ✓ import: details ≤ 50 a request; a person refusal said as 'N staff saved; … need the accountant/owner'; a chunk refusal retried per record, each miss named");
+  }
   console.log("\nAll staff book commit checks passed.");
   process.exit(0);
 })().catch((e) => {

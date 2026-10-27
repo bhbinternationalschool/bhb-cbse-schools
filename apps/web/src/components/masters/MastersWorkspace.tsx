@@ -371,11 +371,16 @@ export function MastersWorkspace() {
   }
 
   function commit(next: MastersState, msg?: string, opts?: MastersCommitOpts) {
+    const onDone = opts?.onDone;
     if (readOnly) {
       flash("Selected session is closed — masters are read-only", 2800);
+      onDone?.(false);
       return;
     }
-    if (!state) return;
+    if (!state) {
+      onDone?.(false);
+      return;
+    }
     const plan = planMastersElementCommit({
       shown: state,
       next,
@@ -386,6 +391,7 @@ export function MastersWorkspace() {
     });
     if (!plan.ok) {
       flash(plan.reason, 5000);
+      onDone?.(false);
       return;
     }
     const elementWork = plan.requests.length > 0 || plan.staff.length > 0;
@@ -401,12 +407,14 @@ export function MastersWorkspace() {
         `Not saved — ${homeless.join(", ")} ${homeless.length === 1 ? "has" : "have"} no place in the school's database yet, so ${homeless.length === 1 ? "it" : "they"} cannot be saved from here.`,
         7000,
       );
+      onDone?.(false);
       return;
     }
     if (!elementWork && plan.rest.length === 0) {
       // Nothing changed: panels pass the book unchanged with a message
       // ("Campus code already exists", "Already linked to V").
       if (msg) flash(msg);
+      onDone?.(true);
       return;
     }
     // The success notice must wait for the database, not for React. Showing
@@ -421,6 +429,7 @@ export function MastersWorkspace() {
       if (!ok && why) flash(why, 6000);
       if (waiting > 0) return;
       if (!failed && msg) flash(msg);
+      onDone?.(!failed);
     };
 
     if (staffRest.length) {

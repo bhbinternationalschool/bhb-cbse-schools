@@ -13,7 +13,8 @@ import { CRUD, type RbacFeatureDef, type RbacWholeModuleTab } from "@/lib/rbacFe
  * - the SIS roster (sis-roster): upserts with explicit deletes and merges,
  *   per-record version guards, and its own teacher-scoped read — a slice
  *   merge on top of that would be unsafe, so editing children needs Students;
- * - the staff roster (staff-roster), Documents (one AI screen, no store),
+ * - the staff records (sis.staff kernel writes since 2.2d — the bank, ID &
+ *   pay fields are their own function), Documents (one AI screen, no store),
  *   Alumni and Scholarships (not built yet).
  */
 export const PEOPLE_FEATURES: RbacFeatureDef[] = [
@@ -331,19 +332,19 @@ export const PEOPLE_WHOLE_MODULE_TABS: RbacWholeModuleTab[] = [
     module: "staff",
     tab: "roster",
     reason:
-      "The staff roster (staff-roster desk) POST/DELETE ask Staff change/remove and there is no function-scoped save; colleagues' Aadhaar, PAN, bank and salary are unredacted only for Staff change.",
+      "Roster edits are staff record writes (POST /api/data/sis.staff — Staff change; Remove is a soft remove that asks Staff remove) with no function-scoped path; colleagues' Aadhaar, PAN, bank and salary are unredacted only for Staff change, and changing them is the separate Bank, ID & pay details function (POST /api/data/sis.staff/sensitive).",
   },
   {
     module: "staff",
     tab: "allocate",
     reason:
-      "Allocating teaching saves the masters / staff roster copy (saveMasters), which has no function-scoped save; the read-only view is staff.assignments.",
+      "Allocating teaching writes the teachers' class / subject links on their staff records (POST /api/data/sis.staff — Staff change), which has no function-scoped path; the read-only view is staff.assignments.",
   },
   {
     module: "staff",
     tab: "doc_verify",
     reason:
-      "Verifying a member of staff's documents writes their staff roster record, which has no function-scoped save.",
+      "Verifying a member of staff's documents writes that document on their staff record (POST /api/data/sis.staff — Staff change), which has no function-scoped path.",
   },
   {
     module: "staff",

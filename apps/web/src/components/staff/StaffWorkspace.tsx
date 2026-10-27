@@ -21,7 +21,7 @@ import {
   type StaffRecord,
 } from "@/lib/foundationMasters";
 import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
-import { readRemovedStaff, useStaffBookWrites } from "@/lib/data/client/staffBookWrites";
+import { readRemovedStaff, useStaffBookWrites, type StaffBookOutcome } from "@/lib/data/client/staffBookWrites";
 import { useStaffList } from "@/lib/data/client/hooks";
 import { bridgeStaffAfterWrite } from "@/lib/data/client/staffBridge";
 import {
@@ -259,9 +259,13 @@ export function StaffWorkspace() {
   // designations move; the roster this screen edits (the page copy) is then
   // re-read from the server — server wins — so a rename made elsewhere shows
   // here within one poll, without a reload. Not on the first answer (the
-  // mount's own hydrate reads it), and not while a save of this screen runs.
+  // mount's own hydrate reads it), and not while a save of this screen runs:
+  // the save re-reads the roster itself, once, after the staff list answered
+  // (useStaffBookWrites) — re-reading here too read the ~136 KB roster twice
+  // per save.
   const staffList = useStaffList();
   const seenStaffAnswer = useRef<number>(0);
+  const ownWrites = useRef(0);
   useEffect(() => {
     const at = staffList.dataUpdatedAt;
     if (!at) return;
@@ -271,6 +275,7 @@ export function StaffWorkspace() {
     }
     if (at === seenStaffAnswer.current) return;
     seenStaffAnswer.current = at;
+    if (ownWrites.current > 0) return;
     void bridgeStaffAfterWrite().then(rereadBook);
   }, [staffList.dataUpdatedAt, rereadBook]);
 
@@ -281,22 +286,33 @@ export function StaffWorkspace() {
   // only after the server confirmed, and a refusal says why.
   const staffWrites = useStaffBookWrites();
   const [saving, setSaving] = useState(false);
-  async function commit(next: MastersState, msg?: string): Promise<boolean> {
-    if (!state) return false;
+  /** The save's whole answer (the import words its own partial outcome). */
+  async function commitOutcome(next: MastersState, msg?: string): Promise<StaffBookOutcome | null> {
+    if (!state) return null;
     setSaving(true);
     setNotice("Saving…");
-    const r = await staffWrites.commit(state, next);
+    ownWrites.current += 1;
+    let r: StaffBookOutcome;
+    try {
+      r = await staffWrites.commit(state, next);
+    } finally {
+      ownWrites.current -= 1;
+    }
     setSaving(false);
     rereadBook();
     if (!r.ok) {
       setNotice(r.message);
       window.setTimeout(() => setNotice((n) => (n === r.message ? null : n)), 9000);
-      return false;
+      return r;
     }
     const said = r.unchanged ? "Nothing changed." : msg ?? "Saved";
     setNotice(said);
     window.setTimeout(() => setNotice((n) => (n === said ? null : n)), 2400);
-    return true;
+    return r;
+  }
+  async function commit(next: MastersState, msg?: string): Promise<boolean> {
+    const r = await commitOutcome(next, msg);
+    return !!r?.ok;
   }
 
   function toggleStatus(s: StaffRecord) {
@@ -513,7 +529,7 @@ export function StaffWorkspace() {
           title="Allocate teaching"
           description="Pick a teacher, then give them a class-teacher section and the subjects they teach."
         >
-          <TeachingAllocationPanel masters={state} ay={ay} onCommit={(next, msg) => void commit(next, msg)} />
+          <TeachingAllocationPanel masters={state} ay={ay} saving={saving} onCommit={commit} />
           {state ? (
             <div className="mt-4">
               <CoordinatorsPanel
@@ -1013,15 +1029,25 @@ export function StaffWorkspace() {
       </div>
 
       <div id="staff-import" className="scroll-mt-24">
-        <StaffImportPanel state={state} onApplied={commit} />
+        <StaffImportPanel state={state} onApplied={commitOutcome} />
       </div>
 
       <div id="staff-removed" className="scroll-mt-24">
         <RemovedStaffPanel
           visible={hasPermission(session, state, "staff", "edit")}
+          nameOf={(id) => {
+            const m = (state.staff ?? []).find((x) => x.id === id);
+            return m ? m.fullName || m.empCode || id : id;
+          }}
           restore={async (id, label) => {
             setNotice("Restoring…");
-            const r = await staffWrites.restore(id);
+            ownWrites.current += 1;
+            let r: StaffBookOutcome;
+            try {
+              r = await staffWrites.restore(id);
+            } finally {
+              ownWrites.current -= 1;
+            }
             rereadBook();
             const said = r.ok ? `${label} restored` : r.message;
             setNotice(said);
@@ -1041,8 +1067,8 @@ function StaffImportPanel({
   onApplied,
 }: {
   state: MastersState;
-  /** Resolves true only once the server confirmed the import's writes. */
-  onApplied: (next: MastersState, message: string) => Promise<boolean>;
+  /** The save's answer: ok only once the server confirmed every write of the import. */
+  onApplied: (next: MastersState, message: string) => Promise<StaffBookOutcome | null>;
 }) {
   const [csvText, setCsvText] = useState("");
   const [fileName, setFileName] = useState("");
@@ -1119,8 +1145,19 @@ function StaffImportPanel({
         `Imported ${result.created} new, updated ${result.updated}` +
           (result.skipped ? `, skipped ${result.skipped}` : ""),
       );
-      if (!saved) {
-        setLocalError("The import was not saved — see the message at the top. The file is still loaded; fix it and import again.");
+      if (!saved?.ok) {
+        // The staff rows landed but some bank / ID / pay details did not
+        // (2.2d follow-up): say exactly that — the rows are saved, so the
+        // file is done; the details are the accountant's / owner's.
+        if (saved && saved.partial && saved.sensitiveMissed?.length) {
+          setLocalError(saved.message);
+          setCsvText("");
+          setFileName("");
+          return;
+        }
+        setLocalError(
+          `The import was not saved${saved ? ` — ${saved.message.replace(/^Not saved — /, "")}` : ""}. The file is still loaded; fix it and import again.`,
+        );
         return;
       }
       setCsvText("");
@@ -1169,7 +1206,7 @@ function StaffImportPanel({
       </label>
 
       {localError ? (
-        <p className="text-sm font-medium text-[var(--danger)]">{localError}</p>
+        <p role="alert" data-testid="staff-import-error" className="text-sm font-medium text-[var(--danger)]">{localError}</p>
       ) : null}
 
       {preview ? (
@@ -1212,9 +1249,12 @@ function StaffImportPanel({
  */
 function RemovedStaffPanel({
   visible,
+  nameOf,
   restore,
 }: {
   visible: boolean;
+  /** Who removed them: the remover's name from the roster (deleted_by is their staff id, else an e-mail). */
+  nameOf: (id: string) => string;
   restore: (id: string, label: string) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
@@ -1274,7 +1314,7 @@ function RemovedStaffPanel({
                   <strong className="text-[var(--brand-deep)]">{label}</strong>
                   <span className="ml-2 text-xs text-[var(--muted)]">
                     removed {when}
-                    {r.deleted_by ? ` by ${String(r.deleted_by)}` : ""}
+                    {r.deleted_by ? ` by ${nameOf(String(r.deleted_by))}` : ""}
                   </span>
                 </span>
                 <button

@@ -41,7 +41,7 @@ export function StaffMyProfileDocs({
     return masters.staff.find((s) => s.id === staffId) ?? null;
   }, [staffId, masters]);
 
-  async function onDocUploaded(key: StaffDocKey, next: StaffDocFile) {
+  async function onDocUploaded(key: StaffDocKey, next: StaffDocFile & { driveReceipt?: string }) {
     setError(null);
     setNotice("Submitting…");
     const r = await submitStaffDocForVerification({
@@ -132,7 +132,7 @@ function StaffDocSelfRow({
   docKey: StaffDocKey;
   staffId: string;
   value: StaffDocFile;
-  onUploaded: (next: StaffDocFile) => void;
+  onUploaded: (next: StaffDocFile & { driveReceipt?: string }) => void;
   onError: (message: string) => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
@@ -172,6 +172,7 @@ function StaffDocSelfRow({
         mimeType?: string;
         size?: number;
         driveFileId?: string;
+        driveReceipt?: string;
         uploadedAt?: string;
       };
       if (!res.ok || !body.ok || !body.fileUrl) {
@@ -187,6 +188,8 @@ function StaffDocSelfRow({
         size: body.size ?? file.size,
         fileUrl: body.fileUrl,
         driveFileId: body.driveFileId || "",
+        // Proves to the submit (me/docs) that this Drive id is this upload's.
+        ...(body.driveReceipt ? { driveReceipt: body.driveReceipt } : {}),
         uploadedAt,
       });
     } catch {
