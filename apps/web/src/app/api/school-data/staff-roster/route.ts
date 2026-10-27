@@ -1,29 +1,13 @@
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import { requireStaffApi, requireStaffPermission } from "@/lib/apiRouteAuth.server";
-import {
-  fetchStaffRemoteServer,
-  pushStaffRemoteServer,
-  softRemoveStaffRosterServer,
-} from "@/lib/staffPersistence";
+import { fetchStaffRemoteServer, softRemoveStaffRosterServer } from "@/lib/staffPersistence";
 import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
-import { signInMobilesInUse } from "@/lib/data/server/repo";
-import { logMobileFills } from "@/lib/staffMobileFillLog.server";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
-import {
-  prepareRosterRows,
-  rosterSaveRefusal,
-  staffActorOf,
-  staffHoldsPowerfulAccess,
-  staffSensitiveAuthority,
-  type StaffAuthority,
-} from "@/lib/staffProtectedFields";
-import type { MastersState } from "@/lib/masters";
+import { staffActorOf, staffSensitiveAuthority } from "@/lib/staffProtectedFields";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { hasPermission } from "@/lib/rbac";
 import { redactStaffRoster } from "@/lib/staffRosterRedact";
-import { readStampsParam } from "@/lib/rowStampClient";
-import { STAFF_STAMPED_SLICES } from "@/lib/staffPersistence";
 
 export const runtime = "nodejs";
 
@@ -85,123 +69,28 @@ export async function GET(req: Request) {
   }
 }
 
-/** POST — push a Masters state's staff/department/designation slices */
+/**
+ * POST — gone (data-layer 2.2d). The staff screens write rows through the
+ * kernel: POST /api/data/sis.staff, sis.departments, sis.designations (and
+ * /api/data/sis.staff/sensitive for bank, ID, pay and login details). This
+ * whole-roster save is refused for every body, nothing written; an old tab
+ * that still sends it is told to reload.
+ */
 export async function POST(req: Request) {
-  const auth = await requireStaffPermission(req, "staff", "edit");
+  const auth = await requireStaffApi(req);
   if (!auth.ok) return auth.response;
-
-  let body: { state?: Partial<MastersState>; stamps?: unknown };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-  if (!body.state) {
-    return NextResponse.json({ error: "Missing state" }, { status: 400 });
-  }
-
-  const incoming = (body.state.staff ?? []) as StaffRecord[];
-  let stamps = readStampsParam(body.stamps, STAFF_STAMPED_SLICES);
-  let refused: { refusedIds: string[]; message: string } | null = null;
-  let mobileFillIds: string[] = [];
-  if (incoming.length > 0) {
-    // Read the stored roster to judge this save against (always, since 2.2b:
-    // the protected-field rule below needs it, not only the password fill).
-    const stored = await fetchStaffRemoteServer();
-    if (!stored) {
-      return NextResponse.json(
-        { ok: false, error: "Could not read the saved roster to check this change — nothing was written, try again" },
-        { status: 503 },
-      );
-    }
-    // Each row is judged — and written — against the stored row the save
-    // lands on: by employee code first, else id, exactly as upsertStaffBundle
-    // remaps (rosterTargetOf). A protected or sign-in key the row does not
-    // carry is the STORED value (absent = keep): the push normalises an absent
-    // key to "", which would otherwise blank a bank account. Browsers never
-    // receive loginPassword (staffRosterRedact), so a blank one means "not
-    // sent", not "clear it": keep the stored.
-    const storedStaff = stored.staff as StaffRecord[];
-    type Rec = Parameters<typeof rosterSaveRefusal>[0][number];
-    const filled = prepareRosterRows(storedStaff as unknown as Rec[], incoming as unknown as Rec[]) as unknown as StaffRecord[];
-
-    // Bank, UPI, Aadhaar, PAN and pay: only the owner or the bank & pay
-    // details function; a set sign-in link (login, e-mail, mobile): only the
-    // owner; a password: never set (data-layer 2.2b; director 20–21 Oct
-    // 2026). This route writes sis_staff directly, past the database's own
-    // guard, so it is checked here — from the session, never from the body.
-    const authority: StaffAuthority | null = auth.viaMirrorSecret
-      ? null
-      : staffSensitiveAuthority(auth.ctx.session, auth.ctx.masters, auth.ctx.rbac, { rbacKnown: auth.ctx.rbacKnown !== false });
-    const named = stamps ? new Set(Object.keys(stamps.staff ?? {})) : null;
-    // The director's mobile rule (21 Oct): a MISSING mobile may be recorded
-    // here, if no other member, family or login has the number and the member
-    // holds no powerful access; each such fill is logged.
-    let inUse: Set<string>;
-    try {
-      inUse = await signInMobilesInUse();
-    } catch {
-      return NextResponse.json(
-        { ok: false, error: "Could not check the mobile numbers in use — nothing was written, try again" },
-        { status: 503 },
-      );
-    }
-    const fills: string[] = [];
-    const refusal = rosterSaveRefusal(storedStaff as unknown as Rec[], filled as unknown as Rec[], named, authority, {
-      inUse,
-      isPowerful: (t) =>
-        auth.viaMirrorSecret ? true : staffHoldsPowerfulAccess(t as unknown as StaffRecord, auth.ctx.masters, auth.ctx.rbac),
-      fills,
-    });
-    mobileFillIds = fills;
-    if (refusal) {
-      console.warn(
-        `[staff-roster] refused ${refusal.refusedIds.length} row(s) of a save by ${auth.viaMirrorSecret ? "mirror" : auth.ctx.session.staffId || "?"}: ${refusal.message}`,
-      );
-    }
-    const refusedSet = new Set(refusal?.refusedIds ?? []);
-    const kept = filled.filter((s) => !refusedSet.has(s.id));
-    if (refusal && kept.length === 0 && !(body.state.departments?.length || body.state.designations?.length)) {
-      // Nothing else in the save: nothing written.
-      return NextResponse.json(
-        { ok: false, error: refusal.message, reason: "protected_fields", refused: { staff: refusal.refusedIds } },
-        { status: 403 },
-      );
-    }
-    // The refused rows leave the save (and its stamps); every other row saves.
-    body.state = { ...body.state, staff: kept };
-    if (stamps?.staff && refusal) {
-      const staffStamps = { ...stamps.staff };
-      for (const id of refusal.refusedIds) delete staffStamps[id];
-      stamps = { ...stamps, staff: staffStamps };
-    }
-    refused = refusal;
-  }
-
-  // Stamped (current browsers): only the rows named, each at its stamp.
-  // Unstamped (older tabs): new rows added, stored rows never replaced.
-  const result = await pushStaffRemoteServer(body.state as MastersState, stamps);
-  if (!result.ok) {
-    return NextResponse.json(
-      { ok: false, error: result.error || "Push failed" },
-      { status: 502 },
-    );
-  }
-  if (result.kept) {
-    console.warn(`[staff-roster] unstamped save left ${result.kept} stored row(s) as they were`);
-  }
-  const written = new Set(Object.keys(result.stamps?.staff ?? {}));
-  const filledNow = mobileFillIds.filter((id) => written.has(id) || !stamps);
-  if (filledNow.length && !auth.viaMirrorSecret) await logMobileFills(auth.ctx.session, filledNow, "staff roster save");
-  // Refused rows are said: the browser forgets their stamps, re-reads the
-  // roster (its copy of those rows goes back to the server's) and toasts the
-  // reason once — never re-sending them with every later save.
-  return NextResponse.json({
-    ok: true,
-    stamps: result.stamps,
-    conflicts: result.conflicts,
-    ...(refused ? { refused: { staff: refused.refusedIds }, refusal: refused.message } : {}),
-  });
+  console.warn(
+    `[staff-roster] refused a whole-roster POST (410) from ${auth.viaMirrorSecret ? "mirror" : auth.ctx.session.staffId || auth.ctx.session.email || "?"}`,
+  );
+  return NextResponse.json(
+    {
+      ok: false,
+      code: "gone",
+      error:
+        "This page is out of date: staff records are now saved one by one. Reload the page and make the change again — nothing was saved.",
+    },
+    { status: 410 },
+  );
 }
 
 /**

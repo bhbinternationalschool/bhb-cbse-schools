@@ -276,18 +276,32 @@ async function renameSection(a: Page, via: EditVia, current: string, next: strin
 }
 
 async function renameStaffViaApi(a: Page, next: string): Promise<void> {
-  const roster = await staffRoster(a.request);
-  const row = roster.staff.find((s) => s.id === STAFF_EDITED);
-  if (!row) throw new Error(`${STAFF_EDITED} not in staff-roster`);
-  const res = await a.request.post("/api/school-data/staff-roster", {
-    data: {
-      state: { staff: [{ ...row, fullName: next }], departments: [], designations: [] },
-      stamps: { staff: { [row.id]: roster.stamps?.staff?.[row.id] ?? "" }, departments: {}, designations: {} },
-    },
+  // Through the kernel (data-layer 2.2d: the staff-roster POST is 410).
+  const list = (await (await a.request.get("/api/data/sis.staff?limit=500")).json()) as { rows: { id: string; updated_at: string }[] };
+  const row = list.rows.find((r) => r.id === STAFF_EDITED);
+  if (!row) throw new Error(`${STAFF_EDITED} not in sis.staff`);
+  const res = await a.request.post("/api/data/sis.staff", {
+    data: { ops: [{ op: "upsert", id: row.id, base: row.updated_at, row: { full_name: next, profile: { fullName: next } } }] },
   });
   const text = await res.text();
-  expect(res.status(), `POST staff-roster: ${text.slice(0, 300)}`).toBe(200);
-  expect((JSON.parse(text) as { ok?: boolean; conflicts?: unknown }).ok, `POST staff-roster: ${text.slice(0, 300)}`).toBe(true);
+  expect(res.status(), `POST sis.staff: ${text.slice(0, 300)}`).toBe(200);
+}
+
+/** The real editor: /staff/<id>/edit, the name typed, Save — one sis.staff request, never a whole-book save. */
+async function renameStaffViaEditor(a: Page, next: string): Promise<void> {
+  const writes: string[] = [];
+  a.on("request", (q) => {
+    if (q.method() === "POST" && /\/api\/(data\/|school-data\/(masters-desk|staff-roster))/.test(q.url())) writes.push(q.url());
+  });
+  await a.goto(`/staff/${STAFF_EDITED}/edit`);
+  const name = a.locator("label", { hasText: "Full name" }).first().locator("input");
+  await expect(name).not.toHaveValue("", { timeout: 30_000 });
+  await name.fill(next);
+  const posted = a.waitForResponse((r) => r.url().endsWith("/api/data/sis.staff") && r.request().method() === "POST", { timeout: 15_000 });
+  await a.getByRole("button", { name: "Save profile" }).first().click();
+  expect((await posted).status(), "POST sis.staff").toBe(200);
+  await expect(a.getByTestId("staff-save-notice")).toHaveText("Staff updated", { timeout: 15_000 });
+  expect(writes.filter((u) => /masters-desk|staff-roster/.test(u)), "no whole-book / roster save").toEqual([]);
 }
 
 // ── The run ─────────────────────────────────────────────────────────────
@@ -405,13 +419,11 @@ for (const via of ["editor", "api"] as const) {
 
 for (const obs of STAFF_OBSERVERS) {
   test(`staff record renamed via api → visible on ${obs.path}`, async ({ browser }, testInfo) => {
+    // /staff re-reads its roster when the staff list moves (data-layer 2.2d).
+    // /timetable's Teacher picker reads the access copy until 2.3a.
     test.fail(
-      true,
-      `${UNTIL}. Measured 15 Oct 2026 (2.1c): the control passes on both observers (controlShown:true) and the ` +
-        "renamed name shows after a reload (visibleAfterReload:true) — so this fails on staleness alone. Both " +
-        "observers draw the roster from the tab's page copy, which the staff hydrate fills once per page: " +
-        "/staff's roster edits staff records and stays on its full-record read until 2.2; /timetable's Teacher " +
-        "picker reads useScreenMasters, whose staff side is the access copy until 2.3a puts it on useStaffList().",
+      obs.path === "/timetable",
+      `${UNTIL}. /timetable's Teacher picker reads useScreenMasters, whose staff side is the access copy until 2.3a puts it on useStaffList().`,
     );
     const next = `Rohit Renamed ${tag()}`;
     const r: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string; controlShown?: boolean } = { propagatedAfterMs: null };
@@ -434,13 +446,27 @@ for (const obs of STAFF_OBSERVERS) {
   });
 }
 
-// Title kept for the scoreboard. Measured 15 Oct 2026 (2.1c): the Staff roster
-// DOES list its staff now (controlShown:true above); what is left is that its
-// editor still saves through the old whole-roster path — build this with 2.2.
-test.fixme(
-  "staff record renamed via editor → visible elsewhere (the Staff roster lists no staff today, so its editor cannot be driven; build with the /staff fix)",
-  async () => {},
-);
+// Data-layer 2.2d: the staff editor saves rows, and the Staff roster follows
+// the staff list — A renames on the real profile form, B on /staff sees it.
+test("staff record renamed via editor → visible on /staff?tab=roster", async ({ browser }, testInfo) => {
+  const next = `Rohit Edited ${tag()}`;
+  const r: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string; controlShown?: boolean } = { propagatedAfterMs: null };
+  await scenario(
+    browser,
+    STAFF_OBSERVERS[0]!,
+    async (a) => (await staffRoster(a.request)).staff.find((s) => s.id === STAFF_EDITED)?.fullName ?? "?",
+    async (a) => {
+      await renameStaffViaEditor(a, next);
+      return next;
+    },
+    async (a) => (await staffRoster(a.request)).staff.find((s) => s.id === STAFF_EDITED)?.fullName === next,
+    r,
+  ).catch(async (e: unknown) => {
+    await metric(testInfo, "propagation", { change: "staff", via: "editor", observer: "/staff?tab=roster", ...r });
+    throw e;
+  });
+  await metric(testInfo, "propagation", { change: "staff", via: "editor", observer: "/staff?tab=roster", ...r });
+});
 
 // ── Data-layer 2.2c: every converted Masters panel, through the REAL editor ──
 //

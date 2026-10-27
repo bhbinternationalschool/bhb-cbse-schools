@@ -26,9 +26,7 @@
  *     not the body's `by`), staff · delete needed (office → 403); hidden from
  *     GET sis.staff, listed by ?removed=1 (teacher → 403); restore with the
  *     removed row's revision brings them back everywhere.
- *  E. The OLD staff-roster save: a plain staff editor (office with payroll
- *     and accounts personally denied) changing a bank account → 403, nothing
- *     written; a mobile change → 200; with the authority back → 200.
+ *  E. The OLD staff-roster save is gone (2.2d): POST → 410, nothing written.
  *     Its DELETE soft-removes the roster: every row kept with deleted_at /
  *     deleted_by, departments and designations untouched.
  *  F. A teacher's own-class class subject through POST /api/data/masters.
@@ -304,78 +302,21 @@ async function main(): Promise<void> {
 
   // ── E. The OLD staff-roster save and DELETE ──────────────────────────────
   {
-    const OTHER = staffId(27);
-    const rosterNow = async () => {
-      const g = await req(`${app}/api/school-data/staff-roster`, { headers: office });
-      const all = arr(g.body.staff).map(obj);
-      const stamps = obj(obj(g.body.stamps).staff);
-      return {
-        me: all.find((s) => s.id === TARGET)!,
-        other: all.find((s) => s.id === OTHER)!,
-        stamp: String(stamps[TARGET] ?? ""),
-        otherStamp: String(stamps[OTHER] ?? ""),
-      };
-    };
-    const save = (who: Record<string, string>, rows: Record<string, unknown>[], stamps: Record<string, string>) =>
-      req(`${app}/api/school-data/staff-roster`, { method: "POST", headers: who, body: { state: { staff: rows }, stamps: { staff: stamps } } });
-
-    // The office (staff · edit, no bank & pay function) is a plain staff editor.
-    const a = await rosterNow();
-    const bank = await save(office, [{ ...a.me, bankAccountNo: "OLD-ROUTE" }], { [TARGET]: a.stamp });
-    const rA = await staffRow();
+    // Data-layer 2.2d: the whole-roster save is gone — every body → 410,
+    // nothing written (the staff screens write sis.staff rows; sections C/D).
+    const g0 = await req(`${app}/api/school-data/staff-roster`, { headers: office });
+    const me0 = arr(g0.body.staff).map(obj).find((s) => s.id === TARGET)!;
+    const before = await staffRow();
+    const gone = await req(`${app}/api/school-data/staff-roster`, {
+      method: "POST",
+      headers: owner,
+      body: { state: { staff: [{ ...me0, addressCurrent: "E2E old route street", bankAccountNo: "OLD-ROUTE" }] }, stamps: { staff: { [TARGET]: String(before.updated_at) } } },
+    });
+    const after = await staffRow();
     record(
-      "old staff-roster save: the office's bank change → 403, nothing written",
-      bank.status === 403 && prof(rA).bankAccountNo === SEED.bankAccountNo,
-      `bank ${bank.status} ${short(bank.body.error)}`,
-    );
-
-    // Review #1: own id with another member's employee code → refused (the write would land on the other member).
-    const hijack = await save(office, [{ ...a.me, empCode: a.other.empCode }], { [TARGET]: a.stamp });
-    const lower = await save(office, [{ ...a.me, id: "e2e_22b_new_id", empCode: String(a.other.empCode).toLowerCase() }], { e2e_22b_new_id: a.otherStamp });
-    const rO = await staffRow(OTHER);
-    record(
-      "old staff-roster save: an id/employee-code mismatch → 403; a new id with another member's code (lower-case) is judged against THAT member → 403; nothing written",
-      hijack.status === 403 && /belongs to another member/.test(String(hijack.body.error)) && lower.status === 403 &&
-        prof(rO).bankAccountNo !== SEED.bankAccountNo,
-      `mismatch ${hijack.status} ${short(hijack.body.error)}; lower-case ${lower.status} ${short(lower.body.error)}`,
-    );
-
-    // Item 4: two rows, one refused → the other saves; the refused one is named.
-    const both = await save(
-      office,
-      [{ ...a.me, bankAccountNo: "OLD-ROUTE" }, { ...a.other, addressCurrent: "E2E other street" }],
-      { [TARGET]: a.stamp, [OTHER]: a.otherStamp },
-    );
-    const rOther = await staffRow(OTHER);
-    const rT = await staffRow();
-    record(
-      "old staff-roster save: one row refused, the other row saves; the refused one is named",
-      both.status === 200 && JSON.stringify(obj(both.body.refused).staff) === JSON.stringify([TARGET]) &&
-        prof(rOther).addressCurrent === "E2E other street" && prof(rT).bankAccountNo === SEED.bankAccountNo,
-      `HTTP ${both.status} ${short(both.body)}`,
-    );
-
-    // Review #2: a row WITHOUT the bank keys keeps them (absent = keep); review #3: blank username → the form's default.
-    const b = await rosterNow();
-    const lean: Record<string, unknown> = { ...b.me, addressCurrent: "E2E lean street", loginUsername: String(b.me.empCode).toLowerCase() };
-    for (const k of ["bankAccountNo", "upiId", "panNo", "aadhaarNo", "basicPay", "bankIfsc", "bankName"]) delete lean[k];
-    const leanSave = await save(office, [lean], { [TARGET]: b.stamp });
-    const rL = await staffRow();
-    record(
-      "old staff-roster save: a row without the bank keys keeps them; a blank login username → the form's default saves",
-      leanSave.status === 200 && !obj(leanSave.body).refused && prof(rL).bankAccountNo === SEED.bankAccountNo && prof(rL).panNo === SEED.panNo &&
-        prof(rL).basicPay === SEED.basicPay && prof(rL).addressCurrent === "E2E lean street" && prof(rL).loginUsername === String(b.me.empCode).toLowerCase(),
-      `HTTP ${leanSave.status} ${short(leanSave.body)}; bank ${short(prof(rL).bankAccountNo)}; username ${short(prof(rL).loginUsername)} (stored before: ${short(prof(original).loginUsername)})`,
-    );
-
-    // The owner may.
-    const c = await rosterNow();
-    const own = await save(owner, [{ ...c.me, bankAccountNo: "OWNER-OK" }], { [TARGET]: c.stamp });
-    const rC = await staffRow();
-    record(
-      "old staff-roster save: the owner's bank change lands",
-      own.status === 200 && !obj(own.body).refused && prof(rC).bankAccountNo === "OWNER-OK",
-      `owner ${own.status} ${short(own.body)}`,
+      "old staff-roster save: POST → 410 for any body (even the owner's), nothing written",
+      gone.status === 410 && after.updated_at === before.updated_at && prof(after).addressCurrent === prof(before).addressCurrent,
+      `HTTP ${gone.status} ${short(gone.body.error)}`,
     );
 
     // DELETE: a soft remove of the roster; meanwhile a non-owner session ends, the owner's does not.
@@ -477,24 +418,14 @@ async function main(): Promise<void> {
     );
     await setRaw(S27, { mobile: keep.s27.mobile, profile: keep.s27.profile });
 
-    // Old route: a fill of 33's placeholder → 200; with another member's number → 403.
-    const g = await req(`${app}/api/school-data/staff-roster`, { headers: office });
-    const r33 = arr(g.body.staff).map(obj).find((x) => x.id === S33)!;
-    const st33 = String(obj(obj(g.body.stamps).staff)[S33] ?? "");
-    const clash = await req(`${app}/api/school-data/staff-roster`, {
-      method: "POST",
-      headers: office,
-      body: { state: { staff: [{ ...r33, mobile: "9000000025" }] }, stamps: { staff: { [S33]: st33 } } },
-    });
-    const ok33 = await req(`${app}/api/school-data/staff-roster`, {
-      method: "POST",
-      headers: office,
-      body: { state: { staff: [{ ...r33, mobile: "9300000033" }] }, stamps: { staff: { [S33]: st33 } } },
-    });
+    // The kernel (the office's route since 2.2d): a fill of 33's placeholder
+    // with another member's number → 403; with a free number → 200.
+    const clash = await post("sis.staff", office, [{ op: "upsert", id: S33, base: await rev(S33), row: { mobile: "9000000025", profile: { mobile: "9000000025" } } }]);
+    const ok33 = await post("sis.staff", office, [{ op: "upsert", id: S33, base: await rev(S33), row: { mobile: "9300000033", profile: { mobile: "9300000033" } } }]);
     record(
-      "mobile rule (old route): another member's number → 403; a free number on a blank mobile → 200",
-      clash.status === 403 && ok33.status === 200 && !obj(ok33.body).refused && (await staffRow(S33)).mobile === "9300000033",
-      `clash ${clash.status} ${short(clash.body.error)}; fill ${ok33.status} ${short(ok33.body)}`,
+      "mobile rule (kernel, office): another member's number → 403; a free number on a blank mobile → 200",
+      clash.status === 403 && ok33.status === 200 && (await staffRow(S33)).mobile === "9300000033",
+      `clash ${clash.status} ${short(clash.body.message)}; fill ${ok33.status} ${short(ok33.body)}`,
     );
 
     // The staff app's roster/mobile: fill → 200; changing a set number → 403 (principal); the owner may.

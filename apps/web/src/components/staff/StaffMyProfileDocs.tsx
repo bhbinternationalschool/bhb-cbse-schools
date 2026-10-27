@@ -31,9 +31,9 @@ export function StaffMyProfileDocs({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Your own record (with its documents) from the roster the access checks
-  // use (data-layer 2.1c). A submitted document is saved by
-  // submitStaffDocForVerification through the Masters save, whose
-  // 'bhb-masters-updated' re-reads that roster — so it shows here at once.
+  // use (data-layer 2.1c). A submitted document is saved on your own record
+  // (POST /api/v1/staff/me/docs, 2.2d); the roster is then re-read from the
+  // server ('bhb-masters-updated'), so it shows here.
   const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
 
   const staff = useMemo(() => {
@@ -41,17 +41,21 @@ export function StaffMyProfileDocs({
     return masters.staff.find((s) => s.id === staffId) ?? null;
   }, [staffId, masters]);
 
-  function onDocUploaded(key: StaffDocKey, next: StaffDocFile) {
-    const r = submitStaffDocForVerification({
+  async function onDocUploaded(key: StaffDocKey, next: StaffDocFile) {
+    setError(null);
+    setNotice("Submitting…");
+    const r = await submitStaffDocForVerification({
       staffId,
       docKey: key,
       file: next,
       submittedBy: actorName || staff?.fullName || "",
     });
     if (!r.ok) {
+      setNotice(null);
       setError(r.error);
       return;
     }
+    // Said only after the server confirmed it.
     setNotice("Submitted for HR / office verification");
     window.setTimeout(() => setNotice(null), 2500);
   }
@@ -107,7 +111,7 @@ export function StaffMyProfileDocs({
             docKey={key}
             staffId={staffId}
             value={staff.docs[key]}
-            onUploaded={(next) => onDocUploaded(key, next)}
+            onUploaded={(next) => void onDocUploaded(key, next)}
             onError={setError}
           />
         ))}
