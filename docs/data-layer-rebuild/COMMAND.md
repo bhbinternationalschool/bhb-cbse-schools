@@ -1709,7 +1709,7 @@ nothing. Number series: a jump of more than 50 is refused unless the records hol
 numbers do move the series).
 The certificates clerk / counter can move only their own series.
 
-*(2.2e built 27 Oct 2026, PR #PRNUM — fee setup and the concession-grant writers write Masters elements; the counter's
+*(2.2e built 27 Oct 2026, PR #716 — fee setup and the concession-grant writers write Masters elements; the counter's
 receipt number and the enrolment SRN come from the server; no migration. MONEY — the director approves.)* **What exists.**
 - **The Masters fee setup is element writes** (`lib/data/client/mastersElementPlan.ts`: `FEE_LIST_KEYS` — fee-head
   categories, fee heads, instalments, fee groups, structure lines, late-fee rules, special fees and their assignments,
