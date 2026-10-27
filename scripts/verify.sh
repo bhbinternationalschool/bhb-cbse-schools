@@ -580,6 +580,7 @@ SELFTESTS=(
   test:staff-kernel
   test:masters-writes
   test:masters-element-commit
+  test:masters-lib-writes
   test:staff-book-commit
   test:desk-feature-rev
   test:staff-requests
