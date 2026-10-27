@@ -17,6 +17,7 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { STAFF_DOC_LABELS } from "@/lib/foundationMasters";
 import { patchStaffRow, readOwnStaff } from "@/lib/staffSelfProfile.server";
+import { ownStaffDocUrlRefusal } from "@/lib/staffOwnDocUrl";
 
 export const runtime = "nodejs";
 
@@ -41,6 +42,14 @@ export async function POST(request: Request) {
 
     const own = await readOwnStaff(staffId);
     if (!own) throw new ApiError("server_error", "Could not read your record — nothing was submitted. Try again.", 503);
+    // Only the school's own upload path for THIS member and THIS document —
+    // never an external URL: for the photo it becomes the photoUrl the office
+    // is shown as an image and a link (2.2d follow-up, security).
+    const refusal = ownStaffDocUrlRefusal(fileUrl, { staffId, empCode: own.staff.empCode, docKey });
+    if (refusal) {
+      console.warn(`[staff/me/docs] ${staffId}: a file reference that is not their own upload for ${docKey} — refused`);
+      throw new ApiError("bad_request", refusal, 400);
+    }
     const now = new Date().toISOString();
     const submitted = {
       status: "pending",

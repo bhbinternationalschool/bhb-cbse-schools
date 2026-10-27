@@ -10,18 +10,19 @@
  * of the action; every refusal comes back with the server's reason. Never
  * the old whole-book save (saveMasters), never the old staff-roster route.
  *
- * The caller (useStaffBookWrites) then refetches the staff queries and re-reads
- * the roster into the page copy (the staff bridge) — after a failure too: the
- * screen must show what the server holds.
+ * The caller (useStaffBookWrites) then refetches the staff queries and, once
+ * they answered, re-reads the roster into the page copy ONCE (the staff
+ * bridge) — after a failure too: the screen must show what the server holds.
  */
 
 import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Revision, WriteFail, WriteResult } from "../types";
-import { invalidateDesks } from "./hooks";
+import { refetchDesks } from "./hooks";
 import { writeRecords, writeStaffSensitiveFields } from "./mutate";
 import { readAll, readRevisions } from "./query";
 import { bridgeStaffAfterWrite } from "./staffBridge";
+import { STAFF_SENSITIVE_NO_AUTHORITY } from "@/lib/staffProtectedFields";
 import { planStaffBookCommit, type StaffBook, type StoredStaffBook } from "./staffBookPlan";
 
 type Row = Record<string, unknown>;
@@ -38,7 +39,22 @@ export type StaffBookOutcome =
       conflicts?: { id: string; fields: string[] }[];
       /** Something of the action landed before the refusal (said in `message`). */
       partial: boolean;
+      /** Staff records whose row write landed (an import: "N staff saved"). */
+      savedStaff?: number;
+      /**
+       * Records whose bank / ID / pay / login details were NOT changed, each
+       * with the reason. `needsAuthority`: the route refused the person
+       * (no "Bank, ID & pay details" function, not the owner).
+       */
+      sensitiveMissed?: { id: string; name: string; reason: string }[];
+      needsAuthority?: boolean;
     };
+
+/** The sensitive route takes 1–50 records per request (staffSensitive.parseSensitiveOps). */
+export const SENSITIVE_CHUNK = 50;
+
+/** The sensitive route refused the PERSON (not one record): nothing of theirs can pass. */
+const isPersonRefusal = (r: WriteFail<Row>) => r.kind === "auth" && r.message === STAFF_SENSITIVE_NO_AUTHORITY;
 
 const same = (a: readonly unknown[] | undefined, b: readonly unknown[] | undefined) => a === b;
 
@@ -62,6 +78,35 @@ const WHAT: Record<string, string> = {
   "sis.designations": "a designation",
   "sis.staff": "this staff record",
 };
+
+/**
+ * What a save says when some bank / ID / pay / login details did not land.
+ * One record (the profile form): "Saved, except …" / "Not saved — …". More
+ * (an import): how many staff were saved and whose details were not changed.
+ */
+export function sensitiveMissMessage(o: {
+  savedStaff: number;
+  sentRows: boolean;
+  landed: number;
+  missed: readonly { id: string; name: string; reason: string }[];
+  needsAuthority: boolean;
+  total: number;
+}): string {
+  const first = o.missed[0]!;
+  if (o.total === 1 && o.savedStaff <= 1) {
+    return (o.sentRows ? "Saved, except the bank, ID, pay or login details — " : "Not saved — ") + first.reason;
+  }
+  const m = o.missed.length;
+  const lead = o.sentRows ? `${o.savedStaff} staff saved; ` : o.landed ? "" : "Not saved — ";
+  const ok = o.landed ? ` (details for ${o.landed} were saved)` : "";
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+  if (o.needsAuthority) {
+    return cap(`${lead}bank/ID/pay details for ${m} were not changed${ok} — they need the accountant/owner.`);
+  }
+  const list = o.missed.slice(0, 8).map((x) => `${x.name} — ${x.reason}`).join("; ");
+  const more = m > 8 ? `; and ${m - 8} more` : "";
+  return cap(`${lead}bank/ID/pay details for ${m} were not changed${ok}: ${list}${more}.`);
+}
 
 /**
  * Save the difference between `shown` and `next`. Never throws. Only the lists
@@ -130,29 +175,85 @@ export async function commitStaffBook(shown: StaffBook, next: StaffBook): Promis
     for (const [id, v] of Object.entries(r.versions)) versions[id] = v;
   }
 
+  const savedStaff = plan.requests
+    .filter((r) => r.collection === "sis.staff")
+    .reduce((n, r) => n + r.ops.filter((o) => o.op === "upsert").length, 0);
+
   if (plan.sensitive.length) {
     // On the revision the row write just answered, else the stored one, else
     // (a record created without a row op — never) a fresh read.
     const missing = plan.sensitive.filter((s) => !versions[s.id] && !s.base).map((s) => s.id);
     const fresh = missing.length ? await readRevisions("sis.staff", missing) : null;
-    const ops = plan.sensitive.map((s) => ({
+    const nameOf = new Map(
+      (next.staff ?? []).map((r) => [r.id, [r.fullName, r.empCode ? `(${r.empCode})` : ""].filter(Boolean).join(" ") || r.id]),
+    );
+    const opOf = (s: (typeof plan.sensitive)[number]) => ({
       id: s.id,
       base: versions[s.id] ?? s.base ?? (fresh?.ok ? fresh.revisions.get(s.id)?.revision ?? null : null),
       fields: s.fields,
-    }));
-    const r = await writeStaffSensitiveFields<Row>(ops);
-    if (!r.ok) {
-      const partial = sent > 0;
+    });
+    const missed: { id: string; name: string; reason: string }[] = [];
+    const reasonOf = (r: WriteFail<Row>) =>
+      r.kind === "conflict" ? "someone changed this record on another device a moment ago; make the change again" : r.message;
+    let needsAuthority = false;
+    let missKind: WriteFail<Row>["kind"] = "conflict";
+    let landed = 0;
+    // The route takes ≤ 50 records a request, each request all or none. A
+    // refused PERSON (403: not the owner, no "Bank, ID & pay details") stops
+    // at once — no record of theirs can pass. Any other refusal of a chunk is
+    // retried record by record, so every record that can land lands and each
+    // one that cannot is named with its reason.
+    const chunks: (typeof plan.sensitive)[] = [];
+    for (let i = 0; i < plan.sensitive.length; i += SENSITIVE_CHUNK) chunks.push(plan.sensitive.slice(i, i + SENSITIVE_CHUNK));
+    outer: for (let c = 0; c < chunks.length; c++) {
+      const chunk = chunks[c]!;
+      const r = await writeStaffSensitiveFields<Row>(chunk.map(opOf));
+      if (r.ok) {
+        landed += chunk.length;
+        for (const [id, v] of Object.entries(r.versions)) versions[id] = v;
+        continue;
+      }
+      if (isPersonRefusal(r)) {
+        needsAuthority = true;
+        for (const rest of chunks.slice(c).flat()) missed.push({ id: rest.id, name: nameOf.get(rest.id) ?? rest.id, reason: r.message });
+        break outer;
+      }
+      missKind = r.kind;
+      if (chunk.length === 1) {
+        missed.push({ id: chunk[0]!.id, name: nameOf.get(chunk[0]!.id) ?? chunk[0]!.id, reason: reasonOf(r) });
+        continue;
+      }
+      for (const one of chunk) {
+        const r1 = await writeStaffSensitiveFields<Row>([opOf(one)]);
+        if (r1.ok) {
+          landed += 1;
+          for (const [id, v] of Object.entries(r1.versions)) versions[id] = v;
+        } else {
+          missKind = r1.kind;
+          missed.push({ id: one.id, name: nameOf.get(one.id) ?? one.id, reason: reasonOf(r1) });
+          if (isPersonRefusal(r1)) {
+            needsAuthority = true;
+            const idx = chunk.indexOf(one);
+            for (const rest of [...chunk.slice(idx + 1), ...chunks.slice(c + 1).flat()]) {
+              missed.push({ id: rest.id, name: nameOf.get(rest.id) ?? rest.id, reason: r1.message });
+            }
+            break outer;
+          }
+        }
+      }
+    }
+    if (missed.length) {
+      const partial = sent > 0 || landed > 0;
       return {
         ok: false,
-        kind: r.kind,
-        message:
-          (partial ? "Saved, except the bank, ID, pay or login details — " : "Not saved — ") +
-          (r.kind === "conflict" ? "someone changed this record on another device a moment ago; make your change again." : r.message),
+        kind: needsAuthority ? "auth" : missKind,
+        message: sensitiveMissMessage({ savedStaff, sentRows: sent > 0, landed, missed, needsAuthority, total: plan.sensitive.length }),
         partial,
+        savedStaff,
+        sensitiveMissed: missed,
+        needsAuthority,
       };
     }
-    for (const [id, v] of Object.entries(r.versions)) versions[id] = v;
   }
   return { ok: true, unchanged: false, versions };
 }
@@ -192,8 +293,13 @@ export function useStaffBookWrites(): {
   restore: (id: string) => Promise<StaffBookOutcome>;
 } {
   const client = useQueryClient();
+  // ONE roster re-read per save: first the staff queries answer again (so the
+  // versions poll then holds this write's version and asks nothing more),
+  // then the roster is read once into the page copy. A screen that also
+  // re-reads the roster when the staff list answers (StaffWorkspace) skips
+  // the answers that arrive while its own save runs — this read is after them.
   const after = useCallback(async () => {
-    invalidateDesks(client, STAFF_DESKS);
+    await refetchDesks(client, STAFF_DESKS);
     await bridgeStaffAfterWrite();
   }, [client]);
   const commit = useCallback(

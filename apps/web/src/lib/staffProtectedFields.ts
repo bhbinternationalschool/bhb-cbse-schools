@@ -54,6 +54,15 @@ export type StaffAuthority = "owner" | "payroll" | "accounts";
 /** The function that opens the sensitive fields (lib/rbacFeatureCatalog/people.ts). */
 export const STAFF_SENSITIVE_FEATURE = "staff.sensitive_edit";
 
+/**
+ * The sensitive route's answer when the PERSON may not use it at all (not the
+ * owner, no "Bank, ID & pay details" function) — as opposed to one record's
+ * refusal. The staff save tells the two apart by this text: a person refusal
+ * stops an import's remaining records at once (2.2d follow-up).
+ */
+export const STAFF_SENSITIVE_NO_AUTHORITY =
+  "Bank, UPI, Aadhaar, PAN and pay can be changed only by the owner or with the bank & pay details function.";
+
 /** Columns / keys a sign-in resolves a person by. */
 export const STAFF_SIGNIN_LINK_KEYS = ["email", "mobile"] as const;
 

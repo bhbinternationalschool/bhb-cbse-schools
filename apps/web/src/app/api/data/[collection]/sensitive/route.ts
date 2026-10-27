@@ -9,7 +9,7 @@ import { functionGrantHeldOnServer, requireStaffApi } from "@/lib/apiRouteAuth.s
 import { readRowsByIds, signInMobilesInUse, staffSignInLinks, writeStaffSensitive } from "@/lib/data/server/repo";
 import { buildSensitiveOps, parseSensitiveOps } from "@/lib/data/server/staffSensitive";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
-import { STAFF_SENSITIVE_FEATURE, staffActorOf, staffSensitiveAuthority, takenLinksOf } from "@/lib/staffProtectedFields";
+import { STAFF_SENSITIVE_FEATURE, STAFF_SENSITIVE_NO_AUTHORITY, staffActorOf, staffSensitiveAuthority, takenLinksOf } from "@/lib/staffProtectedFields";
 import { withBuildCheck } from "@/lib/staleBuild.server";
 
 export const runtime = "nodejs";
@@ -38,11 +38,7 @@ export const POST = withBuildCheck(async (req: Request, ctx: RouteCtx) => {
   // The same answer, asked the catalog's way: an owner, or the function held as a function grant.
   const gated = authority === "owner" || functionGrantHeldOnServer(auth.ctx, STAFF_SENSITIVE_FEATURE, "edit");
   if (!authority || !gated || !actor) {
-    return fail(
-      403,
-      "auth",
-      "Bank, UPI, Aadhaar, PAN and pay can be changed only by the owner or with the bank & pay details function.",
-    );
+    return fail(403, "auth", STAFF_SENSITIVE_NO_AUTHORITY);
   }
 
   let raw: unknown;

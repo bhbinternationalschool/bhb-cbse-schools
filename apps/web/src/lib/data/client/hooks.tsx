@@ -154,6 +154,20 @@ export function invalidateDesks(client: QueryClient, desks: readonly string[]): 
   return ids;
 }
 
+/**
+ * invalidateDesks, and resolve once the active queries reading `desks` have
+ * answered again (never rejects). For a caller that must act on what the
+ * server holds AFTER that answer — the staff screens re-read their roster
+ * once, after the staff list refetched (2.2d follow-up).
+ */
+export async function refetchDesks(client: QueryClient, desks: readonly string[]): Promise<string[]> {
+  const ids = queriesForDesks(desks, deskQueries(client));
+  if (ids.length === 0) return ids;
+  const want = new Set(ids);
+  await client.invalidateQueries({ predicate: (q: Query) => want.has(q.queryHash) }).catch(() => undefined);
+  return ids;
+}
+
 // ── Mutations ──────────────────────────────────────────────────────────────
 
 export type ErpMutationOptions<T> = {
