@@ -177,11 +177,18 @@ test("masters-desk POST (2.2f): every body — whole book, section save, a teach
       { name: "{}", ctx: principal, send: () => principal.page.request.post("/api/school-data/masters-desk", { data: {} }) },
       { name: "empty body", ctx: principal, send: () => principal.page.request.post("/api/school-data/masters-desk", { headers: { "content-type": "application/json" }, data: "" }) },
     ];
+    // Every body is sent and its answer recorded first, so a failure shows ALL
+    // of them (on the code before 2.2f: the whole book 200, the section save
+    // 409, the teacher's classSubjects 200 functionOnly …).
+    const answers: Record<string, string> = {};
     for (const c of cases) {
-      await test.step(`${c.name} → 410`, async () => {
-        await expectGone(await c.send());
-      });
+      const r = await c.send();
+      const body = (await r.json().catch(() => ({}))) as { reason?: string; functionOnly?: boolean };
+      answers[c.name] = `${r.status()} ${body.reason ?? (body.functionOnly ? "functionOnly" : "")} stale=${r.headers()["x-bhb-build-stale"] ?? "-"}`.trim();
     }
+    expect(answers, "every body → 410 build_stale + X-Bhb-Build-Stale").toEqual(
+      Object.fromEntries(cases.map((c) => [c.name, "410 build_stale stale=1"])),
+    );
     await test.step("the masters revision did not move; the teacher's link is as it was", async () => {
       const after = await mastersRevision(principal.page.request);
       expect(after, "masters_desk_sync_meta.updated_at").toEqual(before);
