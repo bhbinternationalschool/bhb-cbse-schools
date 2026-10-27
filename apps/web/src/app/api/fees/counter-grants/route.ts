@@ -10,14 +10,17 @@
  *     | { action: "revoke", voucherId, receiptNo }
  */
 import { NextResponse } from "next/server";
-import { requireStaffApi } from "@/lib/apiRouteAuth.server";
+import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { counterGrantsPost } from "@/lib/data/server/counterGrants.server";
 import { withBuildCheck } from "@/lib/staleBuild.server";
 
 export const runtime = "nodejs";
 
 export const POST = withBuildCheck(async (req: Request) => {
-  const auth = await requireStaffApi(req);
+  // Fees · edit: the counter's own authority (the director's decision — a
+  // fees · edit clerk records counter grants and ends them on void). The
+  // finer rules (no receipt = Masters only) are in counterGrantsPost.
+  const auth = await requireStaffPermission(req, "fees", "edit");
   if (!auth.ok) return auth.response;
   if (auth.viaMirrorSecret) {
     return NextResponse.json({ ok: false, kind: "auth", message: "A person records a discount, not the mirror." }, { status: 403 });
