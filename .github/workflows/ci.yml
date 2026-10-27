@@ -890,6 +890,14 @@ jobs:
       - name: SQL test — Masters element _rev, batch, series bump, staff kernel rows
         run: bash scripts/e2e-stack.sh sql-test supabase/tests/masters_row_revs_staff_kernel.test.sql
 
+      # data-layer 2.2e follow-up: masters_series_claim reserves a RECEIPT /
+      # SRN number in the database — past the records, consecutive, never
+      # repeated; N claims from N connections at once get N numbers.
+      - name: SQL test — receipt / SRN numbers claimed in the database
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/masters_series_claim.test.sql
+      - name: SQL test — parallel number claims from separate connections
+        run: bash supabase/tests/masters_series_claim_parallel.sh
+
       # A voided fee receipt stays voided: a stale whole-desk push can no
       # longer clear voided_at and re-post the receipt (15 Oct 2026, R1).
       - name: SQL test — a voided fee receipt stays voided

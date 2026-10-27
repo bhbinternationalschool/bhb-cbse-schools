@@ -1897,6 +1897,40 @@ masters-element-writes + masters-overlay 15/15. Self-test +2 (planner on stored 
 **Not done.** Two counters issuing the same RECEIPT number at the same instant (`/next` does not reserve) still needs an
 atomic claim — a separate "[MIGRATION — director applies]" proposal, not built here.
 
+*(2.2e follow-up — receipt / SRN numbers claimed in the database. Built 28 Oct 2026, PR #PRNUM, "[MIGRATION — director
+applies]" 20261027090000_data_layer_masters_series_claim; director's approval 27 Oct.)* **What exists.**
+- `masters_series_claim(p_tenant, p_series, p_ay)` (security definer, search_path public, lock_timeout 5s, service_role
+  only): under the numberSeries slice lock (the same advisory lock + FOR UPDATE as `masters_series_bump` and the element
+  kernel) it computes max(stored counter — `countersByAy[ay]` for a per-year series — , highest number on record + 1)
+  with the on-record rule of `numberSeriesIssued` mirrored exactly (RECEIPT → `fee_desk_vouchers.receipt_no`, SRN →
+  `sis_students.srn`, ADMISSION → `sis_students.admission_no`; the prefix incl. the session; 1–12 digits; voided receipts
+  count), writes the counter to that + 1 through `_desk_slice_element_apply` on the element's `_rev` (so `_rev` +1, slice
+  revision moves, sync_meta bumped once, row tables synced), and returns the number + formatted. Unknown → `not_found`;
+  a series with no table of record → `not_on_record`; nothing written in either.
+- `nextSeriesNumberServer` (POST `/api/data/masters.number-series/next` and the mobile `/api/v1/staff/fees/collect`)
+  calls it for **RECEIPT and SRN** (`CLAIMED_SERIES`) via `repo.claimNumberSeries`; ADMISSION (the student form's
+  suggestion, asked when the form opens) keeps the 2.2c peek + lift. Missing function (PGRST202/42883) or a lock timeout
+  (55P03) → 503, the counter says "not saved, try again" as before. Fee Take / Manual book still ask before saving and
+  still take the later of the answer and the tab's number (`laterSeriesNumber`).
+**Evidence.** `supabase/tests/masters_series_claim.test.sql` (CI): lag 701 vs RCV-00690..00710 → RCV-00711, counter 712,
+`_rev` +1; five claims 701..705; per-year + session prefix; SRN; not_found / not_on_record write nothing; grants and
+lock_timeout. `supabase/tests/masters_series_claim_parallel.sh` (CI): 24 claims from 24 psql connections released together
+→ RCV-00711..RCV-00734, all distinct, counter 735, `_rev` 1 → 25; a claim behind an 8 s lock fails after ~5 s, nothing
+written. Mutation (claim made a peek: counter not written) → red, "distinct numbers: 1 of 24". `fee-writes.spec` case 7
+(new): six `/next` asks at once (two principals + the office clerk; SRN two desks) → six distinct consecutive numbers,
+counter past them. **Fail-on-old:** the same case on origin/main 2c5d822c's app → `RCV-00001` ×6. This head (local stack,
+`--no-deps`): fee-writes 11/11 without the clerk case incl. the 2.2e "highest on record + 1" case; masters-element-writes
+number-series 4/4.
+**Users notice.** Two desks (or a desk and the phone) collecting at the same instant get different receipt numbers; the
+second receipt is no longer stuck. A number asked for and then not saved (the collect failed after asking) is skipped —
+a gap in the receipt / SRN series, never a repeat.
+**Not proven / not done.** Applied only to the local stack. The office-clerk counter-grant case failed locally under
+`--no-deps` before any `/next` request was made (the trace shows none — the change is server-side only); CI's full chain
+decides. A tab that holds a number later than the server's (an unsent offline receipt) still uses its own unreserved
+number (`laterSeriesNumber`) — a window until that receipt reaches the database. Registration receipts, online settlement
+and bulk tools still number from the copy (5.1). The whole-book masters push can still write an older counter (2.2f
+removes it); the claim then still skips the records.
+
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /
 `bhb-rbac-updated` / `bhb-desk-first-hydrated` events and their listeners (one is the
