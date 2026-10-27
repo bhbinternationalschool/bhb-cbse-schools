@@ -1897,7 +1897,7 @@ masters-element-writes + masters-overlay 15/15. Self-test +2 (planner on stored 
 **Not done.** Two counters issuing the same RECEIPT number at the same instant (`/next` does not reserve) still needs an
 atomic claim — a separate "[MIGRATION — director applies]" proposal, not built here.
 
-*(2.2e follow-up — receipt / SRN numbers claimed in the database. Built 28 Oct 2026, PR #PRNUM, "[MIGRATION — director
+*(2.2e follow-up — receipt / SRN numbers claimed in the database. Built 28 Oct 2026, PR #718, "[MIGRATION — director
 applies]" 20261027090000_data_layer_masters_series_claim; director's approval 27 Oct.)* **What exists.**
 - `masters_series_claim(p_tenant, p_series, p_ay)` (security definer, search_path public, lock_timeout 5s, service_role
   only): under the numberSeries slice lock (the same advisory lock + FOR UPDATE as `masters_series_bump` and the element
