@@ -48,6 +48,8 @@ const instId = (m: string) => `${P}inst_${m}`;
 
 test.describe.configure({ mode: "serial" });
 test.setTimeout(300_000);
+// No action waits for ever: a missing control fails the case in 30 s.
+test.use({ actionTimeout: 30_000 });
 
 async function pageAs(browser: Browser, who: Who, viewport = { width: 1440, height: 900 }): Promise<Page> {
   const context = await browser.newContext({ baseURL: APP_URL, viewport });
@@ -542,4 +544,102 @@ test("clone: one bad element in the batch and nothing is cloned; without it ever
     await a.context().close();
   }
   expect(errors, "no page errors").toEqual([]);
+});
+
+// ── 6. The counter's receipt number comes from the records ─────────────────
+async function setReceiptCounter(req: APIRequestContext, next: number): Promise<void> {
+  const cur = listOf(await mastersView(req), "numberSeries").find((s) => s.code === "RECEIPT")!;
+  const w = await writeElements(req, "masters.number-series", [{ op: "upsert", id: String(cur.id), base: String(cur._rev ?? 0), row: { nextNumber: next } }]);
+  expect(w.status, `receipt counter: ${JSON.stringify(w.body).slice(0, 200)}`).toBe(200);
+}
+
+const tail = (no: string) => Number(no.match(/(\d+)$/)?.[1] ?? NaN);
+
+test("receipt number: after a phone receipt the tab never saw, with the counter left behind, the counter issues the highest on record + 1", async ({ browser }) => {
+  const a = await pageAs(browser, "principal");
+  const office = await pageAs(browser, "office");
+  const errors = collectPageErrors(a);
+  try {
+    await setFeeGroup(a.request, CHILD_ID, GROUP);
+    // The counter screen, loaded and ready, the child's month ticked.
+    await counterWithFirstMonth(a);
+    await a.getByRole("combobox", { name: "Mode & account" }).selectOption("cash");
+    await a.getByRole("button", { name: "Add line" }).click();
+
+    // Meanwhile the phone counter takes ₹1 from another family, as RCV-00040
+    // (the counter moved there first) — then the counter is put back to 1: a
+    // counter behind its records, as production's was on 27 Oct (701 vs 710).
+    await setReceiptCounter(a.request, 40);
+    const cv = fx.growing.chargeVouchers[3]!;
+    const dues = await office.request.get(`/api/v1/staff/fees/dues?studentId=${encodeURIComponent(cv.studentId)}`);
+    expect(dues.status(), await dues.text()).toBe(200);
+    const due = ((await dues.json()) as { data: { children: { studentId: string; dues: { dueKey: string; balancePaise: number }[] }[] } }).data.children
+      .find((c) => c.studentId === cv.studentId)
+      // The charge voucher's due (the academic ones depend on the built-in structures the fee setup switches on).
+      ?.dues.find((d) => d.balancePaise > 0 && !d.dueKey.startsWith("acad:"));
+    expect(due, "an open charge due for the phone receipt").toBeTruthy();
+    const paid = await office.request.post("/api/v1/staff/fees/collect", {
+      data: {
+        studentId: cv.studentId,
+        lines: [{ studentId: cv.studentId, dueKey: due!.dueKey, amountPaise: 100 }],
+        tenders: [{ mode: "cash", amountPaise: 100 }],
+        clientRef: `e2e-fw-${Date.now().toString(36)}`,
+      },
+    });
+    expect(paid.status(), await paid.text()).toBe(200);
+    const phoneNo = ((await paid.json()) as { data: { receiptNo: string } }).data.receiptNo;
+    expect(phoneNo.startsWith("RCV-"), `the phone receipt is in the RECEIPT series: ${phoneNo}`).toBe(true);
+    await setReceiptCounter(a.request, 1);
+
+    // The counter screen collects now.
+    await a.getByRole("button", { name: /^Collect & print receipt/i }).click();
+    await expect(a.getByText("Receipt details")).toBeVisible({ timeout: 30_000 });
+    const shown = String(await a.locator("text=/RCV-\\d+ · full format/").first().textContent()).match(/RCV-\d+/)![0];
+    await a.screenshot({ path: test.info().outputPath("receipt-number.png") });
+    expect(shown, "never a number in use").not.toBe(phoneNo);
+    expect(tail(shown), `the highest on record + 1 (phone: ${phoneNo})`).toBe(Math.max(tail(phoneNo), 0) + 1);
+    // The counter follows: never behind what was issued.
+    await expect
+      .poll(async () => Number(listOf(await mastersView(a.request), "numberSeries").find((s) => s.code === "RECEIPT")?.nextNumber), { timeout: 15_000 })
+      .toBeGreaterThan(tail(shown));
+    await a.getByRole("button", { name: "Close", exact: true }).click();
+    await voidReceipt(a, shown);
+  } finally {
+    await setFeeGroup(a.request, CHILD_ID, null);
+    await a.context().close();
+    await office.context().close();
+  }
+  expect(errors, "no page errors").toEqual([]);
+});
+
+// ── Seen: the screens this step touches, desktop-light and 375-dark ───────
+test("seen: fee structure, counter, RTE heads and fee reports — desktop-light and phone375-dark", async ({ browser }) => {
+  const shots: { name: string; width: number; height: number; dark: boolean }[] = [
+    { name: "desktop-light", width: 1440, height: 900, dark: false },
+    { name: "phone375-dark", width: 375, height: 812, dark: true },
+  ];
+  for (const shot of shots) {
+    const context = await browser.newContext({ baseURL: APP_URL, viewport: { width: shot.width, height: shot.height }, colorScheme: shot.dark ? "dark" : "light" });
+    await signIn(context, "principal");
+    await context.addCookies([{ name: "bhb_theme", value: shot.dark ? "dark" : "light", url: APP_URL }]);
+    const page = await context.newPage();
+    const errors = collectPageErrors(page);
+    try {
+      await page.goto("/masters?tab=fee-structure");
+      await page.getByRole("tab", { name: /Promoted \/ continuing/ }).click({ timeout: 30_000 });
+      await page.getByRole("button", { name: /E2E fee writes/ }).click({ timeout: 30_000 });
+      await expect(page.getByRole("textbox", { name: "Amount" }).first()).toBeVisible({ timeout: 30_000 });
+      await page.screenshot({ path: test.info().outputPath(`fee-structure-${shot.name}.png`), fullPage: false });
+      await page.goto("/masters?tab=concessions");
+      await page.waitForTimeout(2_000);
+      await page.screenshot({ path: test.info().outputPath(`concessions-${shot.name}.png`), fullPage: false });
+      await page.goto(`/fees?tab=collect&q=${encodeURIComponent(CHILD.admissionNo)}`);
+      await page.getByRole("button", { name: new RegExp(CHILD.admissionNo) }).first().click({ timeout: 30_000 });
+      await page.waitForTimeout(2_000);
+      await page.screenshot({ path: test.info().outputPath(`counter-${shot.name}.png`), fullPage: false });
+    } finally {
+      await context.close();
+    }
+    expect(errors, `no page errors (${shot.name})`).toEqual([]);
+  }
 });
