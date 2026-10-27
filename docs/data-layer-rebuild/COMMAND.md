@@ -1897,7 +1897,7 @@ masters-element-writes + masters-overlay 15/15. Self-test +2 (planner on stored 
 **Not done.** Two counters issuing the same RECEIPT number at the same instant (`/next` does not reserve) still needs an
 atomic claim — a separate "[MIGRATION — director applies]" proposal, not built here.
 
-*(2.2f PR A built 28 Oct 2026, PR #PRA — the Masters whole-book push deleted; no migration.)* **What changed.**
+*(2.2f PR A built 28 Oct 2026, PR #719 — the Masters whole-book push deleted; no migration.)* **What changed.**
 - **The browser push is gone:** `saveMasters`, `persistMastersSystemImport`, `persistMastersClient` (lib/masters.ts);
   the flush, scheduler, section save (`mastersSectionSave`) and `pushMastersDeskApi` (mastersNormalizedClient — the GET
   hydrate stays until 2.3b); `scheduleMastersSync`, `pushMastersRemoteServer` and the read-triggered push when
