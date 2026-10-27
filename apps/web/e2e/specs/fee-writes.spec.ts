@@ -251,6 +251,12 @@ test("overlap: two people edit different fee lines at once — both land, no con
     expect(sent[0].url).toBe("data/masters.fee-structure-lines");
     expect((sent[0].body as { ops: { id: string }[] }).ops.map((o) => o.id), "only May's line").toEqual([lineId("MAY")]);
   } finally {
+    for (const m of ["APR", "MAY"]) {
+      const cur = elementOf(await mastersView(a.request), "feeStructureLines", lineId(m));
+      if (cur && cur.amountPaise !== MONTHLY) {
+        await writeElements(a.request, "masters.fee-structure-lines", [{ op: "upsert", id: lineId(m), base: String(cur._rev ?? 0), row: { amountPaise: MONTHLY } }]);
+      }
+    }
     await a.context().close();
     await b.context().close();
   }
@@ -280,12 +286,41 @@ async function setFeeGroup(req: APIRequestContext, id: string, group: string | n
 async function counterWithFirstMonth(page: Page): Promise<string> {
   await page.goto(`/fees?tab=collect&q=${encodeURIComponent(CHILD.admissionNo)}`);
   await page.getByRole("button", { name: new RegExp(CHILD.admissionNo) }).first().click({ timeout: 30_000 });
-  const box = page.locator('input[aria-label^="Select open heads for "]:not([disabled])').first();
-  await expect(box).toBeVisible({ timeout: 30_000 });
-  const month = String(await box.getAttribute("aria-label")).replace(/^Select open heads for /, "");
-  await box.check();
+  // A month wholly open at ₹1,000 (the overlap case re-prices April and May; a
+  // re-run finds earlier months paid or part-paid).
+  const button = page.getByRole("button", { name: /^\w+ 2026 1 open · 1 overdue ₹1,000$/ }).first();
+  await expect(button).toBeVisible({ timeout: 30_000 });
+  const month = String(await button.textContent()).match(/([A-Z][a-z]+ 2026)/)![1];
+  await page.getByRole("checkbox", { name: `Select open heads for ${month}` }).check();
   await page.getByRole("button", { name: new RegExp(`^${month}`) }).click();
   return month;
+}
+
+/** Another receipt's grant on another child (idempotent). */
+async function keepAnotherGrant(req: APIRequestContext): Promise<void> {
+  const book = await mastersView(req);
+  const ops: BatchOp[] = [];
+  if (!elementOf(book, "concessions", OTHER_RULE)) {
+    ops.push({
+      collection: "masters.concessions",
+      op: "upsert",
+      id: OTHER_RULE,
+      base: null,
+      row: { id: OTHER_RULE, code: "E2E-FW-OTH", name: "E2E other", kind: "other", academicYearCode: AY_CURRENT, mode: "fixed", value: 5_000, siblingTiers: [], feeHeadIds: [HEAD], autoApproveMaxPaise: null, documentationRequired: false, incompatibleCodes: [], notes: "e2e-fw", isActive: true },
+    });
+  }
+  if (!elementOf(book, "concessionGrants", OTHER_GRANT)) {
+    ops.push({
+      collection: "masters.concession-grants",
+      op: "upsert",
+      id: OTHER_GRANT,
+      base: null,
+      row: { id: OTHER_GRANT, concessionId: OTHER_RULE, studentId: OTHER_CHILD, ground: "other", status: "approved", reason: "e2e-fw · receipt RCV-OTHER [v:rcv_e2e_other]", effectiveFrom: "2027-03-01", effectiveTo: null, createdAt: "2026-10-01T00:00:00.000Z", siblingChildNo: null },
+    });
+  }
+  if (!ops.length) return;
+  const r = await batch(req, ops);
+  expect(r.status, `another grant: ${JSON.stringify(r.body).slice(0, 200)}`).toBe(200);
 }
 
 const OTHER_RULE = `${P}cnc_other`;
@@ -300,23 +335,7 @@ test("counter grant: a recurring discount lands as its grant in one batch; voidi
     await setFeeGroup(a.request, CHILD_ID, GROUP);
     // Another receipt's standing grant (another child — one discount per head
     // per child is the counter's rule) — must survive the void.
-    const seeded = await batch(a.request, [
-      {
-        collection: "masters.concessions",
-        op: "upsert",
-        id: OTHER_RULE,
-        base: null,
-        row: { id: OTHER_RULE, code: "E2E-FW-OTH", name: "E2E other", kind: "other", academicYearCode: AY_CURRENT, mode: "fixed", value: 5_000, siblingTiers: [], feeHeadIds: [HEAD], autoApproveMaxPaise: null, documentationRequired: false, incompatibleCodes: [], notes: "e2e-fw", isActive: true },
-      },
-      {
-        collection: "masters.concession-grants",
-        op: "upsert",
-        id: OTHER_GRANT,
-        base: null,
-        row: { id: OTHER_GRANT, concessionId: OTHER_RULE, studentId: OTHER_CHILD, ground: "other", status: "approved", reason: "e2e-fw · receipt RCV-OTHER [v:rcv_e2e_other]", effectiveFrom: "2027-03-01", effectiveTo: null, createdAt: "2026-10-01T00:00:00.000Z", siblingChildNo: null },
-      },
-    ]);
-    expect(seeded.status, `seed other grant: ${JSON.stringify(seeded.body).slice(0, 200)}`).toBe(200);
+    await keepAnotherGrant(a.request);
 
     await counterWithFirstMonth(a);
     await a.getByRole("textbox", { name: "Discount on E2E FW Tuition" }).fill("100");
@@ -383,3 +402,86 @@ async function voidReceipt(page: Page, receiptNo: string): Promise<void> {
   await page.getByRole("button", { name: "Void", exact: true }).first().click();
 }
 
+
+// ── 4. RTE head waiver ─────────────────────────────────────────────────────
+async function setStudentType(req: APIRequestContext, id: string, type: string): Promise<void> {
+  const rv = await req.get(`/api/data/sis.students?ids=${encodeURIComponent(id)}`);
+  const body = (await rv.json()) as { rows: Row[] };
+  const w = await req.post("/api/data/sis.students", { data: { ops: [{ op: "upsert", id, base: body.rows?.[0]?.updated_at, row: { student_type: type } }] } });
+  expect(w.status(), `student type: ${(await w.text()).slice(0, 200)}`).toBe(200);
+}
+
+/** RTE is a default-off module: switched on through the Modules screen for this case, put back as it was. */
+async function setRteModule(page: Page, enabled: boolean | null): Promise<boolean> {
+  await page.goto("/modules");
+  const row = page.locator("li", { hasText: "RTE / EWS / scholarship" }).first();
+  const toggle = row.getByRole("button", { name: /^(Enable|Disable)$/ });
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  const now = (await toggle.textContent())?.trim() === "Disable";
+  if (enabled !== null && now !== enabled) {
+    await toggle.click();
+    await expect
+      .poll(
+        async () => {
+          const r = await page.request.get("/api/data/views/module-registry");
+          const body = (await r.json().catch(() => null)) as { data?: { enabled?: Record<string, boolean> } } | null;
+          return body?.data?.enabled?.rte_ews ?? null;
+        },
+        { timeout: 30_000, message: `module registry saved rte_ews=${enabled}` },
+      )
+      .toBe(enabled);
+  }
+  return now;
+}
+
+test("RTE waiver: unticking a head writes the waiver rule + grant in one batch; ticking it again removes the grant", async ({ browser }) => {
+  const rteChild = CANDIDATES.at(-1) ?? CHILD;
+  expect(rteChild.id, "an RTE child apart from the counter's").not.toBe(CHILD_ID);
+  const a = await pageAs(browser, "principal");
+  const errors = collectPageErrors(a);
+  const writes = recordWrites(a);
+  const grantId = `cg_rtew_${rteChild.id}_${HEAD}`;
+  const ruleId = `cnc_rtew_${HEAD}`;
+  const rteWas = await setRteModule(a, true);
+  try {
+    // The kernel never empties a list: keep another grant on file (as the
+    // school always has), so taking this one off is a removal, not a wipe.
+    await keepAnotherGrant(a.request);
+    await setStudentType(a.request, rteChild.id, "RTE");
+    await a.goto("/rte");
+    await a.getByRole("tablist", { name: "Sections" }).getByRole("tab", { name: "Enrolled", exact: true }).click({ timeout: 30_000 });
+    const row = a.getByRole("listitem").filter({ hasText: rteChild.fullName });
+    await row.getByRole("button", { name: "Fee heads" }).click({ timeout: 30_000 });
+    const box = row.getByRole("checkbox", { name: "E2E FW Tuition" });
+    await expect(box).toBeChecked({ timeout: 15_000 });
+    // Controlled by what Masters holds: it changes once the write is back.
+    await box.click();
+    await expect.poll(async () => elementOf(await mastersView(a.request), "concessionGrants", grantId)?.status, { timeout: 20_000 }).toBe("approved");
+    expect(elementOf(await mastersView(a.request), "concessions", ruleId)?.value, "a 100% waiver rule").toBe(100);
+    await a.screenshot({ path: test.info().outputPath("rte-waived.png") });
+    const waive = writes.filter((w) => w.url.startsWith("data/masters"));
+    expect(writes.filter((w) => w.url.includes("masters-desk")), "never the whole book").toEqual([]);
+    expect(waive.length, "one request").toBe(1);
+    expect(waive[0].url).toBe("data/masters/batch");
+    expect((waive[0].body as { ops: BatchOp[] }).ops.map((o) => [o.collection, o.op, o.id, o.base]).sort(), "the rule and the grant, both new").toEqual([
+      ["masters.concession-grants", "upsert", grantId, null],
+      ["masters.concessions", "upsert", ruleId, null],
+    ]);
+
+    writes.length = 0;
+    await expect(box).not.toBeChecked({ timeout: 15_000 });
+    await box.click();
+    await expect.poll(async () => !!elementOf(await mastersView(a.request), "concessionGrants", grantId), { timeout: 20_000 }).toBe(false);
+    const charge = writes.filter((w) => w.url.startsWith("data/masters"));
+    expect(charge.length, "one request").toBe(1);
+    expect((charge[0].body as { ops: BatchOp[] }).ops.map((o) => [o.collection, o.op, o.id]), "exactly the grant removed").toEqual([
+      ["masters.concession-grants", "delete", grantId],
+    ]);
+    expect(elementOf(await mastersView(a.request), "concessions", ruleId), "the rule stays (it is per head)").toBeTruthy();
+  } finally {
+    await setStudentType(a.request, rteChild.id, rteChild.studentType);
+    await setRteModule(a, rteWas);
+    await a.context().close();
+  }
+  expect(errors, "no page errors").toEqual([]);
+});
