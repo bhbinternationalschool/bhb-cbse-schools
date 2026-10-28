@@ -591,6 +591,9 @@ export async function runOfficeAssistant(
   // Structured action (a button tap) — no model, just do it.
   if (input.action) {
     if (input.action.kind === "approve_draft") {
+      if (!input.action.draft || !input.action.draft.body) {
+        return { kind: "error", text: "That draft could not be found — nothing was sent." };
+      }
       const r = await sendApprovedDraft(input.action.draft, { originUrl: opts.originUrl });
       return { kind: "action_done", text: r.text };
     }
