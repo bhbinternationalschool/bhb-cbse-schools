@@ -10,7 +10,8 @@ import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { getSessionActor } from "@/lib/sessionActor";
 import { hasPermission } from "@/lib/rbac";
-import { DEFAULT_AY, loadMasters } from "@/lib/masters";
+import { DEFAULT_AY, type MastersState } from "@/lib/masters";
+import { requireMasters } from "@/lib/data/requireData";
 import {
   householdOf,
   householdWhatsApp,
@@ -480,7 +481,14 @@ export function isTeacherAttendanceLocked(
   return isPastCutoffIst(p.teacherCutoffTime, now);
 }
 
+/**
+ * Office roles always may; anyone else needs the attendance approve grant,
+ * read from `masters` (useScreenMasters — 2.3b: data, not the tab's copy).
+ * No masters in hand = no grant proven = no override (a refusal, never a
+ * guess from an empty book).
+ */
 export function canOverrideAttendanceLock(
+  masters: MastersState | null | undefined,
   session = getSessionActor(),
 ): boolean {
   if (!session) return false;
@@ -488,9 +496,8 @@ export function canOverrideAttendanceLock(
   if (role === "principal" || role === "admin" || role === "office") {
     return true;
   }
-  if (typeof window === "undefined") return false;
+  if (!masters) return false;
   try {
-    const masters = loadMasters();
     return hasPermission(session, masters, "attendance", "approve");
   } catch {
     return false;
@@ -625,6 +632,8 @@ export function upsertRegister(input: {
   openAbsentNudges?: boolean;
   classLabel?: string;
   students?: SisStudent[];
+  /** The school setup, for the after-cut-off override grant (none = no override). */
+  masters?: MastersState | null;
 }): UpsertRegisterResult {
   if (!input.sectionId) return { ok: false, error: "Select a section" };
   if (!input.classId) return { ok: false, error: "Select a class" };
@@ -638,7 +647,7 @@ export function upsertRegister(input: {
   let lockedOverride = false;
 
   if (!input.skipLockCheck && isTeacherAttendanceLocked(input.date, policy)) {
-    if (!canOverrideAttendanceLock()) {
+    if (!canOverrideAttendanceLock(input.masters)) {
       return {
         ok: false,
         locked: true,
@@ -1043,9 +1052,11 @@ export function resolveAttendanceException(input: {
   id: string;
   note: string;
   resolvedBy: string;
+  /** The school setup (useScreenMasters) — the approve/edit grant is read from it. */
+  masters: MastersState;
 }): { ok: true } | { ok: false; error: string } {
   const session = getSessionActor();
-  const masters = typeof window !== "undefined" ? loadMasters() : null;
+  const masters = requireMasters(input.masters, "resolveAttendanceException");
   const allowed =
     !session ||
     hasPermission(session, masters, "attendance", "approve") ||

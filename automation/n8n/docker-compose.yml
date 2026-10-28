@@ -40,6 +40,10 @@ services:
       # and Code nodes. n8n 2.x blocks that by default; this opens it for
       # this one instance, whose only users are the school's own workflows.
       N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # The Marketing Manager's "Google Ads: read" Code node signs a service-
+      # account JWT with Node's built-in crypto; allow only that one builtin.
+      # Nothing else require()s a module. Harmless when Google Ads is unset.
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
       # Executions: keep two weeks, prune nightly, save data on error only.
       EXECUTIONS_DATA_SAVE_ON_SUCCESS: all
       EXECUTIONS_DATA_SAVE_ON_ERROR: all
@@ -74,7 +78,17 @@ services:
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_DIRECTOR_CHAT_ID: ${TELEGRAM_DIRECTOR_CHAT_ID:-}
       TELEGRAM_PRINCIPAL_CHAT_ID: ${TELEGRAM_PRINCIPAL_CHAT_ID:-}
-      OFFICE_ROSTER: ${OFFICE_ROSTER:-receptionist,academic_incharge}
+      OFFICE_ROSTER: ${OFFICE_ROSTER:-receptionist,academic_incharge,marketing_manager,transport_manager}
+      # --- Google Ads (Marketing Manager; optional, empty until verification
+      #     clears and a service-account JSON key is put on the VM) ---
+      GOOGLE_ADS_CUSTOMER_ID: ${GOOGLE_ADS_CUSTOMER_ID:-}
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${GOOGLE_ADS_LOGIN_CUSTOMER_ID:-}
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${GOOGLE_ADS_DEVELOPER_TOKEN:-}
+      GOOGLE_ADS_SERVICE_ACCOUNT_JSON: ${GOOGLE_ADS_SERVICE_ACCOUNT_JSON:-}
+      GOOGLE_ADS_CLIENT_EMAIL: ${GOOGLE_ADS_CLIENT_EMAIL:-}
+      GOOGLE_ADS_PRIVATE_KEY: ${GOOGLE_ADS_PRIVATE_KEY:-}
+      GOOGLE_ADS_IMPERSONATE_EMAIL: ${GOOGLE_ADS_IMPERSONATE_EMAIL:-}
+      GOOGLE_ADS_API_VERSION: ${GOOGLE_ADS_API_VERSION:-v21}
     volumes:
       - n8n_storage:/home/node/.n8n
       # Read-only copy of this folder so `n8n import:workflow` can run

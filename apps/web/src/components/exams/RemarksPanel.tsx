@@ -15,7 +15,7 @@ import { Sparkles } from "lucide-react";
 import {
   buildReportCard,
   loadExams,
-  type ExamDeps,
+  type ExamReadDeps,
   findMarkSheet,
   saveSheetRemarks,
   type ExamPolicy,
@@ -160,7 +160,7 @@ export function RemarksPanel(props: {
       return;
     }
     // Every store once for the section, not once per child.
-    const deps: ExamDeps = {
+    const deps: ExamReadDeps = {
       state: loadExams(),
       masters: mastersRef.current,
       sis: loadSis(),
@@ -224,6 +224,7 @@ export function RemarksPanel(props: {
         classLabel,
         examTermId: previousTerm.id,
         academicYearCode: ay,
+        deps: { state: loadExams(), masters: mastersRef.current, sis: loadSis() },
       });
       prev = "error" in b ? null : b;
     }

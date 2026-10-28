@@ -505,6 +505,26 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
         const portalLabel = input.portal === "facebook" ? "Facebook" : input.portal === "whatsapp" ? "WhatsApp" : "Google Ads";
         return { text: `${portalLabel} budget for the ${unit} set to ₹${amount.toLocaleString("en-IN")} for ${monthStart.slice(0, 7)}.` };
       }
+      case "set_transport_budget": {
+        const ctx = await getServerTenantContext();
+        if (!ctx) return { text: "Could not set the transport budget right now." };
+        const channel = String(input.channel || "");
+        if (!["diesel", "maintenance", "insurance", "other"].includes(channel)) return { text: "The channel must be diesel, maintenance, insurance or other." };
+        const amount = Math.round(Number(input.amount));
+        if (!Number.isFinite(amount) || amount < 0) return { text: "Give the budget as a whole number of rupees." };
+        const mMatch = /^(\d{4})-(\d{2})$/.exec(String(input.month || "").trim());
+        const monthStart = mMatch ? `${mMatch[1]}-${mMatch[2]}-01` : `${istTodayIso().slice(0, 7)}-01`;
+        const now = new Date().toISOString();
+        // Transport is one fleet — the budget table has no unit column.
+        const { error } = await ctx.sb.from("office_transport_budget").upsert(
+          { tenant_id: ctx.tenantId, month: monthStart, channel, cap_amount: amount, currency: "INR", status: "active", decided_by: "director", decided_at: now, updated_at: now },
+          { onConflict: "tenant_id,month,channel" },
+        );
+        if (error) return { text: "Could not set the transport budget: " + error.message };
+        pending.ranAction = true;
+        const label = ({ diesel: "Diesel", maintenance: "Maintenance", insurance: "Insurance", other: "Other" } as Record<string, string>)[channel];
+        return { text: `${label} budget for the fleet set to ₹${amount.toLocaleString("en-IN")} for ${monthStart.slice(0, 7)}.` };
+      }
       case "close_task": {
         const ctx = await getServerTenantContext();
         if (!ctx) return { text: "Could not update the task right now." };

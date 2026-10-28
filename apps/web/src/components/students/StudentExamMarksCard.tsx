@@ -59,7 +59,8 @@ export function StudentExamMarksCard({ studentId }: { studentId: string }) {
           withHydrationSlot(() => ensureExamsHydrated()),
         ]);
         if (!alive) return;
-        const raw = loadSis().students.find((s) => s.id === studentId);
+        const sis = loadSis();
+        const raw = sis.students.find((s) => s.id === studentId);
         if (!raw) {
           setLoad({ kind: "missing" });
           return;
@@ -68,12 +69,14 @@ export function StudentExamMarksCard({ studentId }: { studentId: string }) {
         const ay = student.academicYearCode || "";
         const classLabel = classLabelForStudent(student, masters);
         const cards: ReportCard[] = [];
-        for (const term of listAllExamTerms(ay, loadExams())) {
+        const exams = loadExams();
+        for (const term of listAllExamTerms(ay, exams)) {
           const rc = buildReportCard({
             student,
             classLabel,
             examTermId: term.id,
             academicYearCode: ay,
+            deps: { state: exams, masters, sis },
           });
           if ("error" in rc) continue;
           // A term nobody has entered marks for is not a result. Listing it

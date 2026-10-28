@@ -4,7 +4,8 @@
  */
 
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY, type MastersState } from "@/lib/masters";
+import { MASTERS_NOT_LOADED_MESSAGE } from "@/lib/data/requireData";
 import {
   householdWhatsApp,
   loadSis,
@@ -170,7 +171,7 @@ export function ptmStateIsEmpty(state: PtmState): boolean {
 }
 
 
-export function seedPtmIfEmpty(ay?: string): PtmState {
+export function seedPtmIfEmpty(ay: string | undefined, masters: MastersState | null): PtmState {
   const existing = loadPtm();
   if (existing.events.length > 0) return existing;
   // Not a default: a made-up "Term PTM" dated today with five 10:00 slots
@@ -180,7 +181,8 @@ export function seedPtmIfEmpty(ay?: string): PtmState {
   // while the desk pruned). A school's PTM desk holds only the events its
   // office creates; only an offline, database-less dev build gets the sample.
   if (isSupabaseConfigured()) return existing;
-  const masters = loadMasters();
+  // 2.3b: the sample's classes come from the screen's Masters — none yet, no sample.
+  if (!masters) return existing;
   const classIds = masters.classes
     .filter((c) => c.isActive !== false)
     .slice(0, 3)
@@ -686,7 +688,8 @@ export function runPtmReport(
     eventId?: string;
     format: "excel" | "pdf";
     ptm?: PtmState;
-    masters?: MastersState;
+    /** The school setup (useScreenMasters). Null = not loaded: the run refuses (2.3b). */
+    masters: MastersState | null;
     students?: SisStudent[];
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
@@ -694,7 +697,8 @@ export function runPtmReport(
   const notLoaded = refuseReportBeforeLoad(reportDesksFor("ptm", id));
   if (notLoaded) return { ok: false, error: notLoaded };
   const ptm = filters.ptm ?? loadPtm();
-  const masters = filters.masters ?? loadMasters();
+  if (!filters.masters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
+  const masters: MastersState = filters.masters;
   const sis = loadSis();
   const students = filters.students ?? sis.students;
   // No event picked → the most recent one (it took whichever was stored

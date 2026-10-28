@@ -10,7 +10,8 @@ import {
   upsertRegister,
   type AttendanceStatus,
 } from "@/lib/attendance";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { type MastersState } from "@/lib/masters";
+import { MASTERS_NOT_LOADED_MESSAGE } from "@/lib/data/requireData";
 import { loadSis, type SisStudent } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import {
@@ -403,14 +404,16 @@ export function runStudentLeaveReport(
     toDate: string;
     format: "excel" | "pdf";
     leave?: StudentLeaveState;
-    masters?: MastersState;
+    /** The school setup (useScreenMasters). Null = not loaded: the run refuses (2.3b). */
+    masters: MastersState | null;
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
   // Not from a copy this page has not loaded (lib/reportDataGuard).
   const notLoaded = refuseReportBeforeLoad(reportDesksFor("student_leave", id));
   if (notLoaded) return { ok: false, error: notLoaded };
   const leave = filters.leave ?? loadStudentLeave();
-  const masters = filters.masters ?? loadMasters();
+  if (!filters.masters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
+  const masters: MastersState = filters.masters;
   const sis = loadSis();
   const note = describeFilters([
     `AY ${filters.academicYearCode}`,
