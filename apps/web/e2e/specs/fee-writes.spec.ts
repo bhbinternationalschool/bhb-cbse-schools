@@ -27,6 +27,8 @@
  *  6. Receipt number: a receipt made elsewhere (the phone counter) after this
  *     tab loaded, and a counter left behind its records — the counter screen
  *     issues max(on record) + 1, never a number in use.
+ *  7. Same instant: six /next asks at once (RECEIPT, SRN) get six distinct
+ *     consecutive numbers — the database reserves each (masters_series_claim).
  */
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -767,7 +769,42 @@ test("receipt number: after a phone receipt the tab never saw, with the counter 
   expect(errors, "no page errors").toEqual([]);
 });
 
-// ── 7. Concession template apply, all or none (data-layer 2.2f, MONEY) ────
+// ── 7. Two counters at the same instant never get one number ──────────────
+// masters_series_claim (20261027090000): /next RESERVES the number in the
+// database. Before, /next only peeked — max(counter, highest on record + 1) —
+// so two Collects at once were handed the same RCV number and the second
+// receipt's push was refused by the unique index.
+test("receipt number: counters asking at the same instant get distinct consecutive numbers, and the counter ends past them", async ({ browser }) => {
+  const a = await pageAs(browser, "principal");
+  const b = await pageAs(browser, "principal");
+  const office = await pageAs(browser, "office");
+  try {
+    const ask = (req: APIRequestContext, series: string) =>
+      req.post("/api/data/masters.number-series/next", { data: { series, ay: AY_CURRENT } }).then(async (r) => {
+        expect(r.status(), await r.text()).toBe(200);
+        return ((await r.json()) as { formatted: string }).formatted;
+      });
+    // RECEIPT: two principals' desks and the office clerk; SRN: two desks.
+    const askers: Record<string, APIRequestContext[]> = {
+      RECEIPT: [a.request, b.request, office.request, a.request, b.request, office.request],
+      SRN: [a.request, b.request, a.request, b.request, a.request, b.request],
+    };
+    for (const [series, reqs] of Object.entries(askers)) {
+      const got = await Promise.all(reqs.map((r) => ask(r, series)));
+      expect(new Set(got).size, `${series}: six asks at once, six numbers (${got.join(", ")})`).toBe(6);
+      const tails = got.map(tail).sort((x, y) => x - y);
+      expect(tails[5] - tails[0], `${series}: consecutive (${got.join(", ")})`).toBe(5);
+      const counter = Number(listOf(await mastersView(a.request), "numberSeries").find((s) => s.code === series)?.nextNumber);
+      expect(counter, `${series}: the counter is past every number handed out`).toBe(tails[5] + 1);
+    }
+  } finally {
+    await a.context().close();
+    await b.context().close();
+    await office.context().close();
+  }
+});
+
+// ── 8. Concession template apply, all or none (data-layer 2.2f, MONEY) ────
 // Fees → Bulk & PDC → Concession templates → Apply. Masters is first put in
 // the state production was in on 13 Oct 2026 (one stored class link without
 // isOptional, so the row tables refuse the next sync): the apply is refused
