@@ -2003,7 +2003,7 @@ PrincipalCockpit and StaffWorkspace follow `useMasters({enabled:false}).dataUpda
 report one. The core masters hydrate (~235 KB) is KEPT: nothing waits for it, but `reportDataGuard`, the subject-request
 approvals and its DB-desk merge are not proven unneeded — 2.3b. `StudentForm` (edit) now decides "Student not found" only
 after the SIS roster loaded (it used to rely on the gate's delay; a teacher's child profile showed "Student not found").
-Ratchets: new `hydrate_events` 23 → **0**; `ensure_hydrated_component_files` 63 → 62; `load_masters_calls_src` 341 → 340.
+Ratchets: new `hydrate_events` 23 → **0**; `ensure_hydrated_component_files` 63 → 63 (−1 gate/access copy, +1 StudentForm waits for the roster); `load_masters_calls_src` 341 → 340.
 **Proof.** New `error.spec` cases: views/staff-list 503 → "did not load" + Try again, never "Access restricted", Try again
 opens the module (office /students, teacher /attendance) — **fail on origin/main 1f19fc5d** (both: "did not load" never
 shown, the module opened). New `teacher.spec` "a teacher's own record" (class teacher + timetable-only teacher: her id in
