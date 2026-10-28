@@ -81,6 +81,15 @@ export function ModuleDashboardHost({
       // Re-read even when another screen did the loading: the first render
       // came from an empty page memory (10 Oct 2026).
       if (!gone) setMastersTick((t) => t + 1);
+      // Most dashboards count children from the SIS roster (a core desk, one
+      // shared read). Until data-layer 2.3a its landing raised
+      // 'bhb-masters-updated' (the students projection) and that redrew the
+      // dashboard; redraw once when it lands instead.
+      if (moduleId !== "students") {
+        const { ensureSisHydrated } = await import("@/lib/sisPersistence");
+        const changed = await withHydrationSlot(() => ensureSisHydrated()).catch(() => false);
+        if (changed && !gone) setMastersTick((t) => t + 1);
+      }
     })();
     return () => {
       gone = true;

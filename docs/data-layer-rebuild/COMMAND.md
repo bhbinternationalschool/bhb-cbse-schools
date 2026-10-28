@@ -1961,6 +1961,41 @@ imports `saveMasters` (scripts are left alone; it no longer runs). Production lo
 `useAccessData` (`components/shell/useAccessData.ts`, 23 consumers) on `useRbac()` +
 `useStaffList()` with the same return type. Acceptance: `counts.spec.ts` on the throttled
 375 px profile shows classes and staff within 2 s.
+*(Built 28 Oct 2026, PR #TBD.)* **What exists.** `CoreDataGate` is deleted; AppShell renders every screen inside
+`components/shell/ShellDataWait.tsx` (director's Q5): it waits for `useMasters()` (its answer is laid on the page copy by
+the 2.1 bridge before the query resolves, so the synchronous `loadMasters()` readers see the book) and — at most 5 s, never
+blocking on failure — for the rbac and staff PAGE copies, which the lib/ save checks (`rbacGuard.assertModulePermission`)
+still read until 2.3b; a failed masters read is `<QueryError>` "Could not load the school's classes, subjects and staff" +
+Try again. `useAccessData` is rebuilt on `useRbac()` + `useStaffList()` (same return type; rules in
+`lib/data/client/accessCopy.ts`: `ready` only when BOTH answered, a read failed without an answer = `failed`, never ready
+with an empty roster; `masters` = the empty shell + staff/departments/designations from the staff list; rbac normalised as
+`loadRbac` did). `useStableAccessCopy({enabled})` joins the access copy with `useMasters({enabled})` for the header chat and
+AI assistant (`enabled: open`); `UniversalSearchBar` reads no classes/sections and stays on `useAccessData`.
+`useScreenMasters` takes the students projection from the page copy, re-read with each answer. AppShell is wrapped in the
+query provider; its academic years and session alignment, and `SessionSelector`, read `useAcademicYears()` (on
+`useMasters`); `SchoolFavicon` re-applies on each masters answer. Events deleted, dispatchers and listeners:
+`bhb-masters-updated` (CoreDataGate, mastersPersistence, sis projection, staffPersistence; AppShell, SessionSelector,
+SchoolFavicon, ModuleDashboardHost, PrincipalCockpit, StaffWorkspace, useAccessData), `bhb-rbac-updated` (rbacPersistence;
+useAccessData), `bhb-desk-first-hydrated` (deskHydrateGuard; useAccessData, useClientMetrics). ModuleDashboardHost,
+PrincipalCockpit and StaffWorkspace follow `useMasters({enabled:false}).dataUpdatedAt` instead (no request of their own).
+`desk-hydrate` is re-emitted by the query kernel (`lib/data/client/viewLoadMetric.ts`): first answer per read name
+("masters", "staff-list", "rbac", …) per page, on the route's page-ready clock; the replica desks (sis, fees, …) no longer
+report one. The core masters hydrate (~235 KB) is KEPT: nothing waits for it, but `reportDataGuard`, the subject-request
+approvals and its DB-desk merge are not proven unneeded — 2.3b. `StudentForm` (edit) now decides "Student not found" only
+after the SIS roster loaded (it used to rely on the gate's delay; a teacher's child profile showed "Student not found").
+Ratchets: new `hydrate_events` 23 → **0**; `ensure_hydrated_component_files` 63 → 62; `load_masters_calls_src` 341 → 340.
+**Proof.** New `error.spec` cases: views/staff-list 503 → "did not load" + Try again, never "Access restricted", Try again
+opens the module (office /students, teacher /attendance) — **fail on origin/main 1f19fc5d** (both: "did not load" never
+shown, the module opened). New `teacher.spec` "a teacher's own record" (class teacher + timetable-only teacher: her id in
+the staff list, account menu links /staff/<id>/edit) — passes on old and new. New `counts.spec` phone gate: classes and
+staff within 2 s on `phone-375-cpu4x`. Self-tests `test:access-copy` and `test:view-load-metric` (each mutation-checked).
+Updated for the new shell (the old expectations assumed CoreDataGate): masters-desk 503 cases in `error`/`teacher` now
+prove the school is drawn from the view while masters-desk fails; `teacher` header-WhatsApp (/my-pay asks the view once,
+the shell's); `kernel`, `admissions-comms`, `masters-exams-reports` (shell error / module gate first), `staff-editor-writes`
+("roster never answers" = the staff-list view).
+**Not done / not proven.** See the PR body: the 2 s phone gate is not met on every page (Mac: /students?tab=register
+2.2–2.9 s, timetable 1.1–2.3 s under load; CI's runner took ~4 s on every page on main), screens that read a replica desk
+once at mount may now mount before it lands (only StudentForm was found and fixed).
 
 **2.3b Delete the four core hydrate tasks and the bridge.** Gated on the all-of-src
 `loadMasters(` occurrence ratchet reaching 0 (the 107 `lib/` readers converted to take `masters`
