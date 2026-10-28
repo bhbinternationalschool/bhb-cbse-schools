@@ -171,6 +171,7 @@ export function buildSystemPrompt(opts: {
     "- Answer questions about collections, dues, attendance, defaulters, students, staff, admissions — call ask_erp for free-form questions, or the specific tools (school_snapshot, defaulters, student_lookup, staff_lookup) when they fit.",
     "- Produce a report as a file with the report tool (collection, attendance, defaulters, daily_brief, fleet).",
     "- Open, create, close or snooze office tasks (list_tasks, create_task, close_task, snooze_task).",
+    "- Set the monthly advertising budget when the director gives figures (set_marketing_budget). The Marketing Manager asks for the budget each month for Google Ads, Facebook and WhatsApp, for the school and the ITI; when the director replies with amounts, record each one and then confirm, in one line, exactly what you set (portal, unit, month, amount). If a portal or unit is not clear, ask — do not guess an amount.",
     "",
     "SENDING — gated, never automatic:",
     "- Any message to a parent, a class, the whole school, or a staff member is OUTWARD. You NEVER send it. You call a draft tool (draft_notice, draft_fee_reminder, draft_parent_message, draft_staff_message), which prepares it for the director's approval. The director approves with a tap before anything goes out.",
@@ -216,8 +217,8 @@ export const DRAFT_TOOLS = new Set([
   "draft_parent_message",
   "draft_staff_message",
 ]);
-/** Tools that perform a task write (office_tasks). */
-export const ACTION_TOOLS = new Set(["create_task", "close_task", "snooze_task"]);
+/** Tools that perform a task write (office_tasks) or a budget write. */
+export const ACTION_TOOLS = new Set(["create_task", "close_task", "snooze_task", "set_marketing_budget"]);
 
 export const OFFICE_ASSISTANT_TOOLS: ToolSpec[] = [
   tool(
@@ -310,6 +311,17 @@ export const OFFICE_ASSISTANT_TOOLS: ToolSpec[] = [
       due_on: { type: ["string", "null"], description: "YYYY-MM-DD, or null." },
     },
     ["to_role", "title"],
+  ),
+  tool(
+    "set_marketing_budget",
+    "Set or update the monthly advertising budget for one portal, for the school or the ITI. Use this to answer the Marketing Manager's monthly budget ask — the director gives the figures and you record them. portal is 'google_ads', 'facebook' (Meta / Instagram) or 'whatsapp'. unit is 'school' or 'iti'. amount is the whole-month cap in rupees. month is YYYY-MM; omit for the current month. Call it once per portal × unit the director names.",
+    {
+      portal: { type: "string", enum: ["google_ads", "facebook", "whatsapp"], description: "Which advertising portal." },
+      unit: { type: "string", enum: ["school", "iti"], description: "Which unit the budget is for." },
+      amount: { type: "integer", description: "Monthly budget cap in rupees (whole number)." },
+      month: { type: ["string", "null"], description: "YYYY-MM, e.g. '2026-11'. Omit/null for this month." },
+    },
+    ["portal", "unit", "amount"],
   ),
   tool("close_task", "Mark an open office task done.", { id: { type: "integer" } }, ["id"]),
   tool("snooze_task", "Snooze an open office task to tomorrow.", { id: { type: "integer" } }, ["id"]),
