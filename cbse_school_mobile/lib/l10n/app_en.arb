@@ -2699,5 +2699,16 @@
     }
   },
   "cmFamiliesNotLoaded": "Families per class not loaded — the check below counts them.",
-  "cmNoneReachable": "No family in these classes can be reached on WhatsApp — nothing would be sent."
+  "cmNoneReachable": "No family in these classes can be reached on WhatsApp — nothing would be sent.",
+  "markEntryRangeHint": "{who}: enter 0–{max} or leave blank for absent",
+  "@markEntryRangeHint": {
+    "placeholders": {
+      "who": {
+        "type": "String"
+      },
+      "max": {
+        "type": "String"
+      }
+    }
+  }
 }
