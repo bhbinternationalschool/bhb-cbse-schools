@@ -743,7 +743,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.SUPABASE_URL }}/rest/v1/office_tasks?tenant_id=eq.{{ $env.OFFICE_TENANT_ID }}&approval_state=eq.pending&source=eq.receptionist&status=eq.open&select=*&order=created_at.asc&limit=50",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/office_tasks?tenant_id=eq.{{ $env.OFFICE_TENANT_ID }}&approval_state=eq.pending&source=in.(receptionist,assistant)&status=eq.open&select=*&order=created_at.asc&limit=50",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

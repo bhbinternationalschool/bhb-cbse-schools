@@ -527,6 +527,15 @@ function switchOn(wf, name, field, values) {
 
 const TENANT = "{{ $env.OFFICE_TENANT_ID }}";
 
+/* Headers for the ERP director-assistant endpoint (/api/office/assistant).
+ * Both secrets are sent: the ERP accepts a dedicated OFFICE_ASSISTANT_SECRET
+ * or the existing WA_DISPATCH_SECRET, so the relay works whichever is set. */
+const ASSIST_HEADERS = [
+  { name: "x-office-assistant-secret", value: "={{ $env.OFFICE_ASSISTANT_SECRET || $env.WA_DISPATCH_SECRET }}" },
+  { name: "x-wa-dispatch-secret", value: "={{ $env.WA_DISPATCH_SECRET }}" },
+  { name: "Content-Type", value: "application/json" },
+];
+
 /** One Telegram Bot API call per item: `{ tg_method, tg }` → POST. */
 function tgCall(wf, name, extra = {}) {
   return wf.add(
@@ -810,7 +819,7 @@ return { json: { row } };
     wf,
     "Fetch: pending drafts",
     "office_tasks",
-    `tenant_id=eq.${TENANT}&approval_state=eq.pending&source=eq.receptionist&status=eq.open&select=*&order=created_at.asc&limit=50`,
+    `tenant_id=eq.${TENANT}&approval_state=eq.pending&source=in.(receptionist,assistant)&status=eq.open&select=*&order=created_at.asc&limit=50`,
   );
   const collect = code(
     wf,
@@ -1377,8 +1386,10 @@ if (!updates.length) return [];
 const st = $getWorkflowStaticData('global');
 st.tg_offset = Math.max(...updates.map((u) => Number(u.update_id || 0))) + 1;
 // (?![a-z]) instead of \\b: JS word boundaries are ASCII-only, so Devanagari words never matched.
-const APPROVE = /^\\s*\\/?(approve|approved|ok|okay|yes|send|haan|ha|हाँ|हां|ठीक|भेज)(?![a-z])[^0-9]*#?\\s*(\\d+)?/i;
-const REJECT = /^\\s*\\/?(reject|rejected|no|cancel|nahi|nahin|नहीं|रद्द)(?![a-z])[^0-9]*#?\\s*(\\d+)?/i;
+// End-anchored: a BARE approve/reject word (optionally a draft number) is a
+// decision; anything longer is a free-form instruction for the assistant.
+const APPROVE = /^\\s*\\/?(approve|approved|ok|okay|yes|haan|ha|हाँ|हां|ठीक)\\s*#?\\s*(\\d+)?\\s*$/i;
+const REJECT = /^\\s*\\/?(reject|rejected|cancel|nahi|nahin|नहीं|रद्द)\\s*#?\\s*(\\d+)?\\s*$/i;
 const COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan' };
 const out = [];
 for (const u of updates) {
@@ -1423,7 +1434,12 @@ for (const u of updates) {
   }
   let decision = null; let m = text.match(APPROVE);
   if (m) decision = 'approve'; else { m = text.match(REJECT); if (m) decision = 'reject'; }
-  if (!decision) continue;
+  if (!decision) {
+    // Any other message from the director is a free-form instruction for the
+    // office assistant (ERP /api/office/assistant). Non-director chatter is ignored.
+    if (role === 'director') out.push({ json: { kind: 'assistant', text, ...base } });
+    continue;
+  }
   if (role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
   out.push({ json: { kind: 'decision', decision, task_id: m[2] ? Number(m[2]) : null, via: 'text', ...base } });
 }
@@ -1431,7 +1447,7 @@ return out;
 `,
   );
   wf.chain(tick, buildPoll, poll, parse);
-  const kind = switchOn(wf, "Switch: update kind", "kind", ["decision", "command", "taskaction"]);
+  const kind = switchOn(wf, "Switch: update kind", "kind", ["decision", "command", "taskaction", "assistant"]);
   wf.link(parse, kind);
 
   /* ── decisions ── */
@@ -1439,7 +1455,7 @@ return out;
     wf,
     "Fetch: pending drafts",
     "office_tasks",
-    `tenant_id=eq.${TENANT}&approval_state=eq.pending&source=eq.receptionist&status=eq.open&select=*&order=created_at.asc&limit=50`,
+    `tenant_id=eq.${TENANT}&approval_state=eq.pending&source=in.(receptionist,assistant)&status=eq.open&select=*&order=created_at.asc&limit=50`,
   );
   wf.link(kind, pending, 0);
   const match = code(
@@ -1480,7 +1496,12 @@ return out;
       options: {},
     },
   );
-  wf.link(decSwitch, gmailReply, 0);
+  // Approve splits by the draft's source. A Receptionist draft is a Gmail
+  // reply (as before). An assistant draft is actually SENT by the ERP, which
+  // owns WhatsApp dispatch and the Meta-template rules — the bot stays thin.
+  const apSrc = switchOn(wf, "Switch: approve source", "task.source", ["receptionist", "assistant"]);
+  wf.link(decSwitch, apSrc, 0);
+  wf.link(apSrc, gmailReply, 0);
   const patchApproved = code(
     wf,
     "Build: approved patch",
@@ -1495,6 +1516,44 @@ return { json: { ...d, task_id: d.task.id, patch: { approval_state: 'approved', 
     { each: true },
   );
   wf.link(gmailReply, patchApproved);
+  // Assistant draft on approve → the ERP performs the real send (wa/dispatch).
+  const erpApproveSend = wf.add(
+    "ERP: approve send",
+    "n8n-nodes-base.httpRequest",
+    4.2,
+    {
+      method: "POST",
+      url: "={{ $env.ERP_BASE_URL }}/api/office/assistant",
+      sendHeaders: true,
+      headerParameters: { parameters: ASSIST_HEADERS },
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody: "={{ JSON.stringify({ chat_id: $json.chat_id, action: { kind: 'approve_draft', draft: ($json.task.payload || {}).assistant_draft } }) }}",
+      options: { timeout: 120000 },
+    },
+    { onError: "continueRegularOutput", alwaysOutputData: true },
+  );
+  wf.link(apSrc, erpApproveSend, 1);
+  const patchApprovedAssistant = code(
+    wf,
+    "Build: assistant approved patch",
+    `
+const d = $('Match: decisions').item.json;
+const res = $input.item.json || {};
+const now = new Date().toISOString();
+// The ERP returns { kind:'action_done', text } once the send has run. Only
+// then is the draft closed; if the office was unreachable it stays pending.
+if (res.kind === 'action_done') {
+  return { json: { ...d, task_id: d.task.id, patch: { approval_state: 'approved', status: 'done', decided_by: 'director', decided_at: now, updated_at: now,
+    payload: { ...d.task.payload, decision_reply: 'telegram ' + d.via, sent_at: now, send_result: String(res.text || '') } },
+    ack: '✅ ' + String(res.text || 'Sent.') } };
+}
+return { json: { ...d, task_id: d.task.id, patch: { updated_at: now, payload: { ...d.task.payload, last_error: 'send unreachable ' + now } },
+  ack: '⚠️ Could not reach the office to send draft #' + d.task.id + '. It is still waiting — tap Approve again.' } };
+`,
+    { each: true },
+  );
+  wf.link(erpApproveSend, patchApprovedAssistant);
   const patchRejected = code(
     wf,
     "Build: rejected patch",
@@ -1510,6 +1569,7 @@ return { json: { ...d, task_id: d.task.id, patch: { approval_state: 'rejected', 
   wf.link(decSwitch, patchRejected, 1);
   const patch = sbPatchTask(wf, "Patch: task decided");
   wf.link(patchApproved, patch);
+  wf.link(patchApprovedAssistant, patch);
   wf.link(patchRejected, patch);
   const noDecision = code(
     wf,
@@ -1527,7 +1587,7 @@ return { json: { ...$input.item.json, patched: false } };
 // Answer the tap, edit the draft message so the decision shows under it
 // (the keyboard goes away), or reply to a typed decision.
 const built = [];
-for (const name of ['Build: approved patch', 'Build: rejected patch', 'Build: no decision']) {
+for (const name of ['Build: approved patch', 'Build: assistant approved patch', 'Build: rejected patch', 'Build: no decision']) {
   try { for (const x of $(name).all()) built.push(x.json); } catch (e) { /* branch did not run */ }
 }
 const out = [];
@@ -1685,6 +1745,139 @@ return out;
   );
   wf.link(kind, applyTaskActions, 2);
   wf.link(applyTaskActions, reply);
+
+  /* ── assistant: any other director message → the ERP office brain ──
+     The bot is a thin relay: it POSTs the text to /api/office/assistant and
+     renders the reply. 'answer'/'action_done'/'error' → a text message;
+     'file' → a Telegram document; 'draft' → a pending office_tasks row plus
+     an Approve/Reject message (whose tap flows through the decision path
+     above, where an assistant draft is sent by the ERP). */
+  const assistReq = code(
+    wf,
+    "Build: assistant request",
+    `
+const asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'assistant');
+return asks.map((a) => ({ json: { chat_id: a.chat_id,
+  assist: { text: a.text, chat_id: a.chat_id, locale: /[\\u0900-\\u097F]/.test(a.text || '') ? 'hi' : 'en' } } }));
+`,
+  );
+  wf.link(kind, assistReq, 3);
+  const erpAssist = wf.add(
+    "ERP: assistant",
+    "n8n-nodes-base.httpRequest",
+    4.2,
+    {
+      method: "POST",
+      url: "={{ $env.ERP_BASE_URL }}/api/office/assistant",
+      sendHeaders: true,
+      headerParameters: { parameters: ASSIST_HEADERS },
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody: "={{ JSON.stringify($json.assist) }}",
+      options: { timeout: 120000 },
+    },
+    { onError: "continueRegularOutput", alwaysOutputData: true },
+  );
+  wf.link(assistReq, erpAssist);
+  const routeAssist = code(
+    wf,
+    "Route: assistant reply",
+    `${JS_TG}
+// One ERP response per asked message (paired by order). Classify each into a
+// text reply, a document to send, or a draft to store + offer for approval.
+const reqs = $('Build: assistant request').all().map((i) => i.json);
+const items = $input.all();
+const out = [];
+for (let i = 0; i < items.length; i++) {
+  const r = (items[i] && items[i].json) || {};
+  const chat_id = (reqs[i] && reqs[i].chat_id) || r.chat_id || TG_CHATS.director;
+  const kind = String(r.kind || '');
+  if (!kind) {
+    out.push({ json: { _route: 'text', chat_id, tg_method: 'sendMessage', tg: { chat_id, text: 'The office assistant could not be reached just now. Please try again in a moment.', parse_mode: 'HTML', disable_web_page_preview: true } } });
+    continue;
+  }
+  if (kind === 'file' && (r.fileBase64 || r.fileUrl)) {
+    if (r.fileBase64) {
+      out.push({ json: { _route: 'file', chat_id, caption: String(r.caption || '').slice(0, 1000) },
+        binary: { data: { data: r.fileBase64, mimeType: r.mime || 'application/pdf', fileName: r.filename || 'report.pdf' } } });
+    } else {
+      out.push({ json: { _route: 'text', chat_id, tg_method: 'sendDocument', tg: { chat_id, document: r.fileUrl, caption: String(r.caption || '').slice(0, 1000) } } });
+    }
+    continue;
+  }
+  if (kind === 'draft' && r.draft) {
+    const summary = String(r.summary || (r.draft && r.draft.recipientLabel) || 'Draft');
+    out.push({ json: { _route: 'draft', chat_id, draft: r.draft, summary,
+      row: { tenant_id: $env.OFFICE_TENANT_ID, from_role: 'director', to_role: 'director',
+        title: summary.slice(0, 80), detail: String(r.draft.body || '').slice(0, 600),
+        status: 'open', source: 'assistant', approval_state: 'pending',
+        payload: { assistant_draft: r.draft, summary, kind: 'assistant_draft' } } } });
+    continue;
+  }
+  const text = String(r.text || 'Done.');
+  for (const chunk of tgChunks(tgEscape(text))) {
+    out.push({ json: { _route: 'text', chat_id, tg_method: 'sendMessage', tg: { chat_id, text: chunk, parse_mode: 'HTML', disable_web_page_preview: true } } });
+  }
+}
+return out;
+`,
+  );
+  wf.link(erpAssist, routeAssist);
+  const assistRoute = switchOn(wf, "Switch: assistant route", "_route", ["text", "file", "draft"]);
+  wf.link(routeAssist, assistRoute);
+  // text → the shared reply sender (sendMessage / editMessageText etc.)
+  wf.link(assistRoute, reply, 0);
+  // file → sendDocument (multipart with the PDF as binary)
+  const sendDoc = wf.add(
+    "Telegram: sendDocument",
+    "n8n-nodes-base.httpRequest",
+    4.2,
+    {
+      method: "POST",
+      url: "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/sendDocument' }}",
+      sendBody: true,
+      contentType: "multipart-form-data",
+      bodyParameters: {
+        parameters: [
+          { name: "chat_id", value: "={{ $json.chat_id }}" },
+          { name: "caption", value: "={{ $json.caption }}" },
+          { parameterType: "formBinaryData", name: "document", inputDataFieldName: "data" },
+        ],
+      },
+      options: { timeout: 120000 },
+    },
+    { onError: "continueRegularOutput" },
+  );
+  wf.link(assistRoute, sendDoc, 1);
+  // draft → store a pending office_tasks row, then offer Approve / Reject
+  const insertDraft = sbInsert(wf, "Insert: assistant draft", "office_tasks", "row", { alwaysOutputData: true });
+  wf.link(assistRoute, insertDraft, 2);
+  const draftMsg = code(
+    wf,
+    "Build: draft approval",
+    `${JS_TG}
+// The insert returns the created rows (return=representation); pair each with
+// its draft (same order) and send the body with Approve/Reject buttons whose
+// callback_data is approve:<id> / reject:<id> — the decision path acts on it.
+const rows = $input.all().map((i) => i.json).filter((r) => r && r.id);
+const asks = $('Route: assistant reply').all().map((i) => i.json).filter((r) => r._route === 'draft');
+const out = [];
+for (let i = 0; i < rows.length; i++) {
+  const id = rows[i].id;
+  const a = asks[i] || {};
+  const d = a.draft || {};
+  const chat_id = a.chat_id || TG_CHATS.director;
+  const to = d.recipientLabel ? ('\\n<i>To: ' + tgEscape(d.recipientLabel) + (d.recipient && d.recipient.count ? ' (' + d.recipient.count + ')' : '') + '</i>') : '';
+  const head = '✍️ <b>Draft for approval</b>\\n' + tgEscape(a.summary || d.recipientLabel || '') + to;
+  const text = tgChunks(head + '\\n\\n' + tgEscape(String(d.body || ''))).slice(-1)[0];
+  out.push({ json: { tg_method: 'sendMessage', tg: { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: [[{ text: '✅ Approve', callback_data: 'approve:' + id }, { text: '❌ Reject', callback_data: 'reject:' + id }]] } } } });
+}
+return out;
+`,
+  );
+  wf.link(insertDraft, draftMsg);
+  wf.link(draftMsg, reply);
   return wf;
 }
 
