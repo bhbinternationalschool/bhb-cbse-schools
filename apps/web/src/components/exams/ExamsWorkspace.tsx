@@ -48,7 +48,7 @@ import {
   type ClassResultRow,
   type CoScholasticDomain,
   type CoScholasticRating,
-  type ExamDeps,
+  type ExamReadDeps,
   type ExamPolicy,
   type ExamSubject,
   type ExamTerm,
@@ -778,12 +778,13 @@ export function ExamsWorkspace() {
   }, [tick]);
 
   /** Stores already in hand, for the readers that loop over students. */
-  const examDeps = useMemo<ExamDeps>(
-    () => ({
-      state: exams,
-      masters: masters ?? undefined,
-      sis: sis ?? undefined,
-    }),
+  /**
+   * Stores in hand for the readers. Null until Masters AND the register have
+   * loaded (2.3b): the readers refuse without them, and the tabs that need
+   * them say "Loading…" rather than "no subjects".
+   */
+  const examDeps = useMemo<ExamReadDeps | null>(
+    () => (masters && sis ? { state: exams, masters, sis } : null),
     [exams, masters, sis],
   );
 
@@ -837,7 +838,7 @@ export function ExamsWorkspace() {
   }, [sis, sectionId, classId, ay, tick]);
 
   const subjects = useMemo(() => {
-    if (!classId) return [];
+    if (!classId || !examDeps) return [];
     const all = subjectsForMarkEntry(classId, roster, exams, examDeps);
     if (!teacherMode) return all;
     // A subject teacher enters marks for their own subjects; the class
@@ -894,7 +895,7 @@ export function ExamsWorkspace() {
   /** studentId → exam-subject ids on that child's curriculum, resolved once
    * for the section. The grid, setMark and onSave all read this. */
   const takesBy = useMemo(
-    () => subjectTakeMap(roster, subjects, exams, examDeps),
+    () => (examDeps ? subjectTakeMap(roster, subjects, exams, examDeps) : new Map<string, Set<string>>()),
     [roster, subjects, exams, examDeps],
   );
 
@@ -1150,6 +1151,10 @@ export function ExamsWorkspace() {
       setError("Select exam, class and section");
       return;
     }
+    if (!examDeps) {
+      setError("The school setup is still loading — try again in a moment");
+      return;
+    }
     // Drop marks for subjects the student does not take
     const marks = grid.map((m) => {
       if (absentCells.has(absenceKey(m.studentId, m.subjectId))) {
@@ -1174,7 +1179,7 @@ export function ExamsWorkspace() {
       }),
       enteredBy: session.fullName,
       lock,
-    });
+    }, examDeps);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -1240,6 +1245,10 @@ export function ExamsWorkspace() {
 
   function openReport(studentId: string) {
     setError(null);
+    if (!examDeps) {
+      setError("The school setup is still loading — try again in a moment");
+      return;
+    }
     const st = sis?.students.find((s) => s.id === studentId);
     if (!st || !examTermId) {
       setError("Pick exam and student");
@@ -1524,7 +1533,7 @@ export function ExamsWorkspace() {
 
   const classResult = useMemo(() => {
     void tick;
-    if (tab !== "results" || !examTermId || !classId || !sectionId) {
+    if (tab !== "results" || !examTermId || !classId || !sectionId || !examDeps) {
       return null;
     }
     const built = buildClassResultSheet({
@@ -1581,6 +1590,10 @@ export function ExamsWorkspace() {
       setError("Select exam, class and section");
       return;
     }
+    if (!examDeps) {
+      setError("The school setup is still loading — try again in a moment");
+      return;
+    }
     const result = suggestPromotionsForSection({
       students: roster,
       classLabel,
@@ -1589,6 +1602,7 @@ export function ExamsWorkspace() {
       examTermId,
       academicYearCode: ay,
       decidedBy: session.fullName,
+      deps: examDeps,
     });
     if (!result.ok) {
       setError(result.error);
@@ -1639,10 +1653,15 @@ export function ExamsWorkspace() {
     ) {
       return;
     }
+    if (!masters) {
+      setError("The school setup is still loading — try again in a moment");
+      return;
+    }
     const result = applyPromotionsToSis({
       examTermId,
       sectionId,
       academicYearCode: ay,
+      masters,
     });
     if (!result.ok) {
       setError(result.error);
@@ -3014,6 +3033,8 @@ export function ExamsWorkspace() {
               Select exam, class and section. Use Annual / Half-yearly for
               promotion decisions (aggregates apply when enabled in policy).
             </p>
+          ) : !examDeps ? (
+            <p className="text-sm text-[var(--muted)]">Loading…</p>
           ) : classResult && "error" in classResult ? (
             <p className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm text-[var(--danger)]">
               {classResult.error}

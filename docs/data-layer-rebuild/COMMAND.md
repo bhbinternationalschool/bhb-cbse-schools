@@ -2074,6 +2074,17 @@ as a parameter from the hook, or to server code). Then delete the `masters`, `st
 2.1 bridge. Acceptance: the `ensure*Hydrated` component ratchet falls by 4; `counts` and
 `propagation` green.
 
+*(2.3b-2 academics built 28 Oct 2026, PR #732.)* `exams.ts`, `attendance.ts`, `homework.ts`, `ptm.ts`,
+`ptmBook.server.ts`, `studentLeave.ts`, the timetable / teaching / exam report catalogs, `admitCardPdf.ts`
+and `classUpgrade.ts` take `masters` as data (exams readers also the register: `ExamReadDeps`);
+`lib/data/requireData.ts` (`requireMasters`/`requireSis` → `DataNotLoadedError`) refuses a reader handed
+nothing; report runners answer `MASTERS_NOT_LOADED_MESSAGE` for `masters: null`. Server callers
+(`api/v1/staff/exams/{sheet,marks}`, PTM booking) use `loadServerMasters()`. `load_masters_calls_src`
+341 → 318, `load_sis_calls_src` 419 → 418. Proof: `academicsMastersAsData.selftest.ts` — 20 of 23
+cases fail on the old lib (old answered `[]`, `null`, "0 rows", 30 rows from the default book).
+**Not done.** `loadSis()` in these files' other readers (3.4) and in the two writers; the date sheet's
+"Add day" on an EMPTY sheet opens an editor that never renders (pre-existing, seen while checking).
+
 ### Phase 3 — Students: removes S2 and most of S4
 
 **3.0 Exports for the non-browser callers first.** 39 files authenticate with

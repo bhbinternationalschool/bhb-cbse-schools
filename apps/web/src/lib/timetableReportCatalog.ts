@@ -12,7 +12,8 @@ import {
   exportFilterReport,
   type ReportColumn,
 } from "@/lib/reportExport";
-import { currentAcademicYearCode, loadMasters, type MastersState } from "@/lib/masters";
+import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import { MASTERS_NOT_LOADED_MESSAGE } from "@/lib/data/requireData";
 import { TENANT } from "@/lib/types";
 import {
   WEEKDAY_SHORT,
@@ -79,7 +80,8 @@ export type TimetableReportFilters = {
   fromDate?: string;
   toDate?: string;
   format: TimetableReportFormat;
-  masters?: MastersState;
+  /** The school setup (useScreenMasters). Null = not loaded: the run refuses (2.3b). */
+  masters: MastersState | null;
   timetable?: TimetableState;
 };
 
@@ -337,7 +339,8 @@ export function runTimetableReport(
   // Not from a copy this page has not loaded (lib/reportDataGuard).
   const notLoaded = refuseReportBeforeLoad(reportDesksFor("timetable", id));
   if (notLoaded) return { ok: false, error: notLoaded };
-  const masters = filters.masters ?? loadMasters();
+  const masters = filters.masters;
+  if (!masters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
   const tt = filters.timetable ?? loadTimetable();
   const ay = filters.academicYearCode || currentAcademicYearCode(masters);
   const def = TIMETABLE_REPORTS.find((r) => r.id === id);

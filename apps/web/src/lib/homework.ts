@@ -5,7 +5,8 @@
 
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { assertModulePermission } from "@/lib/rbacGuard";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY, type MastersState } from "@/lib/masters";
+import { MASTERS_NOT_LOADED_MESSAGE } from "@/lib/data/requireData";
 import {
   householdWhatsApp,
   loadSis,
@@ -314,7 +315,7 @@ export function homeworkStateIsEmpty(state: HomeworkState): boolean {
 
 
 /** Seed one sample post + diary when empty (demo). */
-export function seedHomeworkIfEmpty(ay?: string): HomeworkState {
+export function seedHomeworkIfEmpty(ay: string | undefined, masters: MastersState | null): HomeworkState {
   const existing = loadHomework();
   if (existing.posts.length > 0 || existing.diary.length > 0) return existing;
   // Not a default: made-up rows that this used to save to the live desk
@@ -322,7 +323,8 @@ export function seedHomeworkIfEmpty(ay?: string): HomeworkState {
   // post under a real teacher's name reached parents). A school's desk holds
   // only what its staff create; only the offline dev build gets the sample.
   if (isSupabaseConfigured()) return existing;
-  const masters = loadMasters();
+  // 2.3b: the sample's section comes from the screen's Masters — none yet, no sample.
+  if (!masters) return existing;
   const section = masters.sections.find((s) => s.isActive !== false);
   const subject = (masters.subjects ?? []).find(
     (s) => s.isActive !== false && !s.parentId,
@@ -1060,7 +1062,8 @@ export function runHomeworkReport(
     toDate: string;
     format: HomeworkReportFormat;
     homework?: HomeworkState;
-    masters?: MastersState;
+    /** The school setup (useScreenMasters). Null = not loaded: the run refuses (2.3b). */
+    masters: MastersState | null;
     sis?: SisState;
     /**
      * "classId|sectionId" keys a teacher may report on. Absent = the whole
@@ -1085,7 +1088,8 @@ export function runHomeworkReport(
         diary: rawHw.diary.filter((d) => inScope(d.classId, d.sectionId)),
       }
     : rawHw;
-  const rawMasters = filters.masters ?? loadMasters();
+  const rawMasters = filters.masters;
+  if (!rawMasters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
   const masters: MastersState = keys
     ? {
         ...rawMasters,

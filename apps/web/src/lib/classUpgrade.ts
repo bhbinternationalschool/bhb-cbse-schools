@@ -3,12 +3,12 @@
  */
 
 import {
-  loadMasters,
   resolveFeeGroupId,
   sortClassIdsByClassBand,
   type FeeStudentType,
   type MastersState,
 } from "@/lib/masters";
+import { requireMasters } from "@/lib/data/requireData";
 import {
   loadSis,
   normalizeClassUpgrade,
@@ -64,7 +64,8 @@ export type UpgradeClassInput = {
   resetCurriculum?: boolean;
   /** Bypass the promotion lock (upward moves are blocked when locked). */
   override?: boolean;
-  masters?: MastersState;
+  /** The school setup (useScreenMasters) — target class/section, fee group (2.3b). */
+  masters: MastersState;
 };
 
 export function upgradeStudentClass(
@@ -72,7 +73,8 @@ export function upgradeStudentClass(
 ):
   | { ok: true; state: SisState; record: ClassUpgradeRecord; student: SisStudent }
   | { ok: false; error: string } {
-  const masters = input.masters ?? loadMasters();
+  const masters = requireMasters(input.masters, "upgradeStudentClass");
+  // A writer: it rewrites the tab's register copy, so it starts from that copy.
   const sis = loadSis();
   const idx = sis.students.findIndex((s) => s.id === input.studentId);
   if (idx < 0) return { ok: false, error: "Student not found" };

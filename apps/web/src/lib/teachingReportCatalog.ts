@@ -12,7 +12,8 @@
  */
 
 import { exportFilterReport, type ReportColumn } from "@/lib/reportExport";
-import { currentAcademicYearCode, loadMasters, type MastersState } from "@/lib/masters";
+import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import { MASTERS_NOT_LOADED_MESSAGE } from "@/lib/data/requireData";
 import {
   computeDelivery,
   computeSyllabusProgress,
@@ -62,7 +63,8 @@ export type TeachingReportFilters = {
   /** Limit period delivery to one teacher (a teacher sees their own). */
   staffId?: string;
   format: TeachingReportFormat;
-  masters?: MastersState;
+  /** The school setup (useScreenMasters). Null = not loaded: the run refuses (2.3b). */
+  masters: MastersState | null;
   teaching?: TeachingState;
   timetable?: TimetableState;
 };
@@ -101,7 +103,8 @@ export function runTeachingReport(
   const notLoaded = refuseReportBeforeLoad(reportDesksFor("teaching", id));
   if (notLoaded) return { ok: false, error: notLoaded };
 
-  const masters = filters.masters ?? loadMasters();
+  const masters = filters.masters;
+  if (!masters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
   const state = filters.teaching ?? loadTeaching();
   const ay = filters.academicYearCode || currentAcademicYearCode(masters);
   const def = TEACHING_REPORTS.find((r) => r.id === id);

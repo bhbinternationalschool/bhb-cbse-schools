@@ -229,7 +229,7 @@ export function HomeworkWorkspace() {
 
   function refresh() {
     setSis(loadSis());
-    setState(seedHomeworkIfEmpty(ay));
+    setState(seedHomeworkIfEmpty(ay, masters));
   }
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
-import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
+import { assertPermission, loadServerMasters, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureExamsHydratedServer } from "@/lib/examsPersistence";
@@ -70,7 +70,9 @@ export async function GET(request: Request) {
 
     // Only the subjects this teacher teaches here (a class teacher sees all).
     const scheme = schemeForClassId(classId, getExamPolicy(state));
-    const subjects = subjectsForMarkEntry(classId, students, state)
+    // 2.3b: the school setup from the server's reference cache (503 when unread).
+    const masters = await loadServerMasters();
+    const subjects = subjectsForMarkEntry(classId, students, state, { masters, sis })
       .filter((s) => scopeAllowsSubjectCode(scope, classId, sectionId, s.code))
       .map((s) => ({
       id: s.id,

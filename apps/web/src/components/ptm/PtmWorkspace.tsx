@@ -268,7 +268,7 @@ export function PtmWorkspace() {
       return;
     }
     setSis(loadSis());
-    const ptm = seedPtmIfEmpty(ay);
+    const ptm = seedPtmIfEmpty(ay, masters);
     setState(ptm);
     if (!eventId && ptm.events[0]) setEventId(ptm.events[0].id);
   }
