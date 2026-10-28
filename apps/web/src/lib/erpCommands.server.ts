@@ -4856,6 +4856,59 @@ async function tryAnswerQuestion(
   return { handled: true, audience: "erp_ask", text: outcome.text };
 }
 
+/**
+ * Run "Ask the ERP" as the director (owner), for the office assistant.
+ *
+ * Reuses the exact grounded pipeline the WhatsApp owner flow uses — RBAC per
+ * tool, the model's numbers checked against computed facts, a deterministic
+ * fallback — but for a server-to-server caller (the Telegram console) with no
+ * session cookie. The owner identity comes from the protected super-admin
+ * email, so every tool is permitted. Returns null when the text is not a
+ * school-data question, so the caller can answer conversationally or say it
+ * is not on record.
+ */
+export async function askErpGrounded(opts: {
+  text: string;
+  todayIso?: string;
+  previous?: { question: string; answer: string } | null;
+}): Promise<{ text: string; toolsUsed: string[]; generationIds: string[] } | null> {
+  const text = (opts.text || "").trim();
+  if (!text) return null;
+  const { looksLikeQuestion } = await import("@/lib/erpAsk");
+  if (!looksLikeQuestion(text)) return null;
+
+  const [masters, rbac] = await Promise.all([loadServerMasters(), loadServerRbac()]);
+  const todayIso = opts.todayIso || new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+  const directorEmail = (process.env.OFFICE_DIRECTOR_EMAIL || "director@bhbinternational.school").trim();
+  const session: DemoSession = {
+    persona: "staff",
+    fullName: "Director",
+    roleCode: "owner",
+    email: directorEmail,
+    tenantSlug: TENANT.slug,
+    academicYearCode: currentAcademicYearCode(masters),
+  };
+
+  const { answerErpAsk } = await import("@/lib/erpAsk.server");
+  const outcome = await answerErpAsk({
+    text,
+    session,
+    masters,
+    rbac,
+    flow: "owner",
+    firstName: "Director",
+    schoolName: TENANT.nameDisplay,
+    todayIso,
+    previous: opts.previous ?? null,
+    readers: {
+      attendance: (dateIso) => attendanceSummary({ date: dateIso, scope: "school" }, session, todayIso),
+      admissions: (label) => admissionsPeriod(label, session, todayIso),
+    },
+  });
+  if (!outcome) return null;
+  return { text: outcome.text, toolsUsed: outcome.toolsUsed, generationIds: outcome.generationIds };
+}
+
 async function audit(
   session: DemoSession,
   command: ErpCommandDef,

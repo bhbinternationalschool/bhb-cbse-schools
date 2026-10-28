@@ -21,7 +21,7 @@ export type AiGenerationRecord = {
   route: string;
   promptVersion: string;
   tier: AiTier;
-  engine: "openai" | "gemini";
+  engine: "openai" | "gemini" | "anthropic";
   model: string;
   status: "ok" | "error";
   error?: string;

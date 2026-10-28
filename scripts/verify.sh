@@ -611,6 +611,7 @@ SELFTESTS=(
   test:wa-transport-track
   test:wa-usage-cost
   test:wa-command-templates
+  test:office-assistant
 )
 
 bold "Verifying $(git rev-parse --short HEAD 2>/dev/null || echo 'working tree') on $(git branch --show-current 2>/dev/null || echo '?')"
