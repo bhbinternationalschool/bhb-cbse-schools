@@ -354,28 +354,64 @@ class ExamTermInfo {
   final int sheetCount;
 }
 
+/// One numeric part of a subject marked in parts — "Written" out of 80,
+/// "Oral" out of 20. Each is entered and validated against its own [maxMarks].
+class ExamComponentInfo {
+  ExamComponentInfo.fromJson(Map<String, dynamic> j)
+    : code = _s(j, "code"),
+      label = _s(j, "label"),
+      maxMarks = _i(j, "maxMarks"),
+      kind = _s(j, "kind");
+
+  final String code;
+  final String label;
+  final int maxMarks;
+  final String kind;
+}
+
 class ExamSubjectInfo {
   ExamSubjectInfo.fromJson(Map<String, dynamic> j)
     : id = _s(j, "id"),
       code = _s(j, "code"),
       name = _s(j, "name"),
-      maxMarks = _i(j, "maxMarks");
+      maxMarks = _i(j, "maxMarks"),
+      marksParts = _list(
+        j,
+        "marksParts",
+      ).map(ExamComponentInfo.fromJson).toList();
 
   final String id;
   final String code;
   final String name;
   final int maxMarks;
+
+  /// Numeric parts this subject is marked in. Empty = one whole mark.
+  final List<ExamComponentInfo> marksParts;
+
+  /// A subject marked in parts renders one field per part, not one /100 box.
+  bool get isSplit => marksParts.isNotEmpty;
 }
 
 class StudentMark {
   StudentMark.fromJson(Map<String, dynamic> j)
     : subjectId = _s(j, "subjectId"),
       marksObtained = (j["marksObtained"] as num?)?.toDouble(),
-      grade = _s(j, "grade");
+      grade = _s(j, "grade"),
+      parts = {
+        for (final p in _list(j, "parts"))
+          _s(p, "component"): (p["marksObtained"] as num?)?.toDouble(),
+      };
 
   final String subjectId;
   double? marksObtained;
   String grade;
+
+  /// Already-entered mark for each numeric part (component code → mark), so a
+  /// split subject pre-fills each field. A null value = not entered / absent.
+  final Map<String, double?> parts;
+
+  /// The stored mark for one numeric part, or null when none is entered.
+  double? partMark(String component) => parts[component];
 }
 
 class MarkSheetStudent {
@@ -1585,12 +1621,16 @@ extension StaffApi on ApiClient {
   );
 
   /// Returns the saved marks with their computed grades.
+  ///
+  /// Each entry's [component] is "" for a whole-subject mark, or a numeric
+  /// marks part's code (e.g. "WRIT", "ORAL") for a subject marked in parts.
+  /// The server validates each part against its own maximum.
   Future<List<StudentMark>> saveMarks({
     required String termId,
     required String classId,
     required String sectionId,
     required String subjectId,
-    required List<({String studentId, double? marks})> marks,
+    required List<({String studentId, String component, double? marks})> marks,
   }) async {
     final data = await _postData("/api/v1/staff/exams/marks", {
       "termId": termId,
@@ -1599,7 +1639,11 @@ extension StaffApi on ApiClient {
       "subjectId": subjectId,
       "marks": [
         for (final m in marks)
-          {"studentId": m.studentId, "marksObtained": m.marks},
+          {
+            "studentId": m.studentId,
+            "marksObtained": m.marks,
+            if (m.component.isNotEmpty) "component": m.component,
+          },
       ],
     });
     return _list(

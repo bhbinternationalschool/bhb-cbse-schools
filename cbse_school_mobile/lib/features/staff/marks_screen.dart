@@ -10,10 +10,68 @@ import "ai_answer_sheet_screen.dart";
 import "section_picker.dart";
 import "../../core/i18n/locale_controller.dart";
 
+/// One editable column of the mark-entry grid: a whole-subject mark (empty
+/// [component]) or one numeric part of a split subject (its code and label).
+typedef MarkColumn = ({String component, String label, int max});
+
+/// The columns to enter for one subject: one per numeric part when the
+/// subject is marked in parts, otherwise a single whole-subject column. This
+/// is why a split subject shows N fields and an ordinary subject shows one.
+List<MarkColumn> markEntryColumns(ExamSubjectInfo sub) {
+  if (!sub.isSplit) {
+    return [(component: "", label: sub.name, max: sub.maxMarks)];
+  }
+  return [
+    for (final p in sub.marksParts)
+      (component: p.code, label: p.label, max: p.maxMarks),
+  ];
+}
+
+/// Whether a typed value is acceptable for a column with the given [max].
+/// Blank = absent / not entered (allowed); otherwise a number in 0..max.
+/// Each part is checked against ITS own max, never a flat 100.
+bool markEntryValid(String raw, int max) {
+  final t = raw.trim();
+  if (t.isEmpty) return true;
+  final v = double.tryParse(t);
+  return v != null && v >= 0 && v <= max;
+}
+
+/// The number a typed value stands for, or null for blank (absent).
+double? parseMarkValue(String raw) {
+  final t = raw.trim();
+  if (t.isEmpty) return null;
+  return double.tryParse(t);
+}
+
+/// The entries POSTed for one subject: one per student × column. A split
+/// subject therefore posts a row per part (component set); an ordinary
+/// subject posts one row with an empty component. [read] returns the typed
+/// text for a (studentId, component) box. Validate with [markEntryValid]
+/// before calling this.
+List<({String studentId, String component, double? marks})> markEntriesFor(
+  List<MarkColumn> cols,
+  List<String> studentIds,
+  String? Function(String studentId, String component) read,
+) {
+  final out = <({String studentId, String component, double? marks})>[];
+  for (final id in studentIds) {
+    for (final col in cols) {
+      out.add((
+        studentId: id,
+        component: col.component,
+        marks: parseMarkValue(read(id, col.component) ?? ""),
+      ));
+    }
+  }
+  return out;
+}
+
 /// Marks entry from the phone: pick the exam, then a section you teach,
-/// then a subject — the roster appears with one box per student. Saves one
-/// subject at a time into the section's mark sheet on the exams desk; the
-/// desk's max-marks rule and lock apply exactly as on the web.
+/// then a subject — the roster appears with one box per student (or one box
+/// per part, for a subject marked in parts). Saves one subject at a time into
+/// the section's mark sheet on the exams desk; the desk's max-marks rule and
+/// lock apply exactly as on the web.
 class MarksScreen extends StatelessWidget {
   const MarksScreen({
     super.key,
@@ -181,17 +239,31 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
     }
   }
 
+  /// Controller key: one text box per student × column, so a split subject's
+  /// parts never share a box.
+  String _ck(String studentId, String component) => "$studentId\u0000$component";
+
+  String _fmt(double? v) => v == null
+      ? ""
+      : (v == v.roundToDouble() ? v.toInt().toString() : v.toString());
+
   void _fill() {
     final s = _sheet;
-    final sub = _subjectId;
+    final sub = _subject;
     if (s == null || sub == null) return;
+    final cols = markEntryColumns(sub);
     for (final st in s.students) {
-      final m = st.markFor(sub)?.marksObtained;
-      final text = m == null
-          ? ""
-          : (m == m.roundToDouble() ? m.toInt().toString() : m.toString());
-      final c = _ctl.putIfAbsent(st.id, () => TextEditingController());
-      c.text = text;
+      final mark = st.markFor(sub.id);
+      for (final col in cols) {
+        final v = col.component.isEmpty
+            ? mark?.marksObtained
+            : mark?.partMark(col.component);
+        final c = _ctl.putIfAbsent(
+          _ck(st.id, col.component),
+          () => TextEditingController(),
+        );
+        c.text = _fmt(v);
+      }
     }
     _dirty = false;
   }
@@ -203,27 +275,31 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
     final s = _sheet;
     final sub = _subject;
     if (s == null || sub == null) return;
-    final entries = <({String studentId, double? marks})>[];
+    final cols = markEntryColumns(sub);
     for (final st in s.students) {
-      final raw = (_ctl[st.id]?.text ?? "").trim();
-      if (raw.isEmpty) {
-        entries.add((studentId: st.id, marks: null));
-        continue;
-      }
-      final v = double.tryParse(raw);
-      if (v == null || v < 0 || v > sub.maxMarks) {
-        Haptics.warning();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              "${st.fullName}: enter 0–${sub.maxMarks} or leave blank for absent",
+      for (final col in cols) {
+        final raw = (_ctl[_ck(st.id, col.component)]?.text ?? "").trim();
+        if (!markEntryValid(raw, col.max)) {
+          Haptics.warning();
+          final who = col.component.isEmpty
+              ? st.fullName
+              : "${st.fullName} · ${col.label}";
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                context.l10n.markEntryRangeHint(who, col.max.toString()),
+              ),
             ),
-          ),
-        );
-        return;
+          );
+          return;
+        }
       }
-      entries.add((studentId: st.id, marks: v));
     }
+    final entries = markEntriesFor(
+      cols,
+      [for (final st in s.students) st.id],
+      (id, comp) => _ctl[_ck(id, comp)]?.text,
+    );
     setState(() => _saving = true);
     try {
       await widget.api.saveMarks(
@@ -236,10 +312,15 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
       Haptics.success();
       await _load();
       if (mounted) {
+        final savedStudents = entries
+            .where((e) => e.marks != null)
+            .map((e) => e.studentId)
+            .toSet()
+            .length;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              "${sub.name} marks saved for ${entries.where((e) => e.marks != null).length} students.",
+              "${sub.name} marks saved for $savedStudents students.",
             ),
           ),
         );
@@ -276,18 +357,68 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
     );
     if (total == null || !mounted) return;
     setState(() {
-      _ctl
-          .putIfAbsent(st.id, () => TextEditingController())
-          .text = total == total.roundToDouble()
-          ? total.toInt().toString()
-          : total.toString();
+      _ctl.putIfAbsent(_ck(st.id, ""), () => TextEditingController()).text =
+          _fmt(total);
       _dirty = true;
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          "${st.fullName}: ${_ctl[st.id]!.text} filled in — press Save ${sub.name} to save it.",
+          "${st.fullName}: ${_ctl[_ck(st.id, "")]!.text} filled in — press Save ${sub.name} to save it.",
         ),
+      ),
+    );
+  }
+
+  /// One numeric box for a student × column. [component] is "" for the whole
+  /// subject or a part code; [hint] shows the max ("/80").
+  Widget _markBox({
+    required String studentId,
+    required String component,
+    required String hint,
+    required bool locked,
+    bool last = false,
+  }) {
+    return TextField(
+      controller: _ctl.putIfAbsent(
+        _ck(studentId, component),
+        () => TextEditingController(),
+      ),
+      enabled: !locked,
+      textAlign: TextAlign.center,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r"[0-9.]"))],
+      textInputAction: last ? TextInputAction.done : TextInputAction.next,
+      onChanged: (_) => _dirty = true,
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: hint,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      ),
+    );
+  }
+
+  /// A labelled box for one numeric part of a split subject: "Written /80".
+  Widget _partBox(String studentId, ExamComponentInfo part, bool locked) {
+    return SizedBox(
+      width: 92,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "${part.label} /${part.maxMarks}",
+            style: AppText.labelMediumMuted,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 2),
+          _markBox(
+            studentId: studentId,
+            component: part.code,
+            hint: "/${part.maxMarks}",
+            locked: locked,
+          ),
+        ],
       ),
     );
   }
@@ -406,84 +537,87 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
                     itemBuilder: (context, i) {
                       final st = s.students[i];
                       final m = sub == null ? null : st.markFor(sub.id);
+                      final split = sub != null && sub.isSplit;
+                      final nameCol = Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            st.fullName,
+                            style: AppText.bodyMediumInk.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (!split && (m?.grade ?? "").isNotEmpty)
+                            Text(
+                              "Grade ${m!.grade}",
+                              style: AppText.labelMediumMuted,
+                            ),
+                        ],
+                      );
+                      final rollBox = SizedBox(
+                        width: 30,
+                        child: Text(
+                          st.rollNo.isEmpty ? "–" : st.rollNo,
+                          style: AppText.bodySmallMuted.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      );
                       return Card(
                         margin: const EdgeInsets.symmetric(vertical: 3),
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: 30,
-                                child: Text(
-                                  st.rollNo.isEmpty ? "–" : st.rollNo,
-                                  style: AppText.bodySmallMuted.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                              Expanded(
-                                child: Column(
+                          padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                          child: split
+                              ? Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      st.fullName,
-                                      style: AppText.bodyMediumInk.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                    Row(
+                                      children: [
+                                        rollBox,
+                                        Expanded(child: nameCol),
+                                      ],
                                     ),
-                                    if ((m?.grade ?? "").isNotEmpty)
-                                      Text(
-                                        "Grade ${m!.grade}",
-                                        style: AppText.labelMediumMuted,
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              if (widget.canScan &&
-                                  !s.locked &&
-                                  sub != null &&
-                                  sub.code.isNotEmpty)
-                                IconButton(
-                                  tooltip: "Scan answer sheet (AI)",
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () => _scan(st, sub),
-                                  icon: const Icon(
-                                    Icons.document_scanner_outlined,
-                                    size: 20,
-                                    color: AppColors.primary,
-                                  ),
-                                ),
-                              SizedBox(
-                                width: 72,
-                                child: TextField(
-                                  controller: _ctl[st.id],
-                                  enabled: !s.locked,
-                                  textAlign: TextAlign.center,
-                                  keyboardType:
-                                      const TextInputType.numberWithOptions(
-                                        decimal: true,
-                                      ),
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.allow(
-                                      RegExp(r"[0-9.]"),
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      spacing: 12,
+                                      runSpacing: 6,
+                                      children: [
+                                        for (final p in sub.marksParts)
+                                          _partBox(st.id, p, s.locked),
+                                      ],
                                     ),
                                   ],
-                                  textInputAction: i == s.students.length - 1
-                                      ? TextInputAction.done
-                                      : TextInputAction.next,
-                                  onChanged: (_) => _dirty = true,
-                                  decoration: InputDecoration(
-                                    isDense: true,
-                                    hintText: "/${sub?.maxMarks ?? ""}",
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 10,
+                                )
+                              : Row(
+                                  children: [
+                                    rollBox,
+                                    Expanded(child: nameCol),
+                                    if (widget.canScan &&
+                                        !s.locked &&
+                                        sub != null &&
+                                        sub.code.isNotEmpty)
+                                      IconButton(
+                                        tooltip: "Scan answer sheet (AI)",
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: () => _scan(st, sub),
+                                        icon: const Icon(
+                                          Icons.document_scanner_outlined,
+                                          size: 20,
+                                          color: AppColors.primary,
+                                        ),
+                                      ),
+                                    SizedBox(
+                                      width: 72,
+                                      child: _markBox(
+                                        studentId: st.id,
+                                        component: "",
+                                        hint: "/${sub?.maxMarks ?? ""}",
+                                        locked: s.locked,
+                                        last: i == s.students.length - 1,
+                                      ),
                                     ),
-                                  ),
+                                  ],
                                 ),
-                              ),
-                            ],
-                          ),
                         ),
                       );
                     },

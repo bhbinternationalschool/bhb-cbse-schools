@@ -6907,6 +6907,12 @@ abstract class L {
   /// In en, this message translates to:
   /// **'No family in these classes can be reached on WhatsApp — nothing would be sent.'**
   String get cmNoneReachable;
+
+  /// No description provided for @markEntryRangeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'{who}: enter 0–{max} or leave blank for absent'**
+  String markEntryRangeHint(String who, String max);
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {

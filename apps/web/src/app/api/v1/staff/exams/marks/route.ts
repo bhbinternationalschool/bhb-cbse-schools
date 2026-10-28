@@ -1,6 +1,7 @@
 import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
+import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureExamsHydratedServer } from "@/lib/examsPersistence";
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
     if (ctx.session.persona !== "staff") {
       throw new ApiError("forbidden", "Staff session required", 403);
     }
+    assertMobileFeature(ctx, "marks_entry");
     assertPermission(ctx, "exams", "edit");
     const body = (await request.json().catch(() => ({}))) as Body;
     const termId = (body.termId || "").trim();
@@ -88,12 +90,11 @@ export async function POST(request: Request) {
         403,
       );
     }
-    // The app enters one number per subject, and the letter of a graded
-    // part. A class assessed component-wise (80 + 20, theory + practical) or
-    // by grades / descriptors is entered on the desk, where those columns
-    // exist. Per subject: English split into Written + Oral goes to the
-    // desk, while a one-mark subject in the same class can still be entered
-    // here — and English's Handwriting grade can be picked here too.
+    // The app enters one number per subject, a number per numeric marks part
+    // of a split subject (English = Written 80 + Oral 20, each sent with its
+    // `component` and validated against its own max), and the letter of a
+    // graded part (Handwriting A/B/C). A grade-only / descriptor scheme is
+    // still entered on the desk, where those columns exist.
     const term = state.terms.find((t) => t.id === termId);
     const scheme = schemeForClassId(classId, getExamPolicy(state));
     const gradedParts = term ? gradedPartsForSubject(scheme, term.code, examSubject?.code || "") : [];
