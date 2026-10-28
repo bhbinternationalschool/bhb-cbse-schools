@@ -191,18 +191,11 @@ export const LEGAL_ADDRESS_ONE_LINE = addressOneLine(LEGAL_ADDRESS);
 
 export const CONTACT = {
   email: "director@bhbinternational.school",
-  /**
-   * Office line published for customers.
-   *
-   * This is the school's verified WhatsApp Business number, which is the line
-   * parents already use and the office actually answers. A payment gateway's
-   * risk review requires a reachable phone number on the Contact page, so it
-   * is published rather than held back.
-   */
-  phone: "+91 94519 38805" as string | null,
-  /** Office hours shown on the Contact page. */
-  hours:
-    "Monday to Saturday, 8:00 am – 3:00 pm IST (excluding school holidays)",
+  /** School voice line. The chatbot has its own number below. */
+  phone: "+91 63881 04972" as string | null,
+  whatsapp: "+91 94519 38805",
+  /** Parent-visit hours confirmed by the director. */
+  hours: "Monday to Saturday, 8:00 am - 2:00 pm IST; Sunday closed",
   website: "https://bhbinternational.school",
 } as const;
 
