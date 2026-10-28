@@ -4,9 +4,9 @@
 
 import type { StaffRecord } from "@/lib/foundationMasters";
 import {
-  loadMasters,
   type MastersState,
 } from "@/lib/masters";
+import { MASTERS_NOT_LOADED_MESSAGE } from "@/lib/data/requireData";
 import {
   exportFilterReport,
   describeFilters,
@@ -317,7 +317,10 @@ function buildReport(
   id: StaffLeaveReportId,
   f: StaffLeaveReportFilters,
 ): { ok: true; built: Built } | { ok: false; error: string } {
-  const masters = f.masters ?? loadMasters();
+  // The Masters book as data (data-layer 2.3b): never the tab's page copy;
+  // handed nothing, the report refuses rather than run on an empty book.
+  const masters = f.masters;
+  if (!masters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
   const hr = f.hr ?? loadStaffHr();
   const attendance = f.attendance ?? loadStaffAttendance();
   const roster = filterRoster(masters, f);
@@ -1087,7 +1090,7 @@ export function runStaffLeaveReport(
     filters.toDate ? `To ${filters.toDate}` : "",
     filters.month ? `Month ${filters.month}` : "",
     filters.staffId
-      ? `Staff ${(filters.masters ?? loadMasters()).staff.find((s) => s.id === filters.staffId)?.fullName || filters.staffId}`
+      ? `Staff ${(filters.masters?.staff ?? []).find((s) => s.id === filters.staffId)?.fullName || filters.staffId}`
       : "",
     filters.leaveType ? `Type ${filters.leaveType}` : "",
     filters.status && filters.status !== "all"

@@ -13,7 +13,8 @@
  */
 
 import { normalizeSchoolProfile, type SchoolProfile } from "@/lib/foundationMasters";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import type { MastersState } from "@/lib/masters";
+import { tabMastersBook } from "@/lib/data/client/tabCache";
 import { TENANT } from "@/lib/types";
 
 /**
@@ -30,27 +31,18 @@ function real(value: string | undefined): string {
 }
 
 /**
- * Resolve the printed profile. Pass `masters` when the caller already has it
- * loaded; otherwise it is read from Masters and memoised briefly, because a
- * dual-copy receipt asks for the identity six times and parsing the whole
- * Masters blob per line would show up on print.
+ * Resolve the printed profile from `masters` — the caller's book (a screen's
+ * useScreenMasters, a server route's loadServerMasters). Without one, this
+ * tab's masters answer in the shared query cache (data-layer 2.3b; was the
+ * page copy, loadMasters()): the staff shell renders no screen before that
+ * answer (ShellDataWait), so a receipt or certificate printed from a screen
+ * always has it. With neither (server code that passed nothing, a page
+ * outside the staff shell) the tenant's built-in identity, as server code
+ * always printed.
  */
-let memo: { at: number; profile: SchoolProfile } | null = null;
-const MEMO_MS = 5000;
-
 export function schoolIdentity(masters?: MastersState | null): SchoolProfile {
-  if (masters) return normalizeSchoolProfile(masters.schoolProfile);
-  if (typeof window === "undefined") return normalizeSchoolProfile(null);
-  const now = Date.now();
-  if (memo && now - memo.at < MEMO_MS) return memo.profile;
-  const profile = normalizeSchoolProfile(loadMasters().schoolProfile);
-  memo = { at: now, profile };
-  return profile;
-}
-
-/** Drop the memo after Masters → School profile is saved. */
-export function forgetSchoolIdentity(): void {
-  memo = null;
+  const book = masters ?? (typeof window === "undefined" ? null : tabMastersBook());
+  return normalizeSchoolProfile(book?.schoolProfile ?? null);
 }
 
 /** "Affiliation 2131234 · School code 70123 · UDISE 09123456789" */

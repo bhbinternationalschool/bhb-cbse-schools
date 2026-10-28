@@ -8,7 +8,8 @@ import {
   exportFilterReport,
 } from "@/lib/reportExport";
 import { paidByDueKey, loadFees, type FeesState } from "@/lib/fees";
-import { formatInr, loadMasters, type MastersState } from "@/lib/masters";
+import { formatInr, type MastersState } from "@/lib/masters";
+import { MASTERS_NOT_LOADED_MESSAGE } from "@/lib/data/requireData";
 import { loadSis, type SisState } from "@/lib/sis";
 import { TENANT } from "@/lib/types";
 import {
@@ -349,7 +350,10 @@ export function runTransportReport(
   // Only the reports above read this; the fallback says "unknown", never ₹0.
   const costs: VehicleCosts = filters.costs ?? { fills: null, docs: null, loans: { known: false, reason: "not loaded" } };
   const transport = filters.transport ?? loadTransport();
-  const masters = filters.masters ?? loadMasters();
+  // The Masters book as data (data-layer 2.3b): never the tab's page copy;
+  // handed nothing, the report refuses rather than run on an empty book.
+  const masters = filters.masters;
+  if (!masters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
   const sis = filters.sis ?? loadSis();
   const fees = filters.fees ?? loadFees();
   const date = filters.date || todayYmd();

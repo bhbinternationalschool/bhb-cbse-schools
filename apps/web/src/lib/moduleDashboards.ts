@@ -55,7 +55,6 @@ import { formatInr as formatInrRupees } from "@/lib/payroll";
 import {
   currentAcademicYearCode,
   formatInrCompact,
-  loadMasters,
   type MastersState,
 } from "@/lib/masters";
 import {
@@ -391,9 +390,8 @@ function admissionsDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
-function studentsDash(academicYearCode?: string): ModuleDashboardModel {
+function studentsDash(masters: MastersState, academicYearCode?: string): ModuleDashboardModel {
   const sis = loadSis();
-  const masters = loadMasters();
   const ay = academicYearCode || currentAcademicYearCode(masters);
   const normalizeAy = (code: string) => {
     const t = (code || "").trim().replace(/\s+/g, "").replace(/–/g, "-");
@@ -552,8 +550,7 @@ function studentsDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
-function staffDash(academicYearCode?: string): ModuleDashboardModel {
-  const masters = loadMasters();
+function staffDash(masters: MastersState, academicYearCode?: string): ModuleDashboardModel {
   const hr = loadStaffHr();
   const staff = masters.staff ?? [];
   const active = staff.filter(isStaffActive);
@@ -1023,9 +1020,8 @@ function feesDash(academicYearCode?: string): ModuleDashboardModel {
   return buildFeesDashboardModel(academicYearCode);
 }
 
-function attendanceDash(academicYearCode?: string): ModuleDashboardModel {
+function attendanceDash(masters: MastersState, academicYearCode?: string): ModuleDashboardModel {
   const att = loadAttendance();
-  const masters = loadMasters();
   const registers = (att.registers ?? []).filter((r) =>
     inAcademicYear(r, academicYearCode),
   );
@@ -1276,9 +1272,8 @@ function attendanceDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
-function homeworkDash(academicYearCode?: string): ModuleDashboardModel {
+function homeworkDash(masters: MastersState, academicYearCode?: string): ModuleDashboardModel {
   const hw = loadHomework();
-  const masters = loadMasters();
   const posts = (hw.posts ?? []).filter((p) =>
     inAcademicYear(p, academicYearCode),
   );
@@ -1698,7 +1693,7 @@ function modulesDash(): ModuleDashboardModel {
   };
 }
 
-function payrollDash(academicYearCode?: string): ModuleDashboardModel {
+function payrollDash(masters: MastersState, academicYearCode?: string): ModuleDashboardModel {
   const pay = loadPayroll();
   const runs = (pay.runs ?? []).filter((r) =>
     inAcademicYear(r, academicYearCode),
@@ -1713,7 +1708,7 @@ function payrollDash(academicYearCode?: string): ModuleDashboardModel {
     value: Math.round(runNetPaise(r.lines) / 100),
   }));
 
-  const statutoryConfig = normalizeStatutoryConfig(loadMasters().statutoryConfig);
+  const statutoryConfig = normalizeStatutoryConfig(masters.statutoryConfig);
   const statutoryBatches = loadStatutoryRemit().batches.filter((b) =>
     inAcademicYear(b, academicYearCode),
   );
@@ -1957,8 +1952,7 @@ function examsDash(academicYearCode?: string): ModuleDashboardModel {
   };
 }
 
-function timetableDash(academicYearCode?: string): ModuleDashboardModel {
-  const masters = loadMasters();
+function timetableDash(masters: MastersState, academicYearCode?: string): ModuleDashboardModel {
   const state = loadTimetable();
   const grids = state.grids.filter((g) => inAcademicYear(g, academicYearCode));
   // A week's teaching periods per class, on that class's own bell. This
@@ -2578,20 +2572,40 @@ function purchaseDash(): ModuleDashboardModel {
     "Indents, orders, receipts and vendor bills live in Store & purchase",
   );
 }
+/**
+ * The dashboards that read the Masters book (classes, staff, statutory
+ * settings). Their host passes it as data (data-layer 2.3b — no page-copy
+ * read): useScreenMasters' book, and shows "Loading…" until it is there.
+ */
+export const DASHBOARDS_READING_MASTERS: ReadonlySet<DashboardModuleId> = new Set<DashboardModuleId>([
+  "masters",
+  "students",
+  "staff",
+  "attendance",
+  "homework",
+  "payroll",
+  "timetable",
+]);
+
 export function buildModuleDashboard(
   moduleId: DashboardModuleId,
-  opts?: { academicYearCode?: string },
+  opts: { academicYearCode?: string; masters: MastersState | null },
 ): ModuleDashboardModel {
+  const masters = opts.masters;
+  // Never a dashboard of an empty book (R6): the host waits for it.
+  if (DASHBOARDS_READING_MASTERS.has(moduleId) && !masters) {
+    return emptyModel("Dashboard", "The school setup has not loaded yet — try again in a moment.");
+  }
   try {
     switch (moduleId) {
       case "masters":
-        return mastersDash(loadMasters(), opts?.academicYearCode);
+        return mastersDash(masters!, opts?.academicYearCode);
       case "admissions":
         return admissionsDash(opts?.academicYearCode);
       case "students":
-        return studentsDash(opts?.academicYearCode);
+        return studentsDash(masters!, opts?.academicYearCode);
       case "staff":
-        return staffDash(opts?.academicYearCode);
+        return staffDash(masters!, opts?.academicYearCode);
       case "store":
         return storeDash();
       case "transport":
@@ -2603,9 +2617,9 @@ export function buildModuleDashboard(
       case "fees":
         return feesDash(opts?.academicYearCode);
       case "attendance":
-        return attendanceDash(opts?.academicYearCode);
+        return attendanceDash(masters!, opts?.academicYearCode);
       case "homework":
-        return homeworkDash(opts?.academicYearCode);
+        return homeworkDash(masters!, opts?.academicYearCode);
       case "ptm":
         return ptmDash(opts?.academicYearCode);
       case "events":
@@ -2615,7 +2629,7 @@ export function buildModuleDashboard(
       case "modules":
         return modulesDash();
       case "payroll":
-        return payrollDash(opts?.academicYearCode);
+        return payrollDash(masters!, opts?.academicYearCode);
       case "exams":
         return examsDash(opts?.academicYearCode);
       case "certificates":
@@ -2629,7 +2643,7 @@ export function buildModuleDashboard(
       case "purchase":
         return purchaseDash();
       case "timetable":
-        return timetableDash(opts?.academicYearCode);
+        return timetableDash(masters!, opts?.academicYearCode);
       case "comms":
         return commsDash(opts?.academicYearCode);
       case "rte":
@@ -2651,10 +2665,11 @@ function normalizeSessionAy(code: string, fallback: string): string {
 
 /** Cross-module school home dashboard — aggregates live demo data. */
 export function buildSchoolDashboard(
-  academicYearCode?: string,
+  academicYearCode: string | undefined,
+  /** The Masters book, as data (data-layer 2.3b): useScreenMasters'. */
+  masters: MastersState,
 ): ModuleDashboardModel {
   try {
-    const masters = loadMasters();
     const ay = academicYearCode || currentAcademicYearCode(masters);
     const sessionAy = normalizeSessionAy(ay, ay);
 
