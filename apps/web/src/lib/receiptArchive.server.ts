@@ -33,7 +33,7 @@ export async function resolveSchoolHeader(masters: ReturnType<typeof loadMasters
   const p = schoolIdentity(masters);
   const real = (v: string | null | undefined) => (v ?? "").trim();
   const wa = await schoolWhatsAppContact().catch(() => null);
-  const whatsapp = wa?.display || real(p.whatsapp) || real(TENANT.whatsappNumber) || CONTACT.phone || "";
+  const whatsapp = wa?.display || real(p.whatsapp) || real(TENANT.whatsappNumber) || CONTACT.whatsapp || "";
   return {
     logoPng: schoolCrestPng(),
     phone: real(p.phone) || real(p.mobile) || real(TENANT.officePhone) || CONTACT.phone || "",
