@@ -35,6 +35,7 @@ const ROLE_CHARTERS = {
   academic_incharge: systemFor("academic-incharge"),
   marketing_manager: systemFor("marketing-manager"),
   transport_manager: systemFor("transport-manager"),
+  social_manager: systemFor("social-manager"),
   chair: systemFor("chair"),
 };
 
@@ -1315,7 +1316,7 @@ const it = $input.first().json;
 const m = it.parsed || {};
 const decisions = Array.isArray(m.decisions) ? m.decisions : [];
 const minutes = it.parse_error ? ('Minutes could not be structured (' + it.parse_error + ').\\n' + String(it.text || '').slice(0, 3000)) : String(m.minutes || '').trim();
-const roles = ['receptionist', 'academic_incharge', 'marketing_manager', 'transport_manager', 'director'];
+const roles = ['receptionist', 'academic_incharge', 'marketing_manager', 'transport_manager', 'social_manager', 'director'];
 const task_rows = decisions.map((d) => ({ tenant_id: $env.OFFICE_TENANT_ID, from_role: 'chair', to_role: roles.includes(d.to_role) ? d.to_role : 'director',
   title: String(d.title || 'Decision').slice(0, 80), detail: String(d.detail || '').slice(0, 600), status: 'open', source: 'huddle', approval_state: 'none',
   due_on: d.due_on || null, payload: { kind: 'huddle_decision', meeting_date: it.today } }));
@@ -1397,7 +1398,7 @@ const roleOf = (id) => tgRoleOf(id) || userRole(id);
 // decision; anything longer is a free-form instruction for the assistant.
 const APPROVE = /^\\s*\\/?(approve|approved|ok|okay|yes|haan|ha|हाँ|हां|ठीक)\\s*#?\\s*(\\d+)?\\s*$/i;
 const REJECT = /^\\s*\\/?(reject|rejected|cancel|nahi|nahin|नहीं|रद्द)\\s*#?\\s*(\\d+)?\\s*$/i;
-const COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan', marketing: 'marketing', transport: 'transport', users: 'users' };
+const COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan', marketing: 'marketing', transport: 'transport', social: 'social', users: 'users' };
 const out = [];
 for (const u of updates) {
   const cq = u.callback_query;
@@ -1442,7 +1443,7 @@ for (const u of updates) {
     if (name === 'start') { out.push({ json: { kind: 'command', cmd: 'start', ...base } }); continue; }
     if (!role) continue;
     if (name === 'users' && role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
-    const READER_OK = ['tasks', 'huddle', 'plan', 'marketing', 'transport'];
+    const READER_OK = ['tasks', 'huddle', 'plan', 'marketing', 'transport', 'social'];
     if (role === 'reader' && !READER_OK.includes(name)) continue;
     out.push({ json: { kind: 'command', cmd: name, ...base } });
     continue;
@@ -1724,7 +1725,14 @@ return out;
     `tenant_id=eq.${TENANT}&status=neq.archived&select=month,channel,cap_amount,allocated,spent,currency&order=month.desc&limit=100`,
     { row: 1 },
   );
-  wf.chain(openTasks, huddle, plan, mktgNote, mktgBudget, transNote, transBudget);
+  const socialNote = sbGet(
+    wf,
+    "Fetch: latest social",
+    "office_notes",
+    `tenant_id=eq.${TENANT}&role=eq.social_manager&select=body,facts,created_at&order=created_at.desc&limit=1`,
+    { row: 1 },
+  );
+  wf.chain(openTasks, huddle, plan, mktgNote, mktgBudget, transNote, transBudget, socialNote);
   const commandReplies = code(
     wf,
     "Build: command replies",
@@ -1737,6 +1745,7 @@ const mktg = rows('Fetch: latest marketing')[0] || null;
 const budgetRows = rows('Fetch: marketing budget');
 const trans = rows('Fetch: latest transport')[0] || null;
 const transBudgetRows = rows('Fetch: transport budget');
+const social = rows('Fetch: latest social')[0] || null;
 const users = rows('Fetch: bot users').filter((u) => u.chat_id);
 const asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'command');
 const today = isoDate(istNow());
@@ -1757,7 +1766,7 @@ for (const a of asks) {
   if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });
   if (a.cmd === 'start') {
     const who = a.role ? 'You are the ' + a.role + '.' : 'This chat is not registered yet. Give the office this chat id: <code>' + tgEscape(a.chat_id) + '</code>';
-    const common = '/tasks — open tasks (pick a number to close, snooze or assign)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan\\n/marketing — cost per lead, spend vs budget\\n/transport — fleet safety, fuel, spend vs budget';
+    const common = '/tasks — open tasks (pick a number to close, snooze or assign)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan\\n/marketing — cost per lead, spend vs budget\\n/transport — fleet safety, fuel, spend vs budget\\n/social — today\\'s gallery posts for approval';
     const dir = '\\n/drafts — replies waiting for your decision\\n/users — people you added · /adduser &lt;id&gt; &lt;name&gt; · /removeuser &lt;id&gt;';
     send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n' + common + (a.role === 'director' ? dir : '') : ''));
     continue;
@@ -1899,6 +1908,17 @@ for (const a of asks) {
       if (trans) lines.push('\\n' + tgEscape(String(trans.body || '').slice(0, 2500)));
       else lines.push('\\nNo transport note on record yet — the Transport Manager runs every morning.');
     }
+    send(a.chat_id, lines.join('\\n'));
+    continue;
+  }
+  if (a.cmd === 'social') {
+    const f = (social && social.facts) || {};
+    const lines = ['<b>Social — today</b>'];
+    const drafts = Array.isArray(f.drafts) ? f.drafts : [];
+    if (drafts.length) { lines.push('\\n<b>Drafts for approval</b>'); for (const d of drafts.slice(0, 6)) lines.push(tgEscape('• ' + (d.title || d.content_id || '') + (Array.isArray(d.platforms) && d.platforms.length ? ' → ' + d.platforms.join(', ') : ''))); }
+    if (Array.isArray(f.connected) && f.connected.length) lines.push(tgEscape('Connected: ' + f.connected.join(', ') + '.'));
+    if (Array.isArray(f.not_connected) && f.not_connected.length) lines.push(tgEscape('Not connected (drafts queue): ' + f.not_connected.join(', ') + '.'));
+    if (!drafts.length) { if (social) lines.push('\\n' + tgEscape(String(social.body || '').slice(0, 2500))); else lines.push('\\nNo social note yet — the Social Media Manager runs every morning at 7.'); }
     send(a.chat_id, lines.join('\\n'));
     continue;
   }
@@ -2899,6 +2919,196 @@ return r.length ? [{ json: { rows: r } }] : [];
   return wf;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   7. Social Media Manager
+   ═══════════════════════════════════════════════════════════════
+   Daily 07:00 IST. Reads the school gallery (school_comms_desk_photos /
+   _albums — only review_status 'ok', not storage-evicted), what has already
+   been cross-posted (school_comms_cross_posts), what it has already proposed
+   (office_tasks source 'social'), and which channels are connected
+   (social_integrations_state: a Meta token + FB page id, an Instagram business
+   id, a Telegram channel). Sonnet picks up to three strong, unposted items and
+   drafts a caption + tagline per item in the family's language, and names the
+   channels for each. Nothing posts: the daily note and each draft go to the
+   director; a draft is a plain open office_tasks row (source 'social') with the
+   gallery content id + caption + target channels. Approving a draft to actually
+   post (through the cross-post route) lands with the approval update. Children's
+   photos: only review-approved media, captions never name a child. */
+function buildSocialManager() {
+  const wf = new Workflow(
+    "Office — Social Media Manager",
+    "Daily 07:00 IST: scans the school gallery for new review-approved photos/videos not yet posted, checks which channels are connected (Meta/Instagram/Telegram), and has Sonnet draft a caption + tagline per pick in the family's language. Nothing posts — the daily note and each draft (gallery content id + caption + channels) go to the director for approval; captions never name a child.",
+  );
+  const W = "social-manager";
+
+  const trigger = cron(wf, "Every day 07:00 IST", "0 7 * * *");
+  const ctx = code(
+    wf,
+    "Context",
+    `${JS_DATES}
+const now = istNow();
+const today = isoDate(now);
+return [{ json: { today, ay: academicYearCode(now), since30: isoDate(new Date(now.getTime() - 30 * 86400000)), run_at: new Date().toISOString() } }];
+`,
+  );
+  wf.chain(trigger, ctx);
+
+  const getPhotos = sbGet(
+    wf,
+    "Fetch: gallery media",
+    "school_comms_desk_photos",
+    `tenant_id=eq.${TENANT}&review_status=eq.ok&storage_evicted_at=is.null&select=id,album_id,url,caption,uploaded_at,media_kind&order=uploaded_at.desc&limit=100`,
+  );
+  const getAlbums = sbGet(
+    wf,
+    "Fetch: gallery albums",
+    "school_comms_desk_albums",
+    `tenant_id=eq.${TENANT}&status=eq.published&select=id,title,class_label,published_at&order=published_at.desc&limit=60`,
+  );
+  const getPosted = sbGet(
+    wf,
+    "Fetch: cross posts",
+    "school_comms_cross_posts",
+    `select=content_id,platform,status,posted_at&order=posted_at.desc&limit=300`,
+  );
+  const getProposed = sbGet(
+    wf,
+    "Fetch: social proposed",
+    "office_tasks",
+    `tenant_id=eq.${TENANT}&source=eq.social&select=payload,status,created_at&order=created_at.desc&limit=100`,
+  );
+  const getState = sbGet(
+    wf,
+    "Fetch: social integrations",
+    "social_integrations_state",
+    `tenant_id=eq.${TENANT}&select=state&limit=1`,
+  );
+  const getTasks = sbGet(
+    wf,
+    "Fetch: my open tasks",
+    "office_tasks",
+    `tenant_id=eq.${TENANT}&to_role=eq.social_manager&status=in.(open,doing)&select=id,title,detail,due_on,from_role,created_at&order=due_on.asc.nullslast&limit=50`,
+  );
+  wf.chain(ctx, getPhotos, getAlbums, getPosted, getProposed, getState, getTasks);
+
+  const assemble = code(
+    wf,
+    "Assemble",
+    `${JS_REQUEST}
+const SYSTEM = ${JSON.stringify(ROLE_CHARTERS.social_manager)};
+const ctx = $('Context').first().json;
+const rows = (name) => { try { return $(name).all().map((i) => i.json).filter((r) => r && Object.keys(r).length); } catch (e) { return []; } };
+const photos = rows('Fetch: gallery media');
+const albums = rows('Fetch: gallery albums');
+const posted = rows('Fetch: cross posts');
+const proposed = rows('Fetch: social proposed');
+const tasks = rows('Fetch: my open tasks');
+const state = (rows('Fetch: social integrations')[0] || {}).state || {};
+
+// Which channels can actually receive a post right now.
+const hasMetaToken = String(state.metaAccessToken || '').length > 20;
+const connected = {
+  facebook: hasMetaToken && String(state.facebookPageId || '').length > 0,
+  instagram: hasMetaToken && String(state.instagramBusinessId || '').length > 0,
+  telegram: String(state.telegramChannelId || '').length > 0,
+};
+const notConnected = Object.keys(connected).filter((k) => !connected[k]);
+
+// Candidate media: review-approved, not already posted, not already proposed.
+const postedIds = new Set(posted.map((p) => String(p.content_id)));
+const proposedIds = new Set(proposed.map((t) => String((t.payload || {}).content_id || '')).filter(Boolean));
+const albumTitle = {};
+for (const al of albums) albumTitle[al.id] = al.title || '';
+const candidates = photos
+  .filter((p) => !postedIds.has(String(p.id)) && !proposedIds.has(String(p.id)))
+  .slice(0, 30)
+  .map((p) => ({ content_id: p.id, album: albumTitle[p.album_id] || '', media_kind: p.media_kind || 'photo', caption: String(p.caption || '').slice(0, 200), uploaded_at: p.uploaded_at }));
+
+const data = {
+  date: ctx.today, academic_year: ctx.ay,
+  connected_channels: Object.keys(connected).filter((k) => connected[k]),
+  not_connected: notConnected,
+  gallery_candidates: candidates,
+  albums: albums.slice(0, 20).map((a) => ({ id: a.id, title: a.title, class: a.class_label })),
+  nothing_new: candidates.length === 0,
+  my_open_tasks: tasks.map((t) => ({ id: t.id, title: t.title, from: t.from_role })),
+};
+const user = 'Draft today\\'s social posts from the gallery candidates below. Pick up to three strong, unposted items; for each write a caption (2-4 lines) and a short tagline in the family\\'s language, and name the channels to post to from connected_channels. Captions must never name a child or give a class/contact detail. If there is nothing new (nothing_new true), pick nothing and say so. Return only the JSON object described in your charter under "Output format".\\n\\n' + JSON.stringify(data);
+return [{ json: { ctx, connected, not_connected: notConnected, candidate_count: candidates.length,
+  request: claudeRequest({ model: ${JSON.stringify(MODELS.write)}, system: SYSTEM, user, maxTokens: 2500, effort: 'medium' }) } }];
+`,
+  );
+  wf.chain(getTasks, assemble);
+
+  const parse = claudeCall(wf, { key: "social", workflow: W, role: "social_manager", carryFrom: assemble, each: false });
+
+  const outputs = code(
+    wf,
+    "Build: outputs",
+    `
+const it = $input.first().json;
+const p = it.parsed || {};
+const summary = it.parse_error ? ('Social note could not be structured: ' + it.parse_error + '\\n' + String(it.text || '').slice(0, 800)) : String(p.summary || '').trim();
+const picks = Array.isArray(p.picks) ? p.picks : [];
+const drafts = Array.isArray(p.drafts) ? p.drafts : [];
+const PLAT = ['facebook', 'instagram', 'telegram'];
+const head = '📸 Social — ' + it.ctx.today;
+const connectedList = Object.keys(it.connected || {}).filter((k) => it.connected[k]);
+const draftLines = drafts.slice(0, 5).map((d, i) => (i + 1) + '. ' + String(d.title || d.content_id || '').slice(0, 60)
+  + (Array.isArray(d.platforms) && d.platforms.length ? ' → ' + d.platforms.filter((x) => PLAT.includes(x)).join(', ') : '')
+  + '\\n' + String(d.caption || '').slice(0, 200) + (d.tagline ? '\\n— ' + String(d.tagline).slice(0, 80) : ''));
+const notConn = Array.isArray(it.not_connected) ? it.not_connected : [];
+
+const wa_text = [head, summary,
+  it.candidate_count === 0 ? 'No new review-approved photos since the last post.' : (drafts.length ? drafts.length + ' draft(s) for your approval:' : 'No drafts today.'),
+  draftLines.length ? draftLines.join('\\n\\n') : '',
+  connectedList.length ? 'Connected: ' + connectedList.join(', ') + '.' : '',
+  notConn.length ? 'Not connected yet (drafts queue): ' + notConn.join(', ') + '.' : ''].filter(Boolean).join('\\n\\n');
+
+const note_row = { tenant_id: $env.OFFICE_TENANT_ID, role: 'social_manager', note_date: it.ctx.today,
+  body: wa_text.slice(0, 4000),
+  facts: { picks: picks.slice(0, 6), drafts: drafts.slice(0, 6).map((d) => ({ content_id: d.content_id, title: d.title, platforms: d.platforms, tagline: d.tagline })),
+    connected: connectedList, not_connected: notConn, candidate_count: it.candidate_count, parse_error: it.parse_error || '' } };
+
+// Each draft → ONE open office_tasks row (source 'social') carrying the gallery
+// content id, caption and channels. Approving it to post (via the cross-post
+// route) is wired in the approval update; for now it is a reviewable draft.
+const task_rows = [];
+for (const d of drafts.slice(0, 5)) {
+  if (!d.content_id) continue;
+  const plats = (Array.isArray(d.platforms) ? d.platforms : []).filter((x) => PLAT.includes(x));
+  task_rows.push({ tenant_id: $env.OFFICE_TENANT_ID, from_role: 'social_manager', to_role: 'director',
+    title: String(d.title || 'Social post').slice(0, 80),
+    detail: (String(d.caption || '').slice(0, 400) + (d.tagline ? '\\n\\n— ' + String(d.tagline).slice(0, 100) : '') + '\\n\\nChannels: ' + (plats.join(', ') || 'none set')).slice(0, 600),
+    status: 'open', source: 'social', approval_state: 'none',
+    payload: { kind: 'gallery', content_id: String(d.content_id), post_title: String(d.title || '').slice(0, 120), caption: String(d.caption || '').slice(0, 1200), tagline: String(d.tagline || '').slice(0, 160), platforms: plats, image_url: String(d.image_url || ''), day: it.ctx.today } });
+}
+
+return [{ json: { note_row, task_rows, text: wa_text, to: ['director'], tasks_button: true } }];
+`,
+  );
+  wf.link(parse, outputs);
+  wf.link(outputs, sbInsert(wf, "Insert: social note", "office_notes", "note_row"));
+
+  const tasksFilter = code(
+    wf,
+    "Social tasks to insert",
+    `
+const r = $input.first().json.task_rows || [];
+return r.length ? [{ json: { rows: r } }] : [];
+`,
+    { row: 2 },
+  );
+  wf.link(outputs, tasksFilter);
+  const insertTasks = sbInsert(wf, "Insert: social tasks", "office_tasks", "rows", { row: 2, alwaysOutputData: true });
+  wf.link(tasksFilter, insertTasks);
+
+  // The daily note + a 📋 Open tasks button to the director.
+  internalChain(wf, "Social", outputs);
+
+  return wf;
+}
+
 /* ─── write ─────────────────────────────────────────────────── */
 
 const builds = {
@@ -2907,6 +3117,7 @@ const builds = {
   "morning-huddle.json": buildMorningHuddle,
   "marketing-manager.json": buildMarketingManager,
   "transport-manager.json": buildTransportManager,
+  "social-manager.json": buildSocialManager,
   "telegram-office-bot.json": buildTelegramBot,
 };
 
