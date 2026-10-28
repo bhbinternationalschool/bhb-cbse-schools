@@ -37,16 +37,21 @@ async function desk(req: APIRequestContext): Promise<Desk> {
   return (await res.json()) as Desk;
 }
 
+type Rev = { _rev?: number };
+
+/** Put the campus and class IV's section back as seeded — through the kernel (the masters-desk POST is 410 since 2.2f). */
 async function putBack(req: APIRequestContext): Promise<void> {
-  const d = await desk(req);
-  const res = await req.post("/api/school-data/masters-desk", {
-    data: {
-      version: 2,
-      campuses: d.campuses.map((c) => (c.id === CAMPUS ? { ...c, isActive: true } : c)),
-      sections: d.sections.map((s) => (s.classId === CLASS_IV ? { ...s, name: "A" } : s)),
-      sliceBases: { campuses: d.sliceStamps?.campuses ?? "", sections: d.sliceStamps?.sections ?? "" },
-    },
-  });
+  const campuses = ((await (await req.get("/api/data/masters.campuses?limit=1000")).json()) as { rows: (Campus & Rev)[] }).rows;
+  const sections = ((await (await req.get("/api/data/masters.sections?limit=1000")).json()) as { rows: (Section & Rev)[] }).rows;
+  const ops: Record<string, unknown>[] = [];
+  for (const c of campuses) {
+    if (c.id === CAMPUS && !c.isActive) ops.push({ collection: "masters.campuses", op: "upsert", id: c.id, base: String(c._rev ?? 0), row: { isActive: true } });
+  }
+  for (const s of sections) {
+    if (s.classId === CLASS_IV && s.name !== "A") ops.push({ collection: "masters.sections", op: "upsert", id: s.id, base: String(s._rev ?? 0), row: { name: "A" } });
+  }
+  if (ops.length === 0) return;
+  const res = await req.post("/api/data/masters/batch", { data: { ops } });
   expect(res.status(), `put back: ${(await res.text()).slice(0, 200)}`).toBe(200);
 }
 

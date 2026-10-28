@@ -27,8 +27,9 @@
  *     view-only → 403; two ops are one all-or-none batch. Object slice
  *     (masters.school-profile) on its slice stamp.
  *  4. the step 1.1 finding: a class link without isOptional, through the new
- *     route AND through the old masters-desk POST, is saved with
- *     isOptional:false and the row tables follow (was: slice written, rows 500).
+ *     route, is saved with isOptional:false and the row tables follow (was:
+ *     slice written, rows 500); the old masters-desk POST answers 410 and
+ *     writes nothing (data-layer 2.2f).
  *  5. soft delete (udise.sheets): put away, then revived only with the
  *     revision read back through ?ids=.
  * Everything changed is put back exactly as seeded (the Playwright gate runs
@@ -334,6 +335,8 @@ async function main(): Promise<void> {
     );
   }
   {
+    // Since data-layer 2.2f the old masters-desk POST is gone: the same body
+    // answers 410 build_stale and writes nothing (no slice, no row).
     const desk = await req(`${app}/api/school-data/masters-desk`, { headers: principal });
     const links = arr(desk.body.classSubjects).map(obj);
     const stamp = String(obj(desk.body.sliceStamps).classSubjects || "");
@@ -343,19 +346,13 @@ async function main(): Promise<void> {
       headers: principal,
       body: { classSubjects: [...links, extra], sliceBases: { classSubjects: stamp } },
     });
-    const row = (await rest(`masters_desk_class_subjects?id=eq.${extra.id}&select=is_optional`))[0] ?? {};
-    const after = await req(`${app}/api/school-data/masters-desk`, { headers: principal });
-    const restore = await req(`${app}/api/school-data/masters-desk`, {
-      method: "POST",
-      headers: principal,
-      body: { classSubjects: links, sliceBases: { classSubjects: String(obj(after.body.sliceStamps).classSubjects || "") } },
-    });
+    const rows = await rest(`masters_desk_class_subjects?id=eq.${extra.id}&select=id`);
     const back = await req(`${app}/api/school-data/masters-desk`, { headers: principal });
     record(
-      "1.1 finding (old masters-desk POST): a link without isOptional is saved, rows follow (was 500, slice written, rows not)",
-      w.status === 200 && row.is_optional === false && restore.status === 200 &&
+      "1.1 finding (old masters-desk POST): gone since 2.2f — 410 build_stale, nothing written",
+      w.status === 410 && obj(w.body).reason === "build_stale" && rows.length === 0 &&
         arr(back.body.classSubjects).length === links.length,
-      `write ${w.status} ${w.status === 200 ? "" : short(w.body)}, row is_optional=${String(row.is_optional)}, restore ${restore.status}, links ${arr(back.body.classSubjects).length}/${links.length}`,
+      `write ${w.status} ${short(w.body)}, rows ${rows.length}, links ${arr(back.body.classSubjects).length}/${links.length}`,
     );
   }
 

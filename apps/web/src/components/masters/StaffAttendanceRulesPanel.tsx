@@ -22,7 +22,6 @@ import {
   clearStaffRuleAssignments,
   describeRule,
   loadAttendanceRules,
-  migrateLegacyTimingIntoMasters,
   newAttendanceRuleDraft,
   removeAttendanceRule,
   upsertAttendanceRule,
@@ -80,7 +79,6 @@ export function StaffAttendanceRulesPanel() {
   );
 
   function reload() {
-    migrateLegacyTimingIntoMasters();
     setState(loadAttendanceRules());
   }
 

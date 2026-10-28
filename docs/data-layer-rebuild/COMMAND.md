@@ -1897,6 +1897,63 @@ masters-element-writes + masters-overlay 15/15. Self-test +2 (planner on stored 
 **Not done.** Two counters issuing the same RECEIPT number at the same instant (`/next` does not reserve) still needs an
 atomic claim — a separate "[MIGRATION — director applies]" proposal, not built here.
 
+*(2.2f PR A built 28 Oct 2026, PR #719 — the Masters whole-book push deleted; no migration.)* **What changed.**
+- **The browser push is gone:** `saveMasters`, `persistMastersSystemImport`, `persistMastersClient` (lib/masters.ts);
+  the flush, scheduler, section save (`mastersSectionSave`) and `pushMastersDeskApi` (mastersNormalizedClient — the GET
+  hydrate stays until 2.3b); `scheduleMastersSync`, `pushMastersRemoteServer` and the read-triggered push when
+  `NEXT_PUBLIC_MASTERS_READ_FROM_DB=false` (mastersPersistence); `holdsMastersFeatureWrite` (rbacGuard); the masters
+  branch of the browser mirror push (schoolDataMirror, and Fee Take's refresh that sent `masters` with it). Frozen files:
+  deletions only.
+- **Its callers:** the legacy staff-timing copy into Masters (`migrateLegacyTimingIntoMasters`, run on every Staff
+  attendance rules open — deleted); `ensureStudentClassLinks` returns the filtered copy and never saves; the fee-discount
+  seed import (`lib/feeDiscountImportHydrate.ts`, already a no-op on a configured school) deleted with its four callers
+  (AppShell, Fee Take, loadSis, the SIS hydrate); the idle-logout flush no longer flushes Masters.
+- **`mastersDeskBridge` deleted** (director, Q4). A lib/ writer (`writeMastersChanges`) now waits for the masters VIEW's
+  next answer (`refetchMastersAnswer`, lib/data/client/hooks.tsx — asked whether or not a screen observes it, an in-flight
+  read shared), which the 2.1 bridge lays on the page copy; the Masters editor's writes just invalidate the view. No more
+  ~235 KB masters-desk re-read after every element write.
+- **`POST /api/school-data/masters-desk` answers 410** `{ok:false, reason:"build_stale", reload:true}` +
+  `X-Bhb-Build-Stale: 1` for every body (for anyone holding Masters or one of its functions — others get the 403 they always got; one log line `event: masters-desk-post-gone` with who and
+  the client build). Nothing is read or written. The function-only branch, `sliceBases`, the revision lock and every
+  guard call went with it; `mastersRevisionGuard.ts` (whole file) and `guardSubjectsOverwrite` /
+  `guardFoundationListsOverwrite` / `guardListShrink` (mastersWriteGuard) were left unused and are deleted.
+  `featurePushOutcome` stays for the 15 other desks (director, Q1). GET unchanged.
+- Self-tests deleted with the code: `masters-revision-guard`, `masters-revision-lifecycle`, `masters-revision-everywhere`,
+  `masters-section-saves`, `masters-subject-guard` (package.json, ci.yml, verify.sh). `masters-pending` lost its
+  section-save assertion; `masters-element-commit` §4 (the old path's guard) went, §9 now tests `refetchMastersAnswer`
+  (asks with no screen mounted, one read for two writes, false not a throw). `mastersTransportNoPrune` and
+  `mastersStaffSlices` (listed in the plan) test code that still exists — kept, green.
+- Ratchets (true counts): `save_masters_call_sites` 2 → **0**; new `masters_desk_post` = **0** (was 1);
+  `fake_success` 28 → 27; `selftest_readfilesync_files` 88 → 86; `load_masters_calls_src` 345 → 341; `load_sis_calls_src`
+  420 → 419.
+**Proof.** `stale-writer.spec` — the three old shapes → 410 + `X-Bhb-Build-Stale: 1`, the kernel's value stays; and a
+route test: whole book, section save, a teacher's `{classSubjects}` with one real change in her class, `{}` and an empty
+body → all 410, `masters_desk_sync_meta.updated_at` (erp_versions and the desk GET) unmoved, the teacher's link unchanged.
+**Fail-on-old** (apps/web at origin/main 2c5d822c, same stack): `whole book 200, section save 409 slice_stale, teacher 200
+functionOnly, {} 409 unversioned, empty 409 unversioned`, no stale header; `write-kernel.acceptance` "old masters-desk POST
+gone" FAILS (200, the link written). Updated to the kernel / 410: `propagation` (api writer → batch + element write),
+`masters-overlay` put-back, `masters-element-writes` and `fee-writes` old bodies (410), `staff-editor-writes` (staff 0: no
+write of any kind, masters-desk included), `write-kernel.acceptance`, `versions.acceptance`. Local on this branch:
+propagation project 215/215 (propagation + masters-overlay + masters-element-writes and their dependencies);
+stale-writer 2/2; staff-editor-writes 5/5; fee-writes 10/10 without the office-clerk case (see Not proven); `check`: every
+acceptance green (1.3 22/22, 1.5 26/26, 2.2b 27/27, v1-*). **Seen** (`masters-push-gone.spec`, desktop-light + 375-dark,
+no masters-desk POST in any): a section renamed and back (element write), a staff attendance rule created, back after a
+reload, removed; a student's profile and the roster open; Fee Take opens on a child. Fee Take saving: fee-writes' counter
+collect with a discount (desktop).
+**Behaviour changes users will notice.** A tab opened before this deploy that still saves Masters the old way (an old
+Masters screen, a teacher's old phone/web build saving class subjects) gets "This page is out of date … Reload the page
+and make the change again — nothing was saved" — for one release (director, Q3). Saving a counter discount, RTE waiver,
+referral or the fee clone no longer re-reads the whole masters desk afterwards (faster on slow lines). Opening Staff
+attendance rules, Fee Take or a student no longer saves the Masters book in the background. A browser that still held a
+pre-July staff-timing copy no longer copies it into Masters.
+**Not done / not proven.** The student form's Save (the SIS whole-roster push) is refused on the e2e fixture
+("duplicate key … sis_students_tenant_admission_ay_uidx") on origin/main too — Phase 3's path; SIS saving is therefore not
+seen, only SIS reads. `fee-writes` "fees · edit clerk" fails locally on origin/main as well as here (her Collect never
+shows "Receipt details", fresh stack) — pre-existing locally, CI decides. Fee Take saving is seen on desktop only.
+`test:desk-load-guard` (verify.sh, not CI) fails on origin/main too. `apps/web/scripts/qa-curriculum-pass.mts` still
+imports `saveMasters` (scripts are left alone; it no longer runs). Production log line not yet measured
+(`masters-desk-post-gone` count after deploy).
+
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /
 `bhb-rbac-updated` / `bhb-desk-first-hydrated` events and their listeners (one is the

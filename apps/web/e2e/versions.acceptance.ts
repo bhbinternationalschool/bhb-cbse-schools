@@ -19,7 +19,8 @@
  *     session; 200 {ok:true, versions, at} for office staff; 403 for a
  *     parent (school-wide counts are staff-only) and for an inactive family; it is the static route,
  *     not /api/data/[collection].
- *  5. A Masters change made through the app's own masters-desk POST moves the
+ *  5. A Masters change made through the kernel (POST /api/data/masters.subjects
+ *     on the element's `_rev`; the masters-desk POST is 410 since 2.2f) moves the
  *     "masters" version, and the server's loadServerMasters rebuilds exactly
  *     once — not again on later calls, not after 31 s with no change.
  * The renamed subject is put back exactly as seeded afterwards.
@@ -232,9 +233,8 @@ async function main(): Promise<void> {
   const versionsNow = async () => obj(obj((await req(`${app}/api/data/views/versions`, { headers: office })).body.versions).masters);
   const desk = await req(`${app}/api/school-data/masters-desk`, { headers: office });
   const subjects = arr(desk.body.subjects).map(obj);
-  const stamp = String(obj(desk.body.sliceStamps).subjects || "");
   const target = subjects[0];
-  if (!target || !stamp) throw new Error("masters-desk gave no subjects / no subjects stamp");
+  if (!target) throw new Error("masters-desk gave no subjects");
   // Subjects carry their English name in `nameEn`.
   const originalName = String(target.nameEn ?? "");
   if (!originalName) throw new Error("the first subject has no nameEn");
@@ -243,12 +243,12 @@ async function main(): Promise<void> {
   await sleep(2_100);
   const v0 = await versionsNow();
   const r0 = rebuilds();
-  const post = await req(`${app}/api/school-data/masters-desk`, {
+  const post = await req(`${app}/api/data/masters.subjects`, {
     method: "POST",
     headers: principal,
-    body: { subjects: subjects.map((s) => (s.id === target.id ? { ...s, nameEn: renamed } : s)), sliceBases: { subjects: stamp } },
+    body: { ops: [{ op: "upsert", id: target.id, base: String(target._rev ?? 0), row: { nameEn: renamed } }] },
   });
-  record("masters: rename a subject through the app's masters-desk POST (principal)", post.status === 200, `HTTP ${post.status} ${JSON.stringify(post.body).slice(0, 120)}`);
+  record("masters: rename a subject through the kernel (principal)", post.status === 200, `HTTP ${post.status} ${JSON.stringify(post.body).slice(0, 120)}`);
 
   await sleep(2_100);
   const v1 = await versionsNow();
@@ -278,13 +278,10 @@ async function main(): Promise<void> {
   record("masters: no change for 31 s = no rebuild", r3 === r2 && v2.updated_at === v1.updated_at, `rebuild lines ${r2} → ${r3}; version ${String(v2.updated_at)}`);
 
   // Put the seed back, exactly.
-  const restore = await req(`${app}/api/school-data/masters-desk`, {
+  const restore = await req(`${app}/api/data/masters.subjects`, {
     method: "POST",
     headers: principal,
-    body: {
-      subjects: arr(after.body.subjects).map(obj).map((s) => (s.id === target.id ? target : s)),
-      sliceBases: { subjects: String(obj(after.body.sliceStamps).subjects || "") },
-    },
+    body: { ops: [{ op: "upsert", id: target.id, base: String(obj(obj(post.body).versions)[String(target.id)] ?? ""), row: { nameEn: originalName } }] },
   });
   const back = await req(`${app}/api/school-data/masters-desk`, { headers: office });
   const restored = obj(arr(back.body.subjects).map(obj).find((s) => s.id === target.id));

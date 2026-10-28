@@ -209,7 +209,8 @@ test.describe.serial("the staff editor writes rows (data-layer 2.2d)", () => {
       await feeHeadForm.locator("button[type=submit]").first().click();
       expect((await saved).status(), "the fee head saved").toBe(200);
       await page.waitForTimeout(3_000);
-      expect(writes.filter((w) => !/masters-desk/.test(w)), "no staff write of any kind").toEqual([]);
+      // (2.2f: the masters-desk book is not sent either — it answers 410.)
+      expect(writes, "no staff write of any kind, and no whole-book save").toEqual([]);
       const after = await rows(page);
       expect(after.length, "sis_staff count unchanged").toBe(before.length);
       const rev = (rs: Row[]) => Object.fromEntries(rs.map((r) => [r.id, r.updated_at]));
