@@ -178,11 +178,12 @@ export function StaffProfileForm(props: Props) {
         import("@/lib/deskHydrateGuard"),
       ]);
       const did = await withHydrationSlot(() => ensureStaffHydrated());
+      if (props.mode !== "edit" && !did) return;
+      // Re-read whether or not THIS call did the loading when editing:
+      // another part of the page may have loaded the roster after the mount read.
+      const next = loadMasters();
+      setMasters(next);
       if (props.mode === "edit") {
-        // Re-read whether or not THIS call did the loading: another part of
-        // the page may have loaded the roster after the mount read.
-        const next = loadMasters();
-        setMasters(next);
         const existing = next.staff.find((s) => s.id === props.staffId);
         if (existing) {
           setError(null);
@@ -190,10 +191,7 @@ export function StaffProfileForm(props: Props) {
         } else {
           setError(hasDeskLoaded("staff") ? "Staff not found" : "Could not load the staff list — please try again.");
         }
-        return;
       }
-      if (!did) return;
-      setMasters(loadMasters());
     })();
   }, [props]);
 
