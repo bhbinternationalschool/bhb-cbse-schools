@@ -767,6 +767,27 @@ test("receipt number: after a phone receipt the tab never saw, with the counter 
   expect(errors, "no page errors").toEqual([]);
 });
 
+// ── Between midnight and 05:30 IST the counter's date is India's today ────
+// Fee Take defaulted the collection date to the UTC date, while the receipt's
+// back-dating rule (lib/fees collectPayment) judges it against India's today.
+// From 00:00 to 05:30 IST those differ by a day: a clerk who may not back-date
+// pressed Collect and nothing was saved (every CI run after 00:00 IST on
+// 28 Oct 2026 failed the clerk case). The browser's clock is put at 00:30 IST.
+test("collection date: at 00:30 IST the counter offers India's today — the date the back-dating rule judges against", async ({ browser }) => {
+  const context = await browser.newContext({ baseURL: APP_URL, viewport: { width: 1440, height: 900 } });
+  await signIn(context, "office");
+  const page = await context.newPage();
+  try {
+    // 28 Oct 00:30 IST = 27 Oct 19:00 UTC.
+    await page.clock.install({ time: new Date("2026-10-27T19:00:00.000Z") });
+    await page.goto(`/fees?tab=collect&q=${encodeURIComponent(CHILD.admissionNo)}`);
+    await page.getByRole("button", { name: new RegExp(CHILD.admissionNo) }).first().click({ timeout: 30_000 });
+    await expect(page.getByRole("textbox", { name: "Collection date" })).toHaveValue("2026-10-28", { timeout: 30_000 });
+  } finally {
+    await context.close();
+  }
+});
+
 // ── Seen: the screens this step touches, desktop-light and 375-dark ───────
 test("seen: fee structure, counter, RTE heads and fee reports — desktop-light and phone375-dark", async ({ browser }) => {
   const shots: { name: string; width: number; height: number; dark: boolean }[] = [
