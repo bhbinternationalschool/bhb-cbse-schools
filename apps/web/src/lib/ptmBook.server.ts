@@ -80,8 +80,15 @@ export async function ptmOptionsForStudent(opts: {
   const student = sis.students.find((s) => s.id === opts.studentId);
   if (!student) return { ok: false, error: "Student not found" };
 
-  const { loadMasters } = await import("@/lib/masters");
-  const masters = loadMasters();
+  // 2.3b: the server's reference cache, never the mirror's copy. Unread =
+  // say so; never options built from an empty book.
+  const { loadServerMasters } = await import("@/lib/api/v1/auth");
+  let masters: Awaited<ReturnType<typeof loadServerMasters>>;
+  try {
+    masters = await loadServerMasters();
+  } catch {
+    return { ok: false, error: "Could not read the school setup — please try again" };
+  }
   const state = loadPtm();
   const events = state.events
     .filter(

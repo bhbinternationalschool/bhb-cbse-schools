@@ -22,7 +22,7 @@ import {
   schemeForClassId,
   subjectTakeMap,
   subjectsForMarkEntry,
-  type ExamDeps,
+  type ExamReadDeps,
   type ExamPolicy,
   type ExamSubject,
   type ExamTerm,
@@ -87,7 +87,7 @@ export function ExamReadinessDashboard(props: {
 
   const sections = useMemo<SectionInfo[]>(() => {
     if (!masters || !sis) return [];
-    const deps: ExamDeps = { state: exams, masters, sis };
+    const deps: ExamReadDeps = { state: exams, masters, sis };
     const classes = masters.classes
       .filter((c) => c.isActive !== false)
       .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));

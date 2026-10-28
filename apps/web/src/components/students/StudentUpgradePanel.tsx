@@ -240,6 +240,10 @@ export function StudentUpgradePanel({
       return;
     }
 
+    if (!masters) {
+      setError("The school setup is still loading — try again in a moment");
+      return;
+    }
     setSaving(true);
     const res = upgradeStudentClass({
       studentId: selected.id,
@@ -251,7 +255,7 @@ export function StudentUpgradePanel({
       resetCurriculum: mode === "class" && resetCurriculum,
       reason,
       effectiveOn,
-      masters: masters ?? undefined,
+      masters,
     });
     setSaving(false);
     if (!res.ok) {

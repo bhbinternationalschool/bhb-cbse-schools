@@ -54,7 +54,13 @@ export function buildPtmBriefFacts(input: {
   const exams = loadExams();
   const cards: ReportCard[] = [];
   for (const term of listExamTerms(ay, exams)) {
-    const b = buildReportCard({ student: st, classLabel, examTermId: term.id, academicYearCode: ay });
+    const b = buildReportCard({
+      student: st,
+      classLabel,
+      examTermId: term.id,
+      academicYearCode: ay,
+      deps: { state: exams, masters: input.masters, sis: input.sis },
+    });
     if ("error" in b) continue;
     if (b.totalMax > 0 && b.lines.some((l) => l.marksObtained != null)) cards.push(b);
   }
