@@ -99,6 +99,7 @@ SELFTESTS=(
   test:student-filters
   test:masters-merge
   test:accounts
+  test:certificates-udise-masters-as-data
   test:playbook
   test:erp-chat
   test:wa-templates-automation

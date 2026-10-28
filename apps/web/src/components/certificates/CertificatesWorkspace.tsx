@@ -283,12 +283,13 @@ export function CertificatesWorkspace() {
     if (!student) return null;
     return certificateEligibility(student, kind, {
       server: duesAnswer,
-      bookIsFull: mastersScope === "full",
+      bookIsFull: mastersScope === "full" && !!masters,
+      book: masters,
     });
     // holdDecisions.version: eligibility folds in checkHold, which reads a
     // snapshot that lands after the first render.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- duesAnswer is rebuilt from the query each render; its parts are the deps
-  }, [student, kind, tick, holdDecisions.version, mastersScope, duesQuery.data, duesQuery.error]);
+  }, [student, kind, tick, holdDecisions.version, mastersScope, masters, duesQuery.data, duesQuery.error]);
 
   useEffect(() => {
     const code = holdCodeForCertificate(kind);
@@ -307,7 +308,10 @@ export function CertificatesWorkspace() {
       setApaarId("");
       return;
     }
-    const label = classLabelForStudent(student);
+    // The class label is read from the screen's Masters (2.3b); the desk only
+    // renders once it has answered, so this runs once per student with it.
+    if (!masters) return;
+    const label = classLabelForStudent(student, masters);
     setLastClassStudied(label);
     setPen(student.pen || "");
     setApaarId(student.apaarId || "");
@@ -325,7 +329,7 @@ export function CertificatesWorkspace() {
     // The form resets per student only; session/leavingDate are read at that
     // moment on purpose (a later edit of either must not wipe the TC form).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [student?.id]);
+  }, [student?.id, !!masters]);
 
   // "Checked by" designation: the signer's, from the staff roster — once per
   // student, as soon as Masters has answered. Keyed on `masters` so a book
@@ -396,8 +400,9 @@ export function CertificatesWorkspace() {
   const nextCertNoPreview = useMemo(() => {
     if (!student) return "";
     const ay = student.academicYearCode || session.academicYearCode || DEFAULT_AY;
-    return suggestNextCertificateNumber(kind, ay);
-  }, [student, kind, session.academicYearCode]);
+    if (!masters) return "";
+    return suggestNextCertificateNumber(kind, ay, masters);
+  }, [student, kind, session.academicYearCode, masters]);
 
   async function onGenerateCertificateAi() {
     if (!student) {
@@ -498,7 +503,8 @@ export function CertificatesWorkspace() {
       : duesAnswer;
     if (certificateNeedsDuesCheck(kind)) void duesQuery.refetch();
     const result = issueCertificate({
-      dues: { server: dues, bookIsFull: mastersScope === "full" },
+      masters: mastersNow,
+      dues: { server: dues, bookIsFull: mastersScope === "full", book: mastersNow },
       kind,
       studentId: student.id,
       issuedBy,
@@ -508,7 +514,7 @@ export function CertificatesWorkspace() {
       leavingDate: kind === "tc" ? leavingDate : "",
       reasonForLeaving: kind === "tc" ? reasonForLeaving : "",
       lastClassStudied:
-        kind === "tc" ? lastClassStudied : classLabelForStudent(student),
+        kind === "tc" ? lastClassStudied : classLabelForStudent(student, mastersNow),
       promotedTo: kind === "tc" ? promotedTo : "",
       conduct,
       remarks,
@@ -1603,8 +1609,8 @@ export function CertificatesWorkspace() {
         confirmLabel="Void"
         tone="danger"
         onConfirm={() => {
-          if (!voidTarget) return;
-          voidCertificate(voidTarget.id);
+          if (!voidTarget || !masters) return;
+          voidCertificate(voidTarget.id, masters);
           refresh();
           flash("Certificate voided");
           setVoidTargetId(null);

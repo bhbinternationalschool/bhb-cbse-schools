@@ -70,7 +70,7 @@ export async function POST(req: Request) {
   }
 
   const profile = normalizeSchoolProfile(masters.schoolProfile);
-  const classLabel = classLabelForStudent(student);
+  const classLabel = classLabelForStudent(student, masters);
 
   const studentContext = [
     `Name: ${student.fullName}`,

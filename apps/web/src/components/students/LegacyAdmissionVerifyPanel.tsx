@@ -55,7 +55,11 @@ export function LegacyAdmissionVerifyPanel({
 
   function verifyOne(id: string) {
     setError(null);
-    const res = verifyAndAssignSystemAdmission(id, masters ?? undefined);
+    if (!masters) {
+      setError("The school setup is still loading — try again in a moment");
+      return;
+    }
+    const res = verifyAndAssignSystemAdmission(id, masters);
     if (!res.ok) {
       setError(res.error);
       return;
@@ -71,9 +75,13 @@ export function LegacyAdmissionVerifyPanel({
 
   function verifyAll() {
     if (!pending.length) return;
+    if (!masters) {
+      setError("The school setup is still loading — try again in a moment");
+      return;
+    }
     setBusy(true);
     setError(null);
-    const res = verifyAllPendingSystemAdmissions(masters ?? undefined);
+    const res = verifyAllPendingSystemAdmissions(masters);
     refresh();
     setBusy(false);
     if (res.assigned > 0) {
