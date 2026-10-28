@@ -490,6 +490,7 @@ export function HomeworkReportsRunner({ ay }: { ay: string }) {
       toDate,
       format,
       sectionKeys,
+      masters: hwMasters,
     });
     if (!r.ok) {
       setError(r.error);
@@ -599,6 +600,8 @@ export function ExamReportsRunner({ ay }: { ay: string }) {
     () => (examMastersQ.data?.masters.classes ?? []).filter((c) => c.isActive),
     [examMastersQ.data],
   );
+  // 2.3b: the report reads Masters as data (null = it refuses, never empty).
+  const { masters: examMasters } = useScreenMasters();
 
   useEffect(() => {
     if (!examTermId && terms[0]) setExamTermId(terms[0].id);
@@ -616,6 +619,7 @@ export function ExamReportsRunner({ ay }: { ay: string }) {
       academicYearCode: ay,
       topN,
       format,
+      masters: examMasters,
     });
     if (!r.ok) {
       setError(r.error);
@@ -1040,6 +1044,8 @@ export function TimetableReportsRunner({ ay }: { ay: string }) {
   const [toDate, setToDate] = useState(todayIso);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 2.3b: the report reads Masters as data (null = it refuses, never empty).
+  const { masters: ttMasters } = useScreenMasters();
 
   function run(id: TimetableReportId) {
     const r = runTimetableReport(id, {
@@ -1048,6 +1054,7 @@ export function TimetableReportsRunner({ ay }: { ay: string }) {
       fromDate,
       toDate,
       format,
+      masters: ttMasters,
     });
     if (!r.ok) {
       setError(r.error);
@@ -1207,6 +1214,8 @@ export function PtmReportsRunner() {
   );
   const [eventId, setEventId] = useState(() => events[0]?.id ?? "");
   const { show, view } = useRunResult();
+  // 2.3b: the report reads Masters as data (null = it refuses, never empty).
+  const { masters: ptmMasters } = useScreenMasters();
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
@@ -1230,7 +1239,7 @@ export function PtmReportsRunner() {
       {view}
       <ExportList
         reports={PTM_REPORTS}
-        onRun={(id) => show(runPtmReport(id as PtmReportId, { eventId: eventId || undefined, format }))}
+        onRun={(id) => show(runPtmReport(id as PtmReportId, { eventId: eventId || undefined, format, masters: ptmMasters }))}
       />
     </div>
   );
@@ -1241,6 +1250,8 @@ export function StudentLeaveReportsRunner({ ay }: { ay: string }) {
   const [fromDate, setFromDate] = useState(`${ay.slice(0, 4)}-04-01`);
   const [toDate, setToDate] = useState(todayIso);
   const { show, view } = useRunResult();
+  // 2.3b: the report reads Masters as data (null = it refuses, never empty).
+  const { masters: leaveMasters } = useScreenMasters();
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
@@ -1261,7 +1272,7 @@ export function StudentLeaveReportsRunner({ ay }: { ay: string }) {
       <ExportList
         reports={STUDENT_LEAVE_REPORTS}
         onRun={(id) =>
-          show(runStudentLeaveReport(id as StudentLeaveReportId, { academicYearCode: ay, fromDate, toDate, format }))
+          show(runStudentLeaveReport(id as StudentLeaveReportId, { academicYearCode: ay, fromDate, toDate, format, masters: leaveMasters }))
         }
       />
     </div>
@@ -1317,6 +1328,8 @@ export function TeachingReportsRunner({ ay }: { ay: string }) {
     () => (teachMastersQ.data?.masters.classes ?? []).filter((c) => c.isActive !== false),
     [teachMastersQ.data],
   );
+  // 2.3b: the report reads Masters as data (null = it refuses, never empty).
+  const { masters: teachMasters } = useScreenMasters();
   const [classId, setClassId] = useState("");
   const [fromDate, setFromDate] = useState(`${todayIso().slice(0, 7)}-01`);
   const [toDate, setToDate] = useState(todayIso);
@@ -1369,6 +1382,7 @@ export function TeachingReportsRunner({ ay }: { ay: string }) {
               toDate,
               staffId: ownOnly ? session.staffId || "__none__" : undefined,
               format,
+              masters: teachMasters,
             }),
           )
         }

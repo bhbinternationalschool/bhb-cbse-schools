@@ -16,7 +16,7 @@ import {
   reportTemplateForClassId,
   schemeForClassId,
   getExamPolicy,
-  type ExamDeps,
+  type ExamReadDeps,
   type ExamTerm,
   type ExamsState,
   type ReportCard,
@@ -180,7 +180,7 @@ function cardFor(
   term: ExamTerm,
   sis: SisState,
   masters: MastersState,
-  deps: ExamDeps,
+  deps: ExamReadDeps,
 ): ReportCard | null {
   const policy = getExamPolicy(deps.state);
   const scheme = schemeForClassId(student.classId, policy);
@@ -262,7 +262,7 @@ export async function buildParentResults(
   // printed card would contradict.
   const overridesRow = await readModuleLocalState<unknown>("attendance_result_overrides");
   const attendanceKnown = overridesRow !== null;
-  const deps: ExamDeps = {
+  const deps: ExamReadDeps = {
     state,
     masters,
     sis,

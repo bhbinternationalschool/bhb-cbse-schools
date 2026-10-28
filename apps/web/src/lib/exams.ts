@@ -13,7 +13,6 @@ import {
 import type { ExamRoom } from "@/lib/examSeating";
 import {
   DEFAULT_AY,
-  loadMasters,
   resolveFeeGroupId,
   type MastersState,
   type SchoolClass,
@@ -47,6 +46,7 @@ import {
 import type { Subject as MasterSubject } from "@/lib/foundationMasters";
 import { ncfTagForSubject } from "@/lib/cbseSubjectGroups";
 import { recordExamsDeletion } from "@/lib/examsNormalizedClient";
+import { requireMasters, requireSis } from "@/lib/data/requireData";
 
 /**
  * A subject graded, not marked: Masters calls it co-scholastic, or its NCF
@@ -687,8 +687,14 @@ export type ExamsState = {
 /**
  * Stores a caller has already loaded.
  *
- * Every reader in this file falls back to `loadExams()` / `loadMasters()` /
- * `loadSis()` when a dep is missing. That is correct and it is slow: each of
+ * data-layer 2.3b: Masters and the student register are DATA the caller
+ * passes (`ExamReadDeps`) — a screen from `useScreenMasters`, a route from
+ * `loadServerMasters()`. A reader handed none refuses (lib/data/requireData)
+ * instead of answering from an empty copy. The exams book itself is still the
+ * tab's copy (Phase 5).
+ *
+ * History: every reader in this file fell back to `loadExams()` / `loadMasters()` /
+ * `loadSis()` when a dep was missing. That is correct and it is slow: each of
  * those is a localStorage read plus a JSON.parse plus a normalise pass over
  * the whole blob (the SIS one is 1.2 MB). On 2026-09-15 the mark-entry grid
  * called into this path once per CELL per render — 529 parses of the SIS
@@ -707,6 +713,9 @@ export type ExamDeps = {
   /** Pre-computed HOLD_REPORT_CARD verdicts by student id. */
   holdChecks?: Map<string, HoldCheck>;
 };
+
+/** What a reader that resolves subjects, classes or sections needs in hand. */
+export type ExamReadDeps = ExamDeps & { masters: MastersState; sis: SisState };
 
 const STORAGE_KEY = "bhb_exams_v1";
 
@@ -1887,6 +1896,8 @@ export function saveExamDateSheetEntry(input: {
   startTime: string;
   durationMinutes: number;
   note?: string;
+  /** The school setup (useScreenMasters / loadServerMasters) — session dates. */
+  masters: MastersState;
 }):
   | { ok: true; entry: ExamDateSheetEntry }
   | { ok: false; error: string } {
@@ -1910,7 +1921,7 @@ export function saveExamDateSheetEntry(input: {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
     return { ok: false, error: "Select an exam date" };
   }
-  const masters = loadMasters();
+  const masters = requireMasters(input.masters, "saveExamDateSheetEntry");
   const ayRow = masters.academicYears.find(
     (y) => y.code === input.academicYearCode,
   );
@@ -2013,21 +2024,17 @@ export function subjectsForClass(
  * Creates missing rows by code; widens classIds when needed.
  */
 export function syncExamSubjectsFromMasters(
-  classId?: string,
-  state?: ExamsState,
-  deps?: ExamDeps & {
+  classId: string | undefined,
+  state: ExamsState | undefined,
+  deps: ExamReadDeps & {
     /** Write the widened catalog to storage. Off by default: this is a
      * read-path helper and a read must not write (see ExamDeps). */
     persist?: boolean;
   },
 ): ExamsState {
   const s = state ?? deps?.state ?? loadExams();
-  let masters: MastersState;
-  try {
-    masters = deps?.masters ?? loadMasters();
-  } catch {
-    return s;
-  }
+  const masters = requireMasters(deps?.masters, "syncExamSubjectsFromMasters");
+  const sis = requireSis(deps?.sis, "syncExamSubjectsFromMasters");
 
   const classIds =
     classId
@@ -2047,7 +2054,6 @@ export function syncExamSubjectsFromMasters(
 
   // Also pull any confirmed student enrollments so cart-only codes exist
   try {
-    const sis = deps?.sis ?? loadSis();
     for (const st of sis.students) {
       if (classId && st.classId !== classId) continue;
       if (!isCurriculumConfirmed(st)) continue;
@@ -2153,19 +2159,13 @@ function matchExamSubjectsToCodes(
  */
 export function subjectsForStudent(
   student: SisStudent,
-  state?: ExamsState,
-  deps?: ExamDeps,
+  state: ExamsState | undefined,
+  deps: ExamReadDeps,
 ): ExamSubject[] {
   let s = state ?? deps?.state ?? loadExams();
   s = syncExamSubjectsFromMasters(student.classId, s, deps);
   const examSubs = subjectsForClass(student.classId, s);
-
-  let masters: MastersState;
-  try {
-    masters = deps?.masters ?? loadMasters();
-  } catch {
-    return examSubs;
-  }
+  const masters = requireMasters(deps?.masters, "subjectsForStudent");
 
   const enrolled = resolveStudentSubjects(student, masters, {
     forAssessment: true,
@@ -2196,10 +2196,10 @@ export function subjectsForStudent(
 export function subjectsForMarkEntry(
   classId: string,
   students: SisStudent[],
-  state?: ExamsState,
-  deps?: ExamDeps,
+  state: ExamsState | undefined,
+  deps: ExamReadDeps,
 ): ExamSubject[] {
-  const d = withLoadedDeps(deps);
+  const d = withLoadedDeps(deps, "subjectsForMarkEntry");
   const s = syncExamSubjectsFromMasters(classId, state ?? d.state, d);
   const byCode = new Map<string, ExamSubject>();
 
@@ -2222,37 +2222,24 @@ export function subjectsForMarkEntry(
 export function studentTakesExamSubject(
   student: SisStudent,
   subject: ExamSubject,
-  state?: ExamsState,
-  deps?: ExamDeps,
+  state: ExamsState | undefined,
+  deps: ExamReadDeps,
 ): boolean {
   const list = subjectsForStudent(student, state, deps);
   const code = subject.code.toUpperCase();
   return list.some((s) => s.code.toUpperCase() === code);
 }
 
-/** Fill in whichever stores the caller did not pass, loading each ONCE. */
-function withLoadedDeps(deps?: ExamDeps): ExamDeps & { state: ExamsState } {
-  let masters: MastersState | null = deps?.masters ?? null;
-  if (!masters) {
-    try {
-      masters = loadMasters();
-    } catch {
-      masters = null;
-    }
-  }
-  let sis: SisState | null = deps?.sis ?? null;
-  if (!sis) {
-    try {
-      sis = loadSis();
-    } catch {
-      sis = null;
-    }
-  }
+/**
+ * The caller's stores with the exams book filled in (loaded ONCE). Masters and
+ * the register are the caller's to pass — none means refuse (2.3b).
+ */
+function withLoadedDeps(deps: ExamReadDeps, where: string): ExamReadDeps & { state: ExamsState } {
   return {
     ...deps,
     state: deps?.state ?? loadExams(),
-    ...(masters ? { masters } : {}),
-    ...(sis ? { sis } : {}),
+    masters: requireMasters(deps?.masters, where),
+    sis: requireSis(deps?.sis, where),
   };
 }
 
@@ -2268,12 +2255,12 @@ function withLoadedDeps(deps?: ExamDeps): ExamDeps & { state: ExamsState } {
 export function subjectTakeMap(
   students: SisStudent[],
   subjects: ExamSubject[],
-  state?: ExamsState,
-  deps?: ExamDeps,
+  state: ExamsState | undefined,
+  deps: ExamReadDeps,
 ): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
   if (students.length === 0) return out;
-  const d = withLoadedDeps(deps);
+  const d = withLoadedDeps(deps, "subjectTakeMap");
   let s = state ?? d.state;
   for (const classId of new Set(students.map((st) => st.classId))) {
     s = syncExamSubjectsFromMasters(classId, s, d);
@@ -2466,7 +2453,7 @@ export function prepareMarkSheet(
   input: SaveMarkSheetInput,
   state: ExamsState,
   existing: MarkSheet | undefined,
-  deps?: ExamDeps,
+  deps: ExamReadDeps,
 ):
   | { ok: true; sheet: MarkSheet; subjectsUsed: ExamSubject[] }
   | { ok: false; error: string } {
@@ -2479,7 +2466,7 @@ export function prepareMarkSheet(
     return { ok: false, error: LOCKED_SHEET_MESSAGE };
   }
 
-  const d = withLoadedDeps({ ...deps, state });
+  const d = withLoadedDeps({ ...deps, state }, "prepareMarkSheet");
   const ids = new Set(input.marks.map((m) => m.studentId));
   const students = (d.sis?.students ?? []).filter((st) => ids.has(st.id));
   const subjects = subjectsForMarkEntry(input.classId, students, state, d);
@@ -2707,6 +2694,7 @@ function commitSheet(
 
 export function saveMarkSheet(
   input: SaveMarkSheetInput,
+  deps: ExamReadDeps,
 ): { ok: true; sheet: MarkSheet } | { ok: false; error: string } {
   const state = loadExams();
   const existing = findMarkSheet(
@@ -2715,7 +2703,7 @@ export function saveMarkSheet(
     input.sectionId,
     state,
   );
-  const prepared = prepareMarkSheet(input, state, existing);
+  const prepared = prepareMarkSheet(input, state, existing, deps);
   if (!prepared.ok) return prepared;
   commitSheet(state, prepared.sheet, {
     expectedUpdatedAt: existing?.updatedAt ?? null,
@@ -3083,29 +3071,20 @@ function attendanceSummaryForStudent(
   student: SisStudent,
   ay: string,
   term: ExamTerm,
-  deps: ExamDeps | undefined,
+  deps: ExamReadDeps,
 ): ReportCard["attendance"] {
-  let masters: MastersState | null = deps?.masters ?? null;
-  if (!masters) {
-    try {
-      masters = loadMasters();
-    } catch {
-      masters = null;
-    }
-  }
+  const masters = requireMasters(deps?.masters, "attendanceSummaryForStudent");
   const registers = (deps?.attendance ?? loadAttendance()).registers;
-  const computed = masters
-    ? sessionDaysSummary({
-        masters,
-        ay,
-        classId: student.classId,
-        studentId: student.id,
-        joinedOn: student.joinedOn,
-        registers,
-        until: (term.endsOn || "").slice(0, 10) || undefined,
-        today: deps?.todayIso ?? new Date().toISOString().slice(0, 10),
-      })
-    : null;
+  const computed = sessionDaysSummary({
+    masters,
+    ay,
+    classId: student.classId,
+    studentId: student.id,
+    joinedOn: student.joinedOn,
+    registers,
+    until: (term.endsOn || "").slice(0, 10) || undefined,
+    today: deps?.todayIso ?? new Date().toISOString().slice(0, 10),
+  });
   const override = findAttendanceOverride(
     deps?.attendanceOverrides ?? loadAttendanceResultOverrides(),
     ay,
@@ -3294,23 +3273,16 @@ export function buildReportCard(input: {
   classLabel: string;
   examTermId: string;
   academicYearCode?: string;
-  /** Pass the stores when building cards for more than one student. */
-  deps?: ExamDeps;
+  /** Masters + register (2.3b: data, never a fallback) and any stores in hand. */
+  deps: ExamReadDeps;
 }): ReportCard | { error: string } {
   const ay = input.academicYearCode ?? input.student.academicYearCode ?? DEFAULT_AY;
   const state = input.deps?.state ?? loadExams();
+  const masters = requireMasters(input.deps?.masters, "buildReportCard");
   const term = state.terms.find((t) => t.id === input.examTermId);
   if (!term) return { error: "Exam term not found" };
 
-  let masters: MastersState | null = input.deps?.masters ?? null;
-  if (!masters) {
-    try {
-      masters = loadMasters();
-    } catch {
-      masters = null;
-    }
-  }
-  const deps: ExamDeps = { ...input.deps, state, masters: masters ?? undefined };
+  const deps: ExamReadDeps = { ...input.deps, state, masters };
 
   const mode = masters
     ? curriculumChoiceMode(classGroupForStudent(input.student, masters))
@@ -3785,9 +3757,9 @@ export function evaluatePromotionPass(
 
 export function nextClassAfter(
   classId: string,
-  masters?: MastersState,
+  masters: MastersState,
 ): SchoolClass | null {
-  const m = masters ?? loadMasters();
+  const m = requireMasters(masters, "nextClassAfter");
   const current = m.classes.find((c) => c.id === classId);
   if (!current) return null;
   const ordered = m.classes
@@ -3800,9 +3772,9 @@ export function nextClassAfter(
 
 export function defaultSectionForClass(
   classId: string,
-  masters?: MastersState,
+  masters: MastersState,
 ): Section | null {
-  const m = masters ?? loadMasters();
+  const m = requireMasters(masters, "defaultSectionForClass");
   return (
     m.sections.find((s) => s.classId === classId && s.isActive) ??
     m.sections.find((s) => s.classId === classId) ??
@@ -3866,24 +3838,26 @@ export function buildClassResultSheet(input: {
   sectionId: string;
   examTermId: string;
   academicYearCode?: string;
-  deps?: ExamDeps;
+  /** Masters + register (2.3b: data, never a fallback) and any stores in hand. */
+  deps: ExamReadDeps;
 }): ClassResultSheet | { error: string } {
   const ay = input.academicYearCode ?? DEFAULT_AY;
   const state = input.deps?.state ?? loadExams();
+  const masters = requireMasters(input.deps?.masters, "buildClassResultSheet");
+  const sis = requireSis(input.deps?.sis, "buildClassResultSheet");
   const term = state.terms.find((t) => t.id === input.examTermId);
   if (!term) return { error: "Exam term not found" };
   const policy = getExamPolicy(state);
-  const masters = input.deps?.masters ?? loadMasters();
   const nextClass = nextClassAfter(input.classId, masters);
   const nextSection = nextClass
     ? defaultSectionForClass(nextClass.id, masters)
     : null;
   // One parse of every store for the whole section, not one per child.
-  const deps: ExamDeps = {
+  const deps: ExamReadDeps = {
     ...input.deps,
     state,
     masters,
-    sis: input.deps?.sis ?? loadSis(),
+    sis,
     attendance: input.deps?.attendance ?? loadAttendance(),
     attendanceOverrides: input.deps?.attendanceOverrides ?? loadAttendanceResultOverrides(),
     holdChecks:
@@ -4142,6 +4116,7 @@ export function suggestPromotionsForSection(input: {
   examTermId: string;
   academicYearCode?: string;
   decidedBy: string;
+  deps: ExamReadDeps;
 }):
   | { ok: true; updated: number; skipped: number }
   | { ok: false; error: string } {
@@ -4209,12 +4184,15 @@ export function applyPromotionsToSis(input: {
   examTermId: string;
   sectionId: string;
   academicYearCode?: string;
+  /** The school setup (useScreenMasters) — destination class/section, fee group. */
+  masters: MastersState;
 }):
   | { ok: true; applied: number; skipped: number; errors: string[] }
   | { ok: false; error: string } {
   const ay = input.academicYearCode ?? DEFAULT_AY;
   const state = loadExams();
-  const masters = loadMasters();
+  const masters = requireMasters(input.masters, "applyPromotionsToSis");
+  // A writer: it rewrites the tab's register copy, so it starts from that copy.
   const sis = loadSis();
   const errors: string[] = [];
   let applied = 0;

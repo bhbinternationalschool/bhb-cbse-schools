@@ -30,6 +30,7 @@ import {
   type ExamSubject,
   type ExamTerm,
 } from "@/lib/exams";
+import { loadMasters } from "@/lib/masters";
 
 console.log("examDateSheet.selftest.ts");
 
@@ -71,6 +72,7 @@ const SUBJECT: ExamSubject = {
     date: "2026-11-10",
     startTime: "09:00",
     durationMinutes: 120,
+    masters: loadMasters(),
   });
   assert.ok(added.ok, `the paper was added: ${added.ok ? "" : added.error}`);
   if (!added.ok) throw new Error("unreachable");
@@ -85,6 +87,7 @@ const SUBJECT: ExamSubject = {
     date: "2026-11-14",
     startTime: "09:00",
     durationMinutes: 120,
+    masters: loadMasters(),
   });
   assert.ok(moved.ok, `the paper moved: ${moved.ok ? "" : moved.error}`);
 

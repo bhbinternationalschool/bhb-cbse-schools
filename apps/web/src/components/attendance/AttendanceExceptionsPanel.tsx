@@ -126,10 +126,14 @@ export function AttendanceExceptionsPanel({ ay }: { ay: string }) {
 
   function onResolve(ex: AttendanceException) {
     const note = (resolveNotes[ex.id] || "").trim();
+    // The grant is read from Masters: not loaded yet = not decided (the
+    // button only shows once it is).
+    if (!masters) return;
     const r = resolveAttendanceException({
       id: ex.id,
       note,
       resolvedBy: session.fullName,
+      masters,
     });
     if (!r.ok) {
       setError(r.error);

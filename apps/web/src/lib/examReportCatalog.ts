@@ -6,7 +6,8 @@
  * topper list, no pass/fail summary an office could hand to an inspector.
  */
 
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY, type MastersState } from "@/lib/masters";
+import { MASTERS_NOT_LOADED_MESSAGE } from "@/lib/data/requireData";
 import { loadSis, type SisState } from "@/lib/sis";
 import { rosterForSection } from "@/lib/attendance";
 import {
@@ -98,7 +99,8 @@ export type ExamReportFilters = {
   /** toppers only — how many to list per class (default 10) */
   topN?: number;
   format: ExamReportFormat;
-  masters?: MastersState;
+  /** The school setup (useScreenMasters). Null = not loaded: the run refuses (2.3b). */
+  masters: MastersState | null;
   sis?: SisState;
   exams?: ExamsState;
 };
@@ -181,6 +183,7 @@ function buildResultRows(
       sectionId,
       examTermId: term.id,
       academicYearCode: ay,
+      deps: { masters, sis },
     });
     if ("error" in sheet) continue;
     for (const row of sheet.rows) {
@@ -312,6 +315,7 @@ function runResultSummary(
       sectionId,
       examTermId: term.id,
       academicYearCode: ay,
+      deps: { masters, sis },
     });
     if ("error" in sheet) continue;
     const s = sheet.summary;
@@ -576,7 +580,8 @@ export function runExamReport(
   // Not from a copy this page has not loaded (lib/reportDataGuard).
   const notLoaded = refuseReportBeforeLoad(reportDesksFor("exams", id));
   if (notLoaded) return { ok: false, error: notLoaded };
-  const masters = filters.masters ?? loadMasters();
+  const masters = filters.masters;
+  if (!masters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
   const sis = filters.sis ?? loadSis();
   const exams = filters.exams ?? loadExams();
   const ay = filters.academicYearCode || DEFAULT_AY;

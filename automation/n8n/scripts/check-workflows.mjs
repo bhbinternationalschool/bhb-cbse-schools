@@ -25,7 +25,7 @@ const charterDir = path.join(root, "charters");
 const read = (p) => fs.readFileSync(p, "utf8");
 const house = read(path.join(charterDir, "_house-rules.md")).trim();
 const charters = Object.fromEntries(
-  ["receptionist", "academic-incharge", "chair"].map((n) => [
+  ["receptionist", "academic-incharge", "marketing-manager", "chair"].map((n) => [
     n,
     `${house}\n\n---\n\n${read(path.join(charterDir, `${n}.md`)).trim()}`,
   ]),
@@ -117,7 +117,8 @@ for (const file of fs.readdirSync(wfDir).filter((f) => f.endsWith(".json")).sort
   const expect = {
     "receptionist.json": ["receptionist"],
     "academic-incharge.json": ["academic-incharge"],
-    "morning-huddle.json": ["chair", "receptionist", "academic-incharge"],
+    "marketing-manager.json": ["marketing-manager"],
+    "morning-huddle.json": ["chair", "receptionist", "academic-incharge", "marketing-manager"],
   }[file] || [];
   for (const role of expect) {
     if (!embedded.includes(charters[role])) fail(file, `embedded charter for ${role} is stale — run scripts/build-workflows.mjs`);
