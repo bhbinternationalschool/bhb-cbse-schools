@@ -58,17 +58,15 @@ export default function ContactPage() {
                 >
                   {CONTACT.phone}
                 </a>
-                <span className="text-slate-500">
-                  {" "}
-                  · also reachable on WhatsApp
-                </span>
               </dd>
             </>
           ) : null}
+          <dt className="text-sm font-medium text-slate-500">WhatsApp chatbot only</dt>
+          <dd>{CONTACT.whatsapp} (messages, not voice calls)</dd>
         </dl>
 
         <h2 className="mt-8 text-lg font-semibold text-slate-900">
-          Office hours
+          Parent-visit hours
         </h2>
         <p className="mt-3">{CONTACT.hours}</p>
 
