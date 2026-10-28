@@ -1,19 +1,18 @@
 /**
- * ERP chat — staff DMs/groups, staff–parent DMs, class announcements.
- * Demo store: localStorage `bhb_erp_chat_v2` (+ optional remote blob merge).
+ * The OLD header chat's shapes and pure helpers (staff DMs/groups,
+ * staff–parent DMs, class announcements). Nothing writes this chat any more:
+ * since 29 Oct 2026 the header chat is school chat (lib/schoolChat*.ts,
+ * rows in the database). Kept only for what still reads its old rows (the
+ * message logs read the erp_chat_state blob) and chatSelfFromSession.
  */
 
 import type { MastersState } from "@/lib/masters";
 import {
   canCreateClassAnnouncement,
   canCreateStaffGroup,
-  canParentChatWithStaff,
-  canStaffChatWithParent,
   parentActorKey,
   parseParentActorKey,
   resolveChatActor,
-  staffAllowedParentContacts,
-  staffAllowedSections,
   type ChatActor,
   type ChatParentContact,
   type ChatSectionRef,
@@ -22,8 +21,6 @@ import type { SessionLike } from "@/lib/rbac";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import type { SisState } from "@/lib/sis";
 import type { StaffRecord } from "@/lib/foundationMasters";
-import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
-import { trackServerWork } from "@/lib/serverWork";
 
 export type ErpChatThreadKind =
   | "staff_dm"
@@ -68,8 +65,6 @@ export type ErpChatState = {
   messages: ErpChatMessage[];
 };
 
-const STORAGE_KEY = "bhb_erp_chat_v2";
-const LEGACY_KEY = "bhb_staff_chat_v1";
 export const ERP_CHAT_EVENT = "bhb-erp-chat";
 
 function nid(prefix: string) {
@@ -272,42 +267,6 @@ export function mergeErpChatStates(
   });
 }
 
-export function loadErpChat(): ErpChatState {
-  if (typeof window === "undefined") return emptyErpChatState();
-  try {
-    const raw = readCache(STORAGE_KEY);
-    if (raw) return normalizeErpChatState(JSON.parse(raw));
-    const legacy = localStorage.getItem(LEGACY_KEY);
-    if (legacy) {
-      const migrated = normalizeErpChatState(JSON.parse(legacy));
-      writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(migrated));
-      return migrated;
-    }
-    return emptyErpChatState();
-  } catch {
-    return emptyErpChatState();
-  }
-}
-
-export function saveErpChat(state: ErpChatState) {
-  if (typeof window === "undefined") return;
-  const next = normalizeErpChatState(state);
-  writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify(next));
-  window.dispatchEvent(new Event(ERP_CHAT_EVENT));
-  window.dispatchEvent(new Event("bhb-staff-chat"));
-  void trackServerWork(import("@/lib/erpChatPersistence").then(({ scheduleErpChatSync }) => {
-    scheduleErpChatSync(next);
-  }));
-}
-
-export function writeErpChatLocalRaw(state: ErpChatState) {
-  if (typeof window === "undefined") return;
-  writeCacheOrInvalidate(
-    STORAGE_KEY,
-    JSON.stringify(normalizeErpChatState(state)),
-  );
-}
-
 export function erpChatStateIsEmpty(state: ErpChatState): boolean {
   return (state.threads?.length ?? 0) === 0 && (state.messages?.length ?? 0) === 0;
 }
@@ -335,7 +294,7 @@ export function messagesForThread(
   threadId: string,
   state?: ErpChatState,
 ): ErpChatMessage[] {
-  const s = state ?? loadErpChat();
+  const s = state ?? emptyErpChatState();
   return s.messages
     .filter((m) => m.threadId === threadId)
     .sort((a, b) => a.at.localeCompare(b.at));
@@ -354,7 +313,7 @@ export function unreadInThread(
   actorKey: string,
   state?: ErpChatState,
 ): number {
-  const s = state ?? loadErpChat();
+  const s = state ?? emptyErpChatState();
   return s.messages.filter(
     (m) =>
       m.threadId === threadId &&
@@ -367,7 +326,7 @@ export function totalUnreadForActor(
   actorKey: string,
   state?: ErpChatState,
 ): number {
-  const s = state ?? loadErpChat();
+  const s = state ?? emptyErpChatState();
   const myThreadIds = new Set(
     s.threads
       .filter((t) => t.participantIds.includes(actorKey))
@@ -385,7 +344,7 @@ export function threadsForActor(
   actorKey: string,
   state?: ErpChatState,
 ): ErpChatThread[] {
-  const s = state ?? loadErpChat();
+  const s = state ?? emptyErpChatState();
   return s.threads
     .filter((t) => t.participantIds.includes(actorKey))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -400,31 +359,12 @@ export function actorCanPost(
   return p.canPost !== false;
 }
 
-export function markThreadRead(
-  threadId: string,
-  actorKey: string,
-): ErpChatState {
-  const state = loadErpChat();
-  let changed = false;
-  const messages = state.messages.map((m) => {
-    if (m.threadId !== threadId) return m;
-    if (m.fromActorKey === actorKey) return m;
-    if (m.readBy.includes(actorKey)) return m;
-    changed = true;
-    return { ...m, readBy: [...m.readBy, actorKey] };
-  });
-  if (!changed) return state;
-  const next = { ...state, messages };
-  saveErpChat(next);
-  return next;
-}
-
 export function findOrCreateStaffDm(
   meStaffId: string,
   peerStaffId: string,
   state?: ErpChatState,
 ): { state: ErpChatState; thread: ErpChatThread } {
-  const s = state ?? loadErpChat();
+  const s = state ?? emptyErpChatState();
   const id = staffDmThreadId(meStaffId, peerStaffId);
   const existing = s.threads.find((t) => t.id === id);
   if (existing) return { state: s, thread: existing };
@@ -446,7 +386,7 @@ export function findOrCreateStaffParentDm(input: {
   academicYearCode: string;
   state?: ErpChatState;
 }): { state: ErpChatState; thread: ErpChatThread } {
-  const s = input.state ?? loadErpChat();
+  const s = input.state ?? emptyErpChatState();
   const hhKey = parentActorKey(input.householdId);
   const id = staffParentDmThreadId(input.staffId, input.householdId);
   const existing = s.threads.find((t) => t.id === id);
@@ -472,7 +412,7 @@ export function findOrCreateClassAnnouncement(input: {
   parentHouseholdIds: string[];
   state?: ErpChatState;
 }): { state: ErpChatState; thread: ErpChatThread } {
-  const s = input.state ?? loadErpChat();
+  const s = input.state ?? emptyErpChatState();
   const id = classAnnouncementThreadId(
     input.academicYearCode,
     input.section.sectionId,
@@ -530,241 +470,6 @@ export function findOrCreateClassAnnouncement(input: {
     participants,
   })!;
   return { state: { ...s, threads: [thread, ...s.threads] }, thread };
-}
-
-export function createStaffGroup(input: {
-  title: string;
-  memberStaffIds: string[];
-  createdBy: string;
-}):
-  | { ok: true; state: ErpChatState; thread: ErpChatThread }
-  | { ok: false; error: string } {
-  const title = input.title.trim().slice(0, 120);
-  if (!title) return { ok: false, error: "Group name is required" };
-  const members = [
-    ...new Set([input.createdBy, ...input.memberStaffIds].filter(Boolean)),
-  ];
-  if (members.length < 2) {
-    return { ok: false, error: "Add at least one other staff member" };
-  }
-  const thread = normalizeThread({
-    id: nid("grp"),
-    kind: "staff_group",
-    title,
-    createdBy: input.createdBy,
-    participants: members.map((id) => ({
-      actorKey: id,
-      actorKind: "staff",
-      canPost: true,
-    })),
-  })!;
-  const state = loadErpChat();
-  const next = { ...state, threads: [thread, ...state.threads] };
-  saveErpChat(next);
-  return { ok: true, state: next, thread };
-}
-
-export function sendErpChatMessage(input: {
-  threadId: string;
-  fromActorKey: string;
-  fromActorKind: "staff" | "parent";
-  text: string;
-}):
-  | { ok: true; state: ErpChatState; thread: ErpChatThread; message: ErpChatMessage }
-  | { ok: false; error: string } {
-  const text = input.text.trim();
-  if (!text) return { ok: false, error: "Type a message" };
-  let state = loadErpChat();
-  const thread = state.threads.find((t) => t.id === input.threadId);
-  if (!thread) return { ok: false, error: "Chat not found" };
-  if (!thread.participantIds.includes(input.fromActorKey)) {
-    return { ok: false, error: "You are not in this chat" };
-  }
-  if (!actorCanPost(thread, input.fromActorKey)) {
-    return {
-      ok: false,
-      error:
-        thread.kind === "class_announcement"
-          ? "Class announcements are read-only for parents"
-          : "You cannot post in this chat",
-    };
-  }
-  const message = normalizeMessage({
-    id: nid("ecm"),
-    threadId: thread.id,
-    fromActorKey: input.fromActorKey,
-    fromActorKind: input.fromActorKind,
-    text,
-    at: nowIso(),
-    readBy: [input.fromActorKey],
-  })!;
-  const updatedThread: ErpChatThread = {
-    ...thread,
-    updatedAt: message.at,
-  };
-  state = {
-    ...state,
-    threads: [
-      updatedThread,
-      ...state.threads.filter((t) => t.id !== thread.id),
-    ],
-    messages: [...state.messages, message],
-  };
-  saveErpChat(state);
-  return { ok: true, state, thread: updatedThread, message };
-}
-
-export function openStaffDm(input: {
-  meStaffId: string;
-  peerStaffId: string;
-}):
-  | { ok: true; state: ErpChatState; thread: ErpChatThread }
-  | { ok: false; error: string } {
-  if (!input.meStaffId || !input.peerStaffId) {
-    return { ok: false, error: "Pick a teammate" };
-  }
-  if (input.meStaffId === input.peerStaffId) {
-    return { ok: false, error: "Cannot chat with yourself" };
-  }
-  const { state, thread } = findOrCreateStaffDm(
-    input.meStaffId,
-    input.peerStaffId,
-  );
-  if (!loadErpChat().threads.some((t) => t.id === thread.id)) {
-    saveErpChat(state);
-  }
-  return { ok: true, state: loadErpChat(), thread };
-}
-
-export function openStaffParentDm(input: {
-  actor: ChatActor;
-  householdId: string;
-  staffId: string;
-  academicYearCode: string;
-  masters: MastersState;
-  sis?: SisState;
-}):
-  | { ok: true; state: ErpChatState; thread: ErpChatThread }
-  | { ok: false; error: string } {
-  const { actor, householdId, staffId, academicYearCode, masters, sis } =
-    input;
-  if (actor.kind === "staff") {
-    if (
-      !canStaffChatWithParent(
-        actor,
-        householdId,
-        masters,
-        academicYearCode,
-        sis,
-      )
-    ) {
-      return { ok: false, error: "No access to this parent for your classes" };
-    }
-  } else if (actor.kind === "parent") {
-    if (actor.householdId !== householdId) {
-      return { ok: false, error: "Not your household" };
-    }
-    if (
-      !canParentChatWithStaff(
-        householdId,
-        staffId,
-        masters,
-        academicYearCode,
-        sis,
-      )
-    ) {
-      return { ok: false, error: "This teacher is not assigned to your child" };
-    }
-  } else {
-    return { ok: false, error: "Unauthorized" };
-  }
-
-  const { state, thread } = findOrCreateStaffParentDm({
-    staffId,
-    householdId,
-    academicYearCode,
-  });
-  saveErpChat(state);
-  return { ok: true, state: loadErpChat(), thread };
-}
-
-export function openClassAnnouncement(input: {
-  actor: ChatActor;
-  sectionId: string;
-  academicYearCode: string;
-  masters: MastersState;
-  sis?: SisState;
-}):
-  | { ok: true; state: ErpChatState; thread: ErpChatThread }
-  | { ok: false; error: string } {
-  const { actor, sectionId, academicYearCode, masters, sis } = input;
-  if (actor.kind !== "staff" || !actor.staffId) {
-    return { ok: false, error: "Only staff can create class announcements" };
-  }
-  if (
-    !canCreateClassAnnouncement(
-      actor,
-      sectionId,
-      masters,
-      academicYearCode,
-    )
-  ) {
-    return { ok: false, error: "Section not in your assigned classes" };
-  }
-  const staff = (masters.staff ?? []).find((s) => s.id === actor.staffId);
-  const section = staffAllowedSections(
-    staff,
-    masters,
-    academicYearCode,
-    actor.roleCodes,
-  ).find((s) => s.sectionId === sectionId);
-  if (!section) return { ok: false, error: "Section not found" };
-
-  const parents = staffAllowedParentContacts(
-    actor,
-    masters,
-    academicYearCode,
-    sis,
-  ).filter((p) => p.sectionIds.includes(sectionId));
-
-  const { state, thread } = findOrCreateClassAnnouncement({
-    section,
-    academicYearCode,
-    createdBy: actor.staffId,
-    parentHouseholdIds: parents.map((p) => p.householdId),
-  });
-  // Ensure creator + other office staff can post: add all office staff who open it
-  const withStaff = ensureStaffInAnnouncement(state, thread, actor.staffId);
-  saveErpChat(withStaff);
-  return {
-    ok: true,
-    state: loadErpChat(),
-    thread: loadErpChat().threads.find((t) => t.id === thread.id)!,
-  };
-}
-
-function ensureStaffInAnnouncement(
-  state: ErpChatState,
-  thread: ErpChatThread,
-  staffId: string,
-): ErpChatState {
-  if (thread.participantIds.includes(staffId)) return state;
-  const participants = [
-    ...thread.participants,
-    { actorKey: staffId, actorKind: "staff" as const, canPost: true },
-  ];
-  const nextThread = normalizeThread({
-    ...thread,
-    participants,
-    updatedAt: nowIso(),
-  })!;
-  return {
-    ...state,
-    threads: [
-      nextThread,
-      ...state.threads.filter((t) => t.id !== thread.id),
-    ],
-  };
 }
 
 export function listActiveStaffForChat(

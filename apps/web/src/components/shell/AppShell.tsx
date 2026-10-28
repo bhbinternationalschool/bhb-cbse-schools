@@ -10,7 +10,7 @@ import { formatIst } from "@bhb/time";
 import { SessionSelector } from "./SessionSelector";
 import { UniversalSearchBar } from "./UniversalSearchBar";
 import { NotificationBell } from "./NotificationBell";
-import { StaffInternalChatButton } from "./StaffInternalChatButton";
+import { SchoolChatHeaderButton } from "@/components/schoolChat/SchoolChatHeaderButton";
 import { StaffBroadcastButton } from "@/components/staff/StaffBroadcastButton";
 import { CommsRunningStrip } from "./CommsRunningStrip";
 import { ErpAiChatbot } from "./ErpAiChatbot";
@@ -442,7 +442,7 @@ function AppShellBody({
               {!mobileApp ? (
                 <SessionSelector currentCode={session.academicYearCode} />
               ) : null}
-              <StaffInternalChatButton />
+              <SchoolChatHeaderButton />
               <StaffBroadcastButton />
               <NotificationBell persona="staff" />
               {readOnly ? (

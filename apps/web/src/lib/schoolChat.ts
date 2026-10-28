@@ -21,13 +21,15 @@
  * section or a teacher who loses a subject is out of the old group at once.
  */
 
-export type ChatKind = "class" | "subject" | "dm_staff" | "dm_parent";
+export type ChatKind = "class" | "subject" | "dm_staff" | "dm_parent" | "group";
 
 export type ParsedConversation =
   | { kind: "class"; ay: string; classId: string; sectionId: string }
   | { kind: "subject"; ay: string; classId: string; sectionId: string; subjectId: string }
   | { kind: "dm_staff"; staffIds: [string, string] }
-  | { kind: "dm_parent"; staffId: string; studentId: string };
+  | { kind: "dm_parent"; staffId: string; studentId: string }
+  /** A group a member of staff made (migration 20261029120000): its members are stored. */
+  | { kind: "group"; groupId: string };
 
 const ID_RE = /^[A-Za-z0-9_.-]{1,80}$/;
 const okId = (s: string) => ID_RE.test(s);
@@ -58,6 +60,15 @@ export function parentDmId(staffId: string, studentId: string): string {
   return `dmp:${staffId}:${studentId}`;
 }
 
+/**
+ * A staff-made group's id. Random (two groups may share a name); the row in
+ * school_chat_conversations, not the id, says who is in it.
+ */
+export function staffMadeGroupId(random: string): string {
+  need(random);
+  return `grp:${random}`;
+}
+
 /** null = not a conversation id this server makes (refuse it). */
 export function parseConversationId(id: string): ParsedConversation | null {
   const parts = String(id || "").split(":");
@@ -68,6 +79,7 @@ export function parseConversationId(id: string): ParsedConversation | null {
     return { kind: "subject", ay: rest[0]!, classId: rest[1]!, sectionId: rest[2]!, subjectId: rest[3]! };
   if (tag === "dms" && rest.length === 2 && rest[0]! < rest[1]!) return { kind: "dm_staff", staffIds: [rest[0]!, rest[1]!] };
   if (tag === "dmp" && rest.length === 2) return { kind: "dm_parent", staffId: rest[0]!, studentId: rest[1]! };
+  if (tag === "grp" && rest.length === 1) return { kind: "group", groupId: rest[0]! };
   return null;
 }
 
