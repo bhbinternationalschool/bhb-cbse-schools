@@ -1,6 +1,7 @@
 import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
-import { assertPermission, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
+import { assertPermission, loadServerMasters, requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
+import { loadSis } from "@/lib/sis";
 import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
@@ -130,6 +131,9 @@ export async function POST(request: Request) {
       },
       state,
       existing,
+      // 2.3b: the school setup from the server's reference cache (503 when
+      // unread), never an empty copy; the register as the lib used to load it.
+      { masters: await loadServerMasters(), sis: loadSis() },
     );
     if (!prepared.ok) throw new ApiError("bad_request", prepared.error, 400);
     const pushed = await pushExamSheetToDb(prepared.sheet, {

@@ -321,7 +321,8 @@ export function AttendanceWorkspace() {
     return isTeacherAttendanceLocked(date, policy);
   }, [date, policy, clockTick]);
 
-  const canOverrideLock = useMemo(() => canOverrideAttendanceLock(), [tick]);
+  // 2.3b: the approve grant from the screen's Masters (none yet = no override).
+  const canOverrideLock = useMemo(() => canOverrideAttendanceLock(masters), [masters]);
 
   const lockBlocksTeacher =
     teacherLocked && !canOverrideLock;
@@ -456,6 +457,7 @@ export function AttendanceWorkspace() {
       officeOverrideNote: teacherLocked ? overrideNote : undefined,
       classLabel: classLabel(classId, sectionId),
       students: sis?.students,
+      masters,
     });
     if (!result.ok) {
       setError(result.error);

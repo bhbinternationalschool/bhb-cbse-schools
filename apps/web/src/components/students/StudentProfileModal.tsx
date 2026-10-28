@@ -187,13 +187,14 @@ export function StudentProfileModal({
         classLabel,
         examTermId: term.id,
         academicYearCode: ay,
+        deps: { state: exams, masters, sis },
       });
       if ("error" in rc) continue;
       const hasMarks = rc.lines.some((l) => l.marksObtained != null);
       if (hasMarks) cards.push(rc);
     }
     return cards;
-  }, [exams, student, classLabel, ay]);
+  }, [exams, student, classLabel, ay, masters, sis]);
 
   const attendanceSummary = useMemo(() => {
     if (!attendance)

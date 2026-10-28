@@ -172,6 +172,7 @@ export function buildSystemPrompt(opts: {
     "- Produce a report as a file with the report tool (collection, attendance, defaulters, daily_brief, fleet).",
     "- Open, create, close or snooze office tasks (list_tasks, create_task, close_task, snooze_task).",
     "- Set the monthly advertising budget when the director gives figures (set_marketing_budget). The Marketing Manager asks for the budget each month for Google Ads, Facebook and WhatsApp, for the school and the ITI; when the director replies with amounts, record each one and then confirm, in one line, exactly what you set (portal, unit, month, amount). If a portal or unit is not clear, ask — do not guess an amount.",
+    "- Set the monthly transport budget when the director gives figures (set_transport_budget). The Transport Manager asks each month for the fleet's diesel and maintenance budget (and insurance when a renewal is due); when the director replies with amounts, record each channel and then confirm, in one line, exactly what you set (channel, month, amount). Transport is one fleet — there is no school/ITI split here. If a channel is not clear, ask — do not guess an amount.",
     "",
     "SENDING — gated, never automatic:",
     "- Any message to a parent, a class, the whole school, or a staff member is OUTWARD. You NEVER send it. You call a draft tool (draft_notice, draft_fee_reminder, draft_parent_message, draft_staff_message), which prepares it for the director's approval. The director approves with a tap before anything goes out.",
@@ -218,7 +219,7 @@ export const DRAFT_TOOLS = new Set([
   "draft_staff_message",
 ]);
 /** Tools that perform a task write (office_tasks) or a budget write. */
-export const ACTION_TOOLS = new Set(["create_task", "close_task", "snooze_task", "set_marketing_budget"]);
+export const ACTION_TOOLS = new Set(["create_task", "close_task", "snooze_task", "set_marketing_budget", "set_transport_budget"]);
 
 export const OFFICE_ASSISTANT_TOOLS: ToolSpec[] = [
   tool(
@@ -322,6 +323,16 @@ export const OFFICE_ASSISTANT_TOOLS: ToolSpec[] = [
       month: { type: ["string", "null"], description: "YYYY-MM, e.g. '2026-11'. Omit/null for this month." },
     },
     ["portal", "unit", "amount"],
+  ),
+  tool(
+    "set_transport_budget",
+    "Set or update the monthly transport (fleet) budget for one channel. Use this to answer the Transport Manager's monthly budget ask — the director gives the figures and you record them. channel is 'diesel', 'maintenance', 'insurance' or 'other'. amount is the whole-month cap in rupees for the whole fleet (transport is one fleet, not split by unit). month is YYYY-MM; omit for the current month. Call it once per channel the director names.",
+    {
+      channel: { type: "string", enum: ["diesel", "maintenance", "insurance", "other"], description: "Which transport cost channel." },
+      amount: { type: "integer", description: "Monthly budget cap in rupees (whole number)." },
+      month: { type: ["string", "null"], description: "YYYY-MM, e.g. '2026-11'. Omit/null for this month." },
+    },
+    ["channel", "amount"],
   ),
   tool("close_task", "Mark an open office task done.", { id: { type: "integer" } }, ["id"]),
   tool("snooze_task", "Snooze an open office task to tomorrow.", { id: { type: "integer" } }, ["id"]),

@@ -17,7 +17,8 @@ import { classSectionLabel, WEEKDAY_SHORT } from "@/lib/timetable";
 import { isoDateWeekday } from "@/lib/examTimetable";
 import type { ExamDateSheetEntry, ExamSubject, ExamTerm } from "@/lib/exams";
 import type { SisStudent } from "@/lib/sis";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { type MastersState } from "@/lib/masters";
+import { requireMasters } from "@/lib/data/requireData";
 import { TENANT } from "@/lib/types";
 import { studentQrPayload } from "@/lib/idCardsPdf";
 
@@ -322,8 +323,9 @@ export function drawSignatureOnLine(doc: jsPDF, dataUrl: string, x: number, line
 
 export async function downloadAdmitCardsPdf(
   docs: AdmitCardDoc[],
-  options?: {
-    masters?: MastersState;
+  options: {
+    /** The school setup (useScreenMasters) — the letterhead (2.3b: data, not the tab's copy). */
+    masters: MastersState;
     /** The principal's signature (data URL, lib/printSignatures); absent = blank line. */
     principalSignature?: string | null;
   },
@@ -336,7 +338,7 @@ export async function downloadAdmitCardsPdf(
   }
 
   const letterhead = await resolvePdfLetterhead(
-    options?.masters ?? loadMasters(),
+    requireMasters(options?.masters, "downloadAdmitCardsPdf"),
   );
   const qrDataUrls = await Promise.all(
     docs.map((d) => qrDataUrlFor(d.qrPayload).catch(() => null)),

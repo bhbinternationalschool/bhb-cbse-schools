@@ -11,7 +11,7 @@ import {
   buildReportCard,
   listExamTerms,
   loadExams,
-  type ExamDeps,
+  type ExamReadDeps,
   type ExamTerm,
   type ReportCard,
 } from "@/lib/exams";
@@ -28,7 +28,7 @@ function cardFor(
   classLabel: string,
   termId: string,
   ay: string,
-  deps: ExamDeps,
+  deps: ExamReadDeps,
 ): ReportCard | null {
   const b = buildReportCard({ student: st, classLabel, examTermId: termId, academicYearCode: ay, deps });
   if ("error" in b) return null;
@@ -52,7 +52,7 @@ export function buildSectionRiskFacts(input: {
   const terms = listExamTerms(ay, exams);
   const earlier = terms.filter((t) => t.sortOrder < input.term.sortOrder).reverse();
   // Every store once for the section, not once per student per term.
-  const deps: ExamDeps = {
+  const deps: ExamReadDeps = {
     state: exams,
     masters: input.masters,
     sis: loadSis(),

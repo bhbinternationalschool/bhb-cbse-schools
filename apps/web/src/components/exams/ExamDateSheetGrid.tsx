@@ -178,6 +178,7 @@ export function ExamDateSheetGrid({
       date: draftDate,
       startTime: draftStart,
       durationMinutes: Number(draftDuration),
+      masters,
       note: draftNote,
     });
     if (!result.ok) {
@@ -242,6 +243,7 @@ export function ExamDateSheetGrid({
         startTime: r.startTime,
         durationMinutes: r.durationMinutes,
         note: r.note,
+        masters,
       });
       if (!result.ok) {
         setError(result.error);
