@@ -54,11 +54,15 @@ export function StaffOutdoorDutyPanel() {
           import("@/lib/staffAttendancePersistence"),
           import("@/lib/deskHydrateGuard"),
         ]);
-      const [didStaff, didAttendance] = await Promise.all([
+      await Promise.all([
         withHydrationSlot(() => ensureStaffHydrated()),
         withHydrationSlot(() => ensureStaffAttendanceHydrated()),
       ]);
-      if (didStaff || didAttendance) reload();
+      // Always re-read: when another part of the page loaded the desk first,
+      // this panel's ensure call returns false although its mount read was
+      // empty (the 15 Oct "No leave requests" race; more likely since 2.3a,
+      // when screens stopped waiting behind the old gate).
+      reload();
     })();
   }, []);
 

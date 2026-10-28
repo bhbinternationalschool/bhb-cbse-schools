@@ -483,6 +483,28 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
         pending.ranAction = true;
         return { text: `Task #${(data as { id?: number } | null)?.id ?? "?"} created for ${String(input.to_role || "director")}.` };
       }
+      case "set_marketing_budget": {
+        const ctx = await getServerTenantContext();
+        if (!ctx) return { text: "Could not set the budget right now." };
+        // The director names a portal; the budget table keeps Meta as 'meta'.
+        const channel = ({ google_ads: "google_ads", facebook: "meta", whatsapp: "whatsapp" } as Record<string, string>)[String(input.portal || "")];
+        const unit = String(input.unit || "");
+        const amount = Math.round(Number(input.amount));
+        if (!channel) return { text: "The portal must be google_ads, facebook or whatsapp." };
+        if (unit !== "school" && unit !== "iti") return { text: "The unit must be school or iti." };
+        if (!Number.isFinite(amount) || amount < 0) return { text: "Give the budget as a whole number of rupees." };
+        const mMatch = /^(\d{4})-(\d{2})$/.exec(String(input.month || "").trim());
+        const monthStart = mMatch ? `${mMatch[1]}-${mMatch[2]}-01` : `${istTodayIso().slice(0, 7)}-01`;
+        const now = new Date().toISOString();
+        const { error } = await ctx.sb.from("office_marketing_budget").upsert(
+          { tenant_id: ctx.tenantId, month: monthStart, unit, channel, cap_amount: amount, currency: "INR", status: "active", decided_by: "director", decided_at: now, updated_at: now },
+          { onConflict: "tenant_id,month,unit,channel" },
+        );
+        if (error) return { text: "Could not set the budget: " + error.message };
+        pending.ranAction = true;
+        const portalLabel = input.portal === "facebook" ? "Facebook" : input.portal === "whatsapp" ? "WhatsApp" : "Google Ads";
+        return { text: `${portalLabel} budget for the ${unit} set to ₹${amount.toLocaleString("en-IN")} for ${monthStart.slice(0, 7)}.` };
+      }
       case "close_task": {
         const ctx = await getServerTenantContext();
         if (!ctx) return { text: "Could not update the task right now." };

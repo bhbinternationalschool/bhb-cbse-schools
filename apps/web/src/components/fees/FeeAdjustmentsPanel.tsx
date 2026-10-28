@@ -28,6 +28,7 @@ import {
 } from "@/lib/feeAdjustments";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { loadSis, type SisState } from "@/lib/sis";
+import { useSisRosterLanded } from "@/components/data/useSisRosterLanded";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { PaymentReportImportPanel } from "@/components/fees/PaymentReportImportPanel";
 import { PreviousDuesImportPanel } from "@/components/fees/PreviousDuesImportPanel";
@@ -90,10 +91,12 @@ export function FeeAdjustmentsPanel({
   // Re-read when the server copy of this module lands (login/refresh hydration).
   useModuleStateHydration("fee_adjustments", () => { setRows(loadFeeAdjustments()); });
 
+  // The student picker is the SIS roster: read it again once it has landed.
+  const sisLanded = useSisRosterLanded();
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ay]);
+  }, [ay, sisLanded]);
 
   const students = useMemo(() => {
     if (!sis) return [];

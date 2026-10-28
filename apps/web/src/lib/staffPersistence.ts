@@ -656,13 +656,7 @@ async function hydrateStaffOnce(): Promise<boolean> {
     // 2026-08-18). The roster we just merged came from the DB; nothing needs
     // to go back.
     writeMastersLocalRaw(next);
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
-    }
   }
-  // Marked only once the roster is written: markDeskHydrated fires
-  // bhb-desk-first-hydrated, and access checks listening for it must find the
-  // roster already in masters (review of #574).
   markDeskHydrated(MODULE);
   return changed;
 }

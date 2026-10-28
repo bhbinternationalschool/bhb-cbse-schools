@@ -570,6 +570,8 @@ SELFTESTS=(
   test:reference-cache
   test:versions-route
   test:query-kernel
+  test:access-copy
+  test:view-load-metric
   test:reference-views
   test:masters-bridge
   test:masters-pending

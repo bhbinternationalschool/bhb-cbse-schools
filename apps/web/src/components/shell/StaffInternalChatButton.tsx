@@ -58,7 +58,7 @@ export function StaffInternalChatButton() {
   // they teach) is resolved from the copies the sidebar decides with
   // (data-layer 2.1f), kept by content so a desk landing does not rebuild the
   // thread list. Null until they have loaded: the chat waits, it never guesses.
-  const { masters } = useStableAccessCopy();
+  const { masters } = useStableAccessCopy({ enabled: open });
   const [state, setState] = useState<ErpChatState | null>(null);
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<TabId>("recent");

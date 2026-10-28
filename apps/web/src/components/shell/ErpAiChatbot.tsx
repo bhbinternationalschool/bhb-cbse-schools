@@ -119,7 +119,7 @@ export function ErpAiChatbot() {
   // reads the copies the sidebar decides with (data-layer 2.1f), kept by
   // content so a desk landing does not reload the conversation. Null until
   // they have loaded — the assistant stays disabled rather than guess.
-  const { masters, rbac } = useStableAccessCopy();
+  const { masters, rbac } = useStableAccessCopy({ enabled: open });
   const [messages, setMessages] = useState<ErpAiMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [typing, setTyping] = useState(false);

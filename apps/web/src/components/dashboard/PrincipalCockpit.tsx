@@ -14,6 +14,7 @@ import { formatInr } from "@/lib/masters";
 import { AlertBannerList } from "@/components/dashboard/AlertBannerList";
 import { duesFreshnessHint } from "@/lib/feeStoreDuesKpi";
 import { createCoalescedRefresh, type CoalescedRefresh } from "@/lib/coalescedRefresh";
+import { useMasters } from "@/lib/data/client/hooks";
 import { WaNumberGapBanner } from "@/components/comms/WaNumberGapBanner";
 import type { PrincipalSnapshot } from "@/lib/principalSnapshot.server";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
@@ -153,7 +154,6 @@ export function PrincipalCockpit() {
 
     window.addEventListener("bhb-desk-hydrated", onDataUpdate);
     window.addEventListener("bhb-desk-synced", onDataUpdate);
-    window.addEventListener("bhb-masters-updated", onDataUpdate);
     window.addEventListener("focus", onDataUpdate);
     document.addEventListener("visibilitychange", onVisibilityChange);
 
@@ -162,11 +162,20 @@ export function PrincipalCockpit() {
       if (refreshRef.current === refresh) refreshRef.current = null;
       window.removeEventListener("bhb-desk-hydrated", onDataUpdate);
       window.removeEventListener("bhb-desk-synced", onDataUpdate);
-      window.removeEventListener("bhb-masters-updated", onDataUpdate);
       window.removeEventListener("focus", onDataUpdate);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [fetchSnapshot]);
+  // A Masters change the versions poll saw (data-layer 2.3a — was
+  // 'bhb-masters-updated'): one more snapshot, through the same coalescing.
+  // Reads the tab's cache only.
+  const { dataUpdatedAt: mastersAnsweredAt } = useMasters({ enabled: false });
+  const mastersSeenAt = useRef(mastersAnsweredAt);
+  useEffect(() => {
+    if (!mastersAnsweredAt || mastersAnsweredAt === mastersSeenAt.current) return;
+    mastersSeenAt.current = mastersAnsweredAt;
+    refreshRef.current?.request();
+  }, [mastersAnsweredAt]);
 
   if (err) {
     return (

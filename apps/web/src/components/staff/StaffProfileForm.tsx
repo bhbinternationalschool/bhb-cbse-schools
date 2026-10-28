@@ -21,6 +21,7 @@ import {
   type StaffRecord,
 } from "@/lib/foundationMasters";
 import { loadMasters, type MastersState } from "@/lib/masters";
+import { hasDeskLoaded } from "@/lib/deskHydrateGuard";
 import { useStaffBookWrites } from "@/lib/data/client/staffBookWrites";
 import { persistSeriesUse, suggestFromSeriesCode } from "@/lib/numberSeries";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
@@ -161,11 +162,14 @@ export function StaffProfileForm(props: Props) {
       );
     } else {
       const existing = m.staff.find((s) => s.id === props.staffId);
-      if (!existing) {
+      if (existing) setDraft(normalizeStaffRecord(existing));
+      // "Not found" only once the roster has loaded on this page — an
+      // unloaded roster is unknown, not empty (R6). Since data-layer 2.3a the
+      // shell waits for the roster at most 5 s, so the form can mount first.
+      else if (hasDeskLoaded("staff")) {
         setError("Staff not found");
         return;
       }
-      setDraft(normalizeStaffRecord(existing));
     }
 
     void (async () => {
@@ -174,14 +178,18 @@ export function StaffProfileForm(props: Props) {
         import("@/lib/deskHydrateGuard"),
       ]);
       const did = await withHydrationSlot(() => ensureStaffHydrated());
-      if (!did) return;
+      if (props.mode !== "edit" && !did) return;
+      // Re-read whether or not THIS call did the loading when editing:
+      // another part of the page may have loaded the roster after the mount read.
       const next = loadMasters();
       setMasters(next);
       if (props.mode === "edit") {
         const existing = next.staff.find((s) => s.id === props.staffId);
         if (existing) {
           setError(null);
-          setDraft(normalizeStaffRecord(existing));
+          setDraft((cur) => (cur && !did ? cur : normalizeStaffRecord(existing)));
+        } else {
+          setError(hasDeskLoaded("staff") ? "Staff not found" : "Could not load the staff list — please try again.");
         }
       }
     })();
