@@ -5,8 +5,9 @@
  * Scope, deliberately: WhatsApp sends that flow through the shared
  * `/api/wa/dispatch` choke point (fee reminders, staff duty notify,
  * substitution notify, admission campaigns, owner broadcast — every
- * caller already routes through that one file) plus in-app staff↔parent
- * chat (lib/erpChat.ts, already household-keyed). IVRS has no call
+ * caller already routes through that one file) plus school chat: the
+ * family's direct chats with staff and everything it sent
+ * (lib/schoolChatLog.server.ts). IVRS has no call
  * persistence anywhere in this codebase yet (in-memory Map only, lost on
  * restart) and email has no provider configured — both are surfaced as
  * "not yet tracked" in the UI rather than faked with empty/fabricated
@@ -22,8 +23,7 @@ import {
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { findHouseholdByWaMobile } from "@/lib/waSisBotServer";
 import { waNormalizeLocal10 } from "@/lib/waSend";
-import { fetchDomainBlobFromDb } from "@/lib/domainBlob.server";
-import type { ErpChatState } from "@/lib/erpChat";
+import { ChatLogReadError, schoolChatEntriesForHousehold, type ChatLogDb } from "@/lib/schoolChatLog.server";
 
 export type HouseholdLogEntry = {
   id: string;
@@ -88,31 +88,10 @@ export async function logHouseholdWaSend(opts: {
   }
 }
 
-function appChatEntriesForHousehold(
-  state: ErpChatState,
-  householdId: string,
-): HouseholdLogEntry[] {
-  const threadIds = new Set(
-    state.threads.filter((t) => t.householdId === householdId).map((t) => t.id),
-  );
-  if (threadIds.size === 0) return [];
-  return state.messages
-    .filter((m) => threadIds.has(m.threadId))
-    .map((m) => ({
-      id: m.id,
-      channel: "app_chat" as const,
-      direction: m.fromActorKind === "staff" ? ("out" as const) : ("in" as const),
-      purpose: "app_chat",
-      via: "app",
-      templateName: "",
-      preview: m.text.slice(0, 400),
-      status: "sent" as const,
-      error: null,
-      by: m.fromActorKind === "staff" ? "Staff" : "Parent",
-      at: m.at,
-    }));
-}
-
+/**
+ * Throws ChatLogReadError when the school database cannot be read — the
+ * route answers 503; a failed read is never an empty history.
+ */
 export async function getHouseholdMessageTimeline(opts: {
   householdId?: string;
   mobile?: string;
@@ -129,59 +108,53 @@ export async function getHouseholdMessageTimeline(opts: {
   }
 
   const ctx = await getServerTenantContext();
+  if (!ctx) throw new ChatLogReadError("Could not reach the school database — please try again.");
   const entries: HouseholdLogEntry[] = [];
 
-  if (ctx) {
-    const { sb, tenantId } = ctx;
-    let query = sb
-      .from("household_message_log")
-      .select("*")
-      .eq("tenant_id", tenantId)
-      .order("created_at", { ascending: false })
-      .limit(limit);
-    query = householdId
-      ? query.eq("household_id", householdId)
-      : query.eq("mobile_e164", mobile10 ? `91${mobile10}` : opts.mobile || "");
-    const { data, error } = await query;
-    if (error) {
-      console.warn("[householdMessageLog] wa fetch failed", error.message);
-    } else {
-      const waRows = data || [];
-      const ladders = await deliveryLaddersFor(
-        waRows.map((r) => String(r.wa_message_id || "")),
-      );
-      for (const r of waRows) {
-        const ladder = ladders.get(String(r.wa_message_id || ""));
-        const stage: WaDeliveryStage =
-          r.status === "failed" ? "failed" : ladderStage(ladder);
-        entries.push({
-          id: String(r.id),
-          channel: "wa",
-          direction: r.direction === "in" ? "in" : "out",
-          purpose: String(r.purpose || ""),
-          via: String(r.via || ""),
-          templateName: String(r.template_name || ""),
-          preview: String(r.preview || ""),
-          status: r.status === "failed" ? "failed" : "sent",
-          deliveryStage: stage,
-          deliveryLabel: stageLabel(stage),
-          deliveredAt: ladder?.deliveredAt ?? null,
-          readAt: ladder?.readAt ?? null,
-          error: r.error ? String(r.error) : (ladder?.error ?? null),
-          by: "School",
-          at: String(r.created_at),
-        });
-      }
-    }
+  const { sb, tenantId } = ctx;
+  let query = sb
+    .from("household_message_log")
+    .select("*")
+    .eq("tenant_id", tenantId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  query = householdId
+    ? query.eq("household_id", householdId)
+    : query.eq("mobile_e164", mobile10 ? `91${mobile10}` : opts.mobile || "");
+  const { data, error } = await query;
+  if (error) {
+    console.error("[householdMessageLog] wa fetch failed", error.message);
+    throw new ChatLogReadError("Could not read the WhatsApp messages — please try again.");
+  }
+  const waRows = data || [];
+  const ladders = await deliveryLaddersFor(
+    waRows.map((r) => String(r.wa_message_id || "")),
+  );
+  for (const r of waRows) {
+    const ladder = ladders.get(String(r.wa_message_id || ""));
+    const stage: WaDeliveryStage =
+      r.status === "failed" ? "failed" : ladderStage(ladder);
+    entries.push({
+      id: String(r.id),
+      channel: "wa",
+      direction: r.direction === "in" ? "in" : "out",
+      purpose: String(r.purpose || ""),
+      via: String(r.via || ""),
+      templateName: String(r.template_name || ""),
+      preview: String(r.preview || ""),
+      status: r.status === "failed" ? "failed" : "sent",
+      deliveryStage: stage,
+      deliveryLabel: stageLabel(stage),
+      deliveredAt: ladder?.deliveredAt ?? null,
+      readAt: ladder?.readAt ?? null,
+      error: r.error ? String(r.error) : (ladder?.error ?? null),
+      by: "School",
+      at: String(r.created_at),
+    });
   }
 
   if (householdId) {
-    const { ok, state } = await fetchDomainBlobFromDb("erp_chat_state");
-    if (ok && state) {
-      entries.push(
-        ...appChatEntriesForHousehold(state as ErpChatState, householdId),
-      );
-    }
+    entries.push(...(await schoolChatEntriesForHousehold(sb as unknown as ChatLogDb, tenantId, householdId, limit)));
   }
 
   entries.sort((a, b) => b.at.localeCompare(a.at));

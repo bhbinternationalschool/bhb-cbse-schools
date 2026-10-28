@@ -97,8 +97,9 @@ export function StaffMessageTimelinePanel({
       <p className="text-[12px] text-[var(--muted)]">
         This staff member&apos;s cross-channel message history — WhatsApp sent
         to their own mobile (duty/substitution notify, leadership pings,
-        broadcasts) and in-app chat threads they take part in (staff DMs,
-        groups, class-announcement channels, parent DMs).{" "}
+        broadcasts) and school chat: their direct chats with staff and
+        families, the groups staff made that they are in, and every message
+        they sent.{" "}
         <span className="text-amber-800">IVRS and email are not tracked
         yet</span> — IVRS has no call history stored anywhere in this system
         today, and email has no provider configured.
