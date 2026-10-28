@@ -91,18 +91,19 @@ export function householdLanguage(
 /**
  * The language the school writes in when a family has not said otherwise.
  *
- * Hindi, decided 2026-09-07. It was "en", hardcoded at each call site, and
- * every one of the school's 198 households had a blank preferred_language —
- * so in practice EVERY parent received English, in a school where most
- * families read Hindi far more comfortably. The language flow that was meant
- * to fix that per family had never once saved a choice.
+ * English, per school rule: "the school is ENGLISH MEDIUM (only the Hindi/Sanskrit
+ * paper is in Hindi; never tell a child to write an exam in Hindi)". Families may
+ * choose their preferred language, which overrides this default. The language flow
+ * allows families to select their preference; families who have not selected
+ * receive the school default (English). This aligns with the school's English-
+ * medium policy while respecting family language preferences when set.
  *
  * A family that picks a language still overrides this; the default only
  * decides what happens before they ever say. One constant, so the school's
  * language is a decision in one place rather than a literal repeated at
  * every call.
  */
-export const SCHOOL_DEFAULT_WA_LANGUAGE: "en" | "hi" = "hi";
+export const SCHOOL_DEFAULT_WA_LANGUAGE: "en" | "hi" = "en";
 
 export function waTemplateLanguageFor(
   hh: HouseholdPrefsLike,
