@@ -2073,7 +2073,7 @@ as a parameter from the hook, or to server code). Then delete the `masters`, `st
 `moduleRegistry` tasks from `deskHydrationSchedule.ts` (a deletion in a frozen file) and the
 2.1 bridge. Acceptance: the `ensure*Hydrated` component ratchet falls by 4; `counts` and
 `propagation` green.
-*(2.3b batch 1 — shell, permissions and identity. Built 28 Oct 2026, PR #TBD.)* **What exists.** The lib/ save
+*(2.3b batch 1 — shell, permissions and identity. Built 29 Oct 2026, PR #735.)* **What exists.** The lib/ save
 checks (`lib/rbacGuard`: `assertModulePermission`, `assertSelfOrModulePermission`, `actorMayExport`,
 `assertCanConfigureRbac`, `assertStaffAdvancesPermission`, `holdsModuleFeatureWrite`, `isFunctionOnlyWriter`; and
 `rbac.saveRbac`, which now calls `assertCanConfigureRbac`) decide with this tab's views/rbac + views/staff-list answers in
