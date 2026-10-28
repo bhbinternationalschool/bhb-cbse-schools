@@ -13,7 +13,7 @@ import {
   resolveSchoolTiming,
   type SchoolWeekTiming,
 } from "@/lib/schoolTiming";
-import { loadMasters, saveMasters } from "@/lib/masters";
+import { loadMasters } from "@/lib/masters";
 import { getGracePeriodMinutes } from "@/lib/staffHr";
 
 import { assertModulePermission } from "@/lib/rbacGuard";
@@ -81,54 +81,17 @@ export type PunchEvaluation = {
 
 const STORAGE_KEY = "bhb_staff_attendance_rules_v1";
 
-/** School default timing from Masters (migrates legacy staff-rules timing once). */
+/**
+ * School default timing from Masters. (A legacy timing kept in the staff-rules
+ * store is no longer copied into Masters — that copy saved the whole Masters
+ * book from a read; data-layer 2.2f.)
+ */
 export function schoolTimingFromMasters(): SchoolWeekTiming {
-  migrateLegacyTimingIntoMasters();
   const m = loadMasters();
   return resolveSchoolTiming(
     normalizeSchoolTimingConfig(m.schoolTiming),
   ).timing;
 }
-
-export function migrateLegacyTimingIntoMasters() {
-  if (typeof window === "undefined") return;
-  try {
-    const raw = readCache(STORAGE_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw) as StaffAttendanceRulesState;
-    if (!parsed?.schoolTiming) return;
-    const masters = loadMasters();
-    const cfg = normalizeSchoolTimingConfig(masters.schoolTiming);
-    const hasCustomOverrides =
-      cfg.groupOverrides.length > 0 || cfg.classOverrides.length > 0;
-    const d = cfg.default;
-    const legacy = normalizeSchoolWeekTiming(parsed.schoolTiming);
-    const stillDefault =
-      d.startTime === "09:00" &&
-      d.endTime === "15:30" &&
-      !d.sundayExceptional &&
-      !hasCustomOverrides;
-    if (stillDefault) {
-      saveMasters({
-        ...masters,
-        schoolTiming: normalizeSchoolTimingConfig({
-          default: legacy,
-          groupOverrides: [],
-          classOverrides: [],
-        }),
-      });
-    }
-    // Drop legacy copy from rules store
-    const { schoolTiming: _drop, ...rest } = parsed;
-    writeCacheOrInvalidate(
-      STORAGE_KEY,
-      JSON.stringify({ ...rest, version: 1 }),
-    );
-  } catch {
-    /* ignore */
-  }
-}
-
 
 export const RULE_STEP_DEFS: {
   kind: RuleStepKind;

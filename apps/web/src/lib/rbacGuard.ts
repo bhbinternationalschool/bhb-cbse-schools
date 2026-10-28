@@ -55,10 +55,6 @@ export function isFunctionOnlyWriter(module: RbacModule): boolean {
   return holdsModuleFeatureWrite(module);
 }
 
-export function holdsMastersFeatureWrite(): boolean {
-  return holdsModuleFeatureWrite("masters") && assertSessionWritable("saveMasters");
-}
-
 /**
  * Returns false when closed-year locked or actor lacks permission.
  * When no actor is registered (SSR / public forms), permission is skipped

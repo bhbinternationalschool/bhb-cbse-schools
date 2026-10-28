@@ -80,14 +80,6 @@ jobs:
         working-directory: apps/web
         run: npm run test:masters-write-guard
 
-      - name: Test — a stale masters push cannot overwrite a newer save
-        working-directory: apps/web
-        run: npm run test:masters-revision-guard
-
-      - name: Test — a refused client can recover and save again
-        working-directory: apps/web
-        run: npm run test:masters-revision-lifecycle
-
       - name: Test — a cold client does not invent a school
         working-directory: apps/web
         run: npm run test:masters-cold-client

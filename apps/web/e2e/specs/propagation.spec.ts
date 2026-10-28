@@ -10,9 +10,11 @@
  *   refused "Missing permission masters.edit" — makes the change:
  *     editor  through the real screen (Masters → Subjects by class → "New
  *             subject for V"; Masters → Classes & sections → Sections → Edit),
- *     api     with the same POST the editor sends (/api/school-data/masters-desk
- *             `{version:2, <slice>:[…], sliceBases:{…}}`; staff-roster
- *             `{state, stamps}`), from A's signed-in browser context.
+ *     api     with the kernel writes the editor sends (POST /api/data/masters/batch
+ *             for a subject + its class link, POST /api/data/masters.sections on
+ *             the element's `_rev`, POST /api/data/sis.staff), from A's signed-in
+ *             browser context. (Until 2.2f this was the masters-desk whole-book
+ *             POST, which now answers 410.)
  *   The change is then read back from the database through the API (so a
  *   failure below is propagation, not a failed write), and B — never
  *   reloaded — must show it within 30 s. When it does not, the same locator
@@ -85,11 +87,12 @@ async function mastersDesk(req: APIRequestContext): Promise<MastersDesk> {
   return (await res.json()) as MastersDesk;
 }
 
-async function postMasters(req: APIRequestContext, body: Record<string, unknown>): Promise<void> {
-  const res = await req.post("/api/school-data/masters-desk", { data: { version: 2, ...body } });
+/** A kernel write (data-layer 2.2f: the masters-desk POST is 410); must be 200 ok. */
+async function postKernel(req: APIRequestContext, path: string, ops: Record<string, unknown>[]): Promise<void> {
+  const res = await req.post(path, { data: { ops } });
   const text = await res.text();
-  expect(res.status(), `POST masters-desk: ${text.slice(0, 300)}`).toBe(200);
-  expect((JSON.parse(text) as { ok?: boolean }).ok, `POST masters-desk: ${text.slice(0, 300)}`).toBe(true);
+  expect(res.status(), `POST ${path}: ${text.slice(0, 300)}`).toBe(200);
+  expect((JSON.parse(text) as { ok?: boolean }).ok, `POST ${path}: ${text.slice(0, 300)}`).toBe(true);
 }
 
 type StaffRoster = { ok: boolean; staff: StaffRecord[]; stamps?: Record<string, Record<string, string>> };
@@ -250,11 +253,11 @@ async function addSubject(a: Page, via: EditVia, code: string, name: string): Pr
     isActive: true,
     isOptional: false,
   };
-  await postMasters(a.request, {
-    subjects: [...desk.subjects, subject],
-    classSubjects: [...desk.classSubjects.map((l) => ({ ...l, isOptional: l.isOptional ?? false })), link],
-    sliceBases: { subjects: desk.sliceStamps?.subjects ?? "", classSubjects: desk.sliceStamps?.classSubjects ?? "" },
-  });
+  // One all-or-none batch, as the editor's "Add subject" sends it (two new elements, no base).
+  await postKernel(a.request, "/api/data/masters/batch", [
+    { collection: "masters.subjects", op: "upsert", id: subject.id, base: null, row: subject },
+    { collection: "masters.class-subjects", op: "upsert", id: link.id, base: null, row: link },
+  ]);
 }
 
 async function renameSection(a: Page, via: EditVia, current: string, next: string): Promise<void> {
@@ -268,11 +271,10 @@ async function renameSection(a: Page, via: EditVia, current: string, next: strin
     await a.getByRole("button", { name: "Update", exact: true }).click();
     return;
   }
-  const desk = await mastersDesk(a.request);
-  await postMasters(a.request, {
-    sections: desk.sections.map((s) => (s.classId === CLASS_V && s.name === current ? { ...s, name: next } : s)),
-    sliceBases: { sections: desk.sliceStamps?.sections ?? "" },
-  });
+  const list = (await (await a.request.get("/api/data/masters.sections?limit=1000")).json()) as { rows: (Section & { _rev?: number })[] };
+  const sec = list.rows.find((s) => s.classId === CLASS_V && s.name === current);
+  if (!sec) throw new Error(`V-${current} not in masters.sections`);
+  await postKernel(a.request, "/api/data/masters.sections", [{ op: "upsert", id: sec.id, base: String(sec._rev ?? 0), row: { name: next } }]);
 }
 
 async function renameStaffViaApi(a: Page, next: string): Promise<void> {
