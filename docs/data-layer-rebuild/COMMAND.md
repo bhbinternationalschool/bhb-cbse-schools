@@ -1973,6 +1973,23 @@ schoolTiming, campuses, feeHeads …). This branch: 1/1.
 no longer conflicts.
 **Not proven.** A "remove" approval (several link deletes in one batch) is not exercised by a spec. The ensure-desk path for
 a brand-new school (empty masters desk) is not run on the stack.
+*(2.2f PR C built 28 Oct 2026, PR #721 — MONEY, the director approves: concession templates on the batch kernel; no
+migration.)* Fees → Bulk & PDC → Concession templates → Apply (`applyTemplate`, lib/feeConcessionTemplates.server.ts) writes
+the template's rule (created, or patched to match the template at its `_rev`) and one CREATED grant per student as ONE
+all-or-none `desk_slice_rows_write` batch (`writeMastersChangesServer`; it now says whether a refusal was a conflict, which
+is re-read and re-planned up to three times). Before, the whole `concessionGrants` (and `concessions`) list went through
+`pushMastersSlicesToDb` at its slice stamp and the row tables were synced in a SECOND call: when that sync failed, the
+grants were already written while the clerk was told "nothing was granted". The kernel syncs inside the same transaction.
+Planning (who is skipped, approval status, amounts) is unchanged.
+**Proof.** `fee-writes.spec` case "concession template (2.2f)" on the file's own fee setup: with one stored class link
+lacking `isOptional` (the 13 Oct 2026 state, made directly in the stack's slice) the apply is refused and NO grant and no
+template rule are stored; healthy again, the same apply stores the rule and both grants (`_rev` 1), and no other grant's
+`_rev` moves. **Fail-on-old** (origin/main 2c5d822c): the refused apply left both grants stored (pending, `_rev` 1). This
+branch: fee-writes 11/11 locally (the office-clerk case excluded — it fails on origin/main locally too, see 2.2f PR A).
+**Behaviour changes users will notice.** None when Masters is healthy. When Masters cannot be saved, a refused apply now
+really grants nothing (before, the families could get the discount while the screen said it failed).
+**Not proven.** The templates screen itself was not opened (the route is what the screen calls). A conflict-retry (another
+desk changing the template's rule between read and write) is not exercised.
 *(2.2e follow-up — receipt / SRN numbers claimed in the database. Built 28 Oct 2026, PR #718, "[MIGRATION — director
 applies]" 20261027090000_data_layer_masters_series_claim; director's approval 27 Oct.)* **What exists.**
 - `masters_series_claim(p_tenant, p_series, p_ay)` (security definer, search_path public, lock_timeout 5s, service_role

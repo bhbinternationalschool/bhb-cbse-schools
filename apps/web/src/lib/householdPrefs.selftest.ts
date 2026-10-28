@@ -36,16 +36,22 @@ assert.deepEqual(householdLanguage({ preferredLanguage: "bho" }), { language: "b
 assert.equal(waTemplateLanguageFor({ preferredLanguage: "mai" }), "hi");
 assert.equal(waTemplateLanguageFor({ preferredLanguage: "en" }, "hi"), "en");
 assert.equal(waTemplateLanguageFor({ preferredLanguage: "" }, "hi"), "hi");
-// A family we know nothing about gets the SCHOOL's language, not English.
-// Hindi since 2026-09-07: all 198 households had a blank preference, so the
-// old hardcoded "en" meant every parent was written to in English. Asserted
-// against the constant rather than the literal, so the school can change its
-// mind in one place without this test having to be edited to agree.
+// A family we know nothing about gets the SCHOOL's language.
+// English: the school is ENGLISH MEDIUM. Families who choose Hindi still get it,
+// but those who haven't selected prefer English by default. Asserted against the
+// constant so the school can change its mind in one place without this test
+// having to be edited to agree.
 assert.equal(waTemplateLanguageFor(undefined), SCHOOL_DEFAULT_WA_LANGUAGE);
 assert.equal(
   waTemplateLanguageFor({ preferredLanguage: "" }),
   SCHOOL_DEFAULT_WA_LANGUAGE,
-  "a blank preference is not a preference for English",
+  "a blank preference gets the school default (English, ENGLISH MEDIUM)",
+);
+// Families who chose Hindi explicitly still get Hindi.
+assert.equal(
+  waTemplateLanguageFor({ preferredLanguage: "hi" }),
+  "hi",
+  "families with explicit Hindi preference get Hindi",
 );
 // A family that HAS chosen still overrides the school default, both ways.
 assert.equal(waTemplateLanguageFor({ preferredLanguage: "en" }), "en");

@@ -412,14 +412,23 @@ const base = { academicYearCode: "2026-27", examTermId: "term_hy", classId: "cls
     gradedParts: gradedPartsForSubject(scheme, "HY", "ENG"),
     gradeOnlyScheme: false,
   };
-  assert.match(staffAppEntriesProblem([{ studentId: "stu_1", marksObtained: 80 }], rules) ?? "", /marked in parts/, "old app: whole mark for a split subject → desk");
+  assert.match(staffAppEntriesProblem([{ studentId: "stu_1", marksObtained: 80 }], rules) ?? "", /marked in parts/, "a whole mark for a split subject → enter each part");
   assert.match(staffAppEntriesProblem([{ studentId: "stu_1", component: "HW", marksObtained: 18 }], rules) ?? "", /graded/, "a number for a graded part");
   assert.match(staffAppEntriesProblem([{ studentId: "stu_1", component: "HW", marksObtained: 0 }], rules) ?? "", /graded/, "…even 0");
   assert.match(staffAppEntriesProblem([{ studentId: "stu_1", component: "HW", grade: "E" }], rules) ?? "", /not one of the grades/);
-  assert.match(staffAppEntriesProblem([{ studentId: "stu_1", component: "WRIT", marksObtained: 70 }], rules) ?? "", /marks part/);
   assert.match(staffAppEntriesProblem([{ studentId: "stu_1", component: "ZZ", grade: "A" }], rules) ?? "", /not one of its parts/);
   assert.equal(staffAppEntriesProblem([{ studentId: "stu_1", component: "hw", grade: "b" }], rules), null, "a listed letter is fine");
   assert.equal(staffAppEntriesProblem([{ studentId: "stu_1", component: "HW", grade: "" }], rules), null, "clearing is fine");
+
+  // Numeric marks parts (Written 80, Oral 20) ARE entered from the app now,
+  // each validated against its own maximum — never a flat 100.
+  assert.equal(staffAppEntriesProblem([{ studentId: "stu_1", component: "WRIT", marksObtained: 70 }], rules), null, "a number within Written's 80 is fine");
+  assert.equal(staffAppEntriesProblem([{ studentId: "stu_1", component: "ORAL", marksObtained: 20 }], rules), null, "Oral up to its own 20 is fine");
+  assert.equal(staffAppEntriesProblem([{ studentId: "stu_1", component: "WRIT", marksObtained: null }], rules), null, "blank part = absent");
+  assert.match(staffAppEntriesProblem([{ studentId: "stu_1", component: "WRIT", marksObtained: 90 }], rules) ?? "", /cannot exceed 80/, "over Written's own max");
+  assert.match(staffAppEntriesProblem([{ studentId: "stu_1", component: "ORAL", marksObtained: 25 }], rules) ?? "", /cannot exceed 20/, "25 is fine for Written but over Oral's 20");
+  assert.match(staffAppEntriesProblem([{ studentId: "stu_1", component: "WRIT", marksObtained: -1 }], rules) ?? "", /number ≥ 0/, "negative part mark");
+  assert.match(staffAppEntriesProblem([{ studentId: "stu_1", component: "WRIT", grade: "A" }], rules) ?? "", /marked, not graded/, "a letter sent for a numeric part");
 
   // Maths (one mark) beside a whole-mark subject with Handwriting.
   const wholeRules = { ...rules, marksParts: [] };
@@ -436,6 +445,22 @@ const base = { academicYearCode: "2026-27", examTermId: "term_hy", classId: "cls
   const picked = mergeStaffAppEntries(existing, "sub_eng", [{ studentId: "stu_1", component: "hw", grade: "B" }]);
   assert.equal(picked.find((m) => m.component === "HW")?.grade, "B");
   assert.equal(picked.find((m) => m.subjectId === "sub_eng" && !m.component)?.marksObtained, 60, "the whole mark untouched");
+
+  // Numeric marks parts: each part lands on its own row, by component, with
+  // a number (not a grade); a sibling graded row rides through untouched.
+  const split = [mk("sub_eng", "HW", null, "A"), mk("sub_eng", "WRIT", 70), mk("sub_eng", "ORAL", 15)];
+  const saved = mergeStaffAppEntries(split, "sub_eng", [
+    { studentId: "stu_1", component: "WRIT", marksObtained: 76 },
+    { studentId: "stu_1", component: "ORAL", marksObtained: 18 },
+  ]);
+  assert.equal(saved.length, 3, "two parts updated in place, graded row kept, none added");
+  assert.equal(saved.find((m) => m.component === "WRIT")?.marksObtained, 76, "Written written");
+  assert.equal(saved.find((m) => m.component === "ORAL")?.marksObtained, 18, "Oral written");
+  assert.equal(saved.find((m) => m.component === "HW")?.grade, "A", "the graded part rides through a numeric save");
+  // A blank part clears to absent (null) without wiping the others.
+  const cleared = mergeStaffAppEntries(split, "sub_eng", [{ studentId: "stu_1", component: "WRIT", marksObtained: null }]);
+  assert.equal(cleared.find((m) => m.component === "WRIT")?.marksObtained, null, "Written cleared");
+  assert.equal(cleared.find((m) => m.component === "ORAL")?.marksObtained, 15, "Oral untouched");
 }
 
 console.log("OK — examGradedParts.selftest.ts");
