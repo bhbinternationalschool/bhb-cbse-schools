@@ -7,6 +7,7 @@ import { DEFAULT_AY, type MastersState } from "@/lib/masters";
 import type { SisState, SisStudent } from "@/lib/sis";
 import type { TransportStaffRider } from "@/lib/transport";
 import { TENANT } from "@/lib/types";
+import type { RegisterDayMark, RegisterStatus } from "@/lib/transportBoardingLog";
 import { householdHasGeo } from "@/lib/mapsGeocode";
 import { transportConcessionForStudent } from "@/lib/fees";
 import {
@@ -903,10 +904,14 @@ export type FleetRiderRow = {
   concessionLabel: string;
   /** monthlyFeePaise - concessionPaise. What the family is actually billed. */
   netFeePaise: number;
-  /** Where the attendant's phone was when they marked the child today. */
+  /**
+   * The bus register's mark for this child on this route, today's trip, with
+   * where the attendant's phone was. Null = not marked (never "absent").
+   */
   todayBoarding: {
-    status: string;
+    status: RegisterStatus;
     markedAt: string;
+    markedByName: string;
     lat: number | null;
     lng: number | null;
     accuracyM: number | null;
@@ -982,6 +987,8 @@ export function buildFleetRosters(
   opts?: {
     boardingDate?: string;
     trip?: "AM" | "PM";
+    /** Bus register v2 marks for the day (GET /api/v1/transport/register/runs?marks=1). */
+    registerMarks?: RegisterDayMark[];
     /**
      * Masters plus the roster, so the discount shown here is the one the
      * invoice charges. Omit them and every concession reads as zero — which
@@ -1003,17 +1010,16 @@ export function buildFleetRosters(
 ): FleetRosterRow[] {
   const day = opts?.boardingDate ?? new Date().toISOString().slice(0, 10);
   const trip = opts?.trip ?? "AM";
-  // One mark per child per trip per day. The DB merges a re-mark into the
-  // existing row, so duplicates should not exist — but it prepends new rows,
-  // so a plain Map would silently keep the OLDEST of any pair. Pick by
-  // timestamp instead: whichever mark is newest is the one that happened.
-  const markByStudent = new Map<string, (typeof state.boardingEvents)[number]>();
-  for (const e of state.boardingEvents ?? []) {
-    if (e.date !== day || e.trip !== trip) continue;
-    const held = markByStudent.get(e.studentId);
-    if (!held || (e.createdAt ?? "") >= (held.createdAt ?? "")) {
-      markByStudent.set(e.studentId, e);
-    }
+  // Bus register v2 marks (transport_boarding_marks), fetched by the caller —
+  // the old state.boardingEvents slice is no longer read. One mark per child
+  // per route per trip per day is a DB constraint; should two ever arrive,
+  // the later tap is the one that happened.
+  const markByRouteStudent = new Map<string, RegisterDayMark>();
+  for (const m of opts?.registerMarks ?? []) {
+    if (m.date !== day || m.trip !== trip) continue;
+    const key = `${m.routeId}|${m.studentId}`;
+    const held = markByRouteStudent.get(key);
+    if (!held || m.tappedAt >= held.tappedAt) markByRouteStudent.set(key, m);
   }
   const byRoute = new Map<string, StudentTransportProfile[]>();
   for (const p of profiles) {
@@ -1043,7 +1049,13 @@ export function buildFleetRosters(
         // priced, measured, or handed to a driver. Carried explicitly so the
         // screen distinguishes it from a stop that merely has no distance.
         const stopLinkBroken = !stop;
-        const expected = expectedMonthlyFeePaise(route, stop, state.feePolicy);
+        // Exactly what the fee engine bills (computeTransportPeriodDues): no
+        // stop, no policy fee. Under a flat/per-km/slab policy this used to
+        // show the route's fee for a broken-link rider the engine bills ₹0 —
+        // a rider billed nothing, reported as billed.
+        const expected = stop
+          ? expectedMonthlyFeePaise(route, stop, state.feePolicy)
+          : 0;
         const fullFee = asg.monthlyFeePaise > 0 ? asg.monthlyFeePaise : expected;
         const fee = applyServiceMode(fullFee, asg.serviceMode);
         const km = stop?.distanceKm ?? 0;
@@ -1096,16 +1108,17 @@ export function buildFleetRosters(
           boardingSuspended: asg.boardingSuspended,
           siblingOnBoard: (householdCounts.get(p.householdId) ?? 0) > 1,
           todayBoarding: (() => {
-            const mark = markByStudent.get(p.studentId);
+            const mark = markByRouteStudent.get(`${route.id}|${p.studentId}`);
             if (!mark) return null;
-            const geo = mark.boardedLocation ?? mark.offboardedLocation ?? null;
             return {
               status: mark.status,
-              markedAt: mark.createdAt,
-              lat: geo?.lat ?? null,
-              lng: geo?.lng ?? null,
-              accuracyM: geo?.accuracyM ?? null,
-              distanceFromSchoolKm: geo?.distanceFromSchoolKm ?? null,
+              markedAt: mark.tappedAt,
+              markedByName: mark.markedByName,
+              lat: mark.lat,
+              lng: mark.lng,
+              accuracyM: mark.accuracyM,
+              // The register does not record distance from school.
+              distanceFromSchoolKm: null,
             };
           })(),
         };

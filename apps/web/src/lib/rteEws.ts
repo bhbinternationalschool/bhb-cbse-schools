@@ -5,6 +5,7 @@
  * Module visibility gated by `moduleRegistry` (`rte_ews`, default OFF).
  */
 
+import { laterSeriesNumber } from "@/lib/numberSeries";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import {
   DEFAULT_AY,
@@ -12,7 +13,6 @@ import {
   normalizeConcessionGrant,
   normalizeConcessionRule,
   resolveFeeGroupId,
-  saveMasters,
   suggestFeeStudentType,
   type MastersState,
   currentAcademicYearCode,
@@ -41,6 +41,8 @@ import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { recordRteDeletion } from "@/lib/rteNormalizedClient";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 const STORAGE_KEY = "bhb_rte_ews_v1";
 
@@ -140,7 +142,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
 }
 
 export function emptyRteState(): RteState {
@@ -1314,6 +1316,8 @@ export function sendAllottedRteToSis(input: {
   applicationId: string;
   by: string;
   sectionId?: string;
+  /** The SRN the server issued (data-layer 2.2e: issueSeriesNumber("SRN")). */
+  issuedSrn?: string;
 }):
   | { ok: true; student: SisStudent; admissionNo: string }
   | { ok: false; error: string } {
@@ -1361,7 +1365,8 @@ export function sendAllottedRteToSis(input: {
   const sis = loadSis();
   const admissionDate = todayIso();
   const admissionNo = suggestAdmissionNo(sis.students);
-  const srn = suggestSrn(sis.students);
+  const localSrn = suggestSrn(sis.students);
+  const srn = input.issuedSrn ? laterSeriesNumber(input.issuedSrn, localSrn) : localSrn;
   const studentType = suggestFeeStudentType(
     admissionDate,
     app.academicYearCode || DEFAULT_AY,
@@ -1480,10 +1485,11 @@ export function listReadyForSis(state?: RteState): QuotaApplication[] {
   );
 }
 
-export function listEnrolledRteStudents(sis?: SisState) {
+export function listEnrolledRteStudents(sis?: SisState, academicYearCode?: string) {
   const state = sis ?? loadSis();
-  // A government-facing register: one row per child, this session.
-  return studentsInSession(state, currentAcademicYearCode())
+  // A government-facing register: one row per child, for the session asked
+  // (the report passed its year and this ignored it).
+  return studentsInSession(state, academicYearCode || currentAcademicYearCode())
     .filter(
       (s) =>
         (s.studentType === "RTE" || s.category === "EWS"),
@@ -1535,10 +1541,10 @@ export function assignRteToStudent(input: {
 }
 
 /** Take RTE/EWS off a student — fee type reverts, tags and waivers drop. */
-export function removeRteFromStudent(input: {
+export async function removeRteFromStudent(input: {
   studentId: string;
   by: string;
-}): { ok: true } | { ok: false; error: string } {
+}): Promise<{ ok: true } | { ok: false; error: string }> {
   const sis = loadSis();
   const st = sis.students.find((s) => s.id === input.studentId);
   if (!st) return { ok: false, error: "Student not found" };
@@ -1586,13 +1592,18 @@ export function removeRteFromStudent(input: {
   );
   saveSis({ ...sis, students });
 
+  // Its RTE head waivers go too — the grants named, one all-or-none batch
+  // (data-layer 2.2e), never the tab's whole book. Awaited: a refusal is said.
   const existing = masters.concessionGrants ?? [];
   const kept = existing.filter(
     (g) =>
       !(g.studentId === st.id && g.id.startsWith(RTE_WAIVER_GRANT_PREFIX)),
   );
   if (kept.length !== existing.length) {
-    void trackServerWork(saveMasters({ ...masters, concessionGrants: kept }));
+    const saved = await writeRteMastersChanges(masters, { ...masters, concessionGrants: kept });
+    if (!saved.ok) {
+      return { ok: false, error: `RTE was taken off the student, but the head waivers were not removed (${saved.error}). Remove them in Masters → Concessions.` };
+    }
   }
   return { ok: true };
 }
@@ -1603,6 +1614,24 @@ export function removeRteFromStudent(input: {
  * other concession, so "untick a head" simply means "grant its waiver". */
 
 const RTE_WAIVER_GRANT_PREFIX = "cg_rtew_";
+
+/**
+ * The RTE waiver rule and grants this action changed, as element writes in
+ * ONE all-or-none batch (data-layer 2.2e) — never the tab's whole book. The
+ * rule and grant ids are fixed per head / student, so one already stored
+ * (another tab made it) is left as it is.
+ */
+async function writeRteMastersChanges(
+  before: MastersState,
+  after: MastersState,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { diffMastersLists } = await import("@/lib/data/mastersElementChanges");
+  const changes = diffMastersLists(before, after, ["concessions", "concessionGrants"], { ifAbsent: true });
+  if (changes.length === 0) return { ok: true };
+  const { writeMastersChanges } = await import("@/lib/data/client/mastersLibWrites");
+  const out = await writeMastersChanges(changes);
+  return out.ok ? { ok: true } : { ok: false, error: `Not saved — ${out.message}` };
+}
 
 function rteWaiverRuleId(feeHeadId: string): string {
   return `cnc_rtew_${feeHeadId}`;
@@ -1693,10 +1722,8 @@ export async function setRteHeadWaiver(input: {
   ) {
     return { ok: true };
   }
-  const saved = await saveMasters({ ...masters, concessions, concessionGrants });
-  if (!saved.ok) {
-    return { ok: false, error: `Masters save blocked (${saved.reason})` };
-  }
+  const saved = await writeRteMastersChanges(masters, { ...masters, concessions, concessionGrants });
+  if (!saved.ok) return { ok: false, error: saved.error };
   return { ok: true };
 }
 
@@ -1842,6 +1869,9 @@ export function runRteReport(
     rte?: RteState;
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("rte", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const rte = filters.rte ?? loadRte();
   const ay = filters.academicYearCode || DEFAULT_AY;
   const note = describeFilters([TENANT.shortName, ay, todayIso()]);
@@ -1923,7 +1953,7 @@ export function runRteReport(
   }
 
   const masters = loadMasters();
-  const rows = listEnrolledRteStudents().map((s) => ({
+  const rows = listEnrolledRteStudents(undefined, ay).map((s) => ({
     name: s.fullName,
     class: masters.classes.find((c) => c.id === s.classId)?.name || s.classId,
     type: s.studentType,

@@ -37,11 +37,15 @@ const ALL_SECTIONS = "__all__";
 export function TeachingAllocationPanel({
   masters,
   ay,
+  saving = false,
   onCommit,
 }: {
   masters: MastersState;
   ay: string;
-  onCommit: (next: MastersState, msg?: string) => void;
+  /** A save of this screen is running: nothing new is sent until it answers. */
+  saving?: boolean;
+  /** Resolves true only once the server confirmed the save (data-layer 2.2d). */
+  onCommit: (next: MastersState, msg?: string) => Promise<boolean>;
 }) {
   const [staffId, setStaffId] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -164,12 +168,16 @@ export function TeachingAllocationPanel({
       subjectIds: [...picked],
     });
     if (!result.ok) return setError(result.error);
-    onCommit(
+    const added = picked;
+    void onCommit(
       result.masters,
       `${result.added} subject${result.added === 1 ? "" : "s"} assigned to ${teacher.fullName}`,
-    );
-    // Keep the teacher and class selected so the next subject is quick.
-    setPicked(new Set());
+    ).then((saved) => {
+      // Only a confirmed save clears the ticks: a refused one keeps them, so
+      // the choice can be sent again (the screen says why it was refused).
+      // Keep the teacher and class selected so the next subject is quick.
+      if (saved) setPicked((now) => (now === added ? new Set() : now));
+    });
   }
 
   function addClassTeacher() {
@@ -182,14 +190,18 @@ export function TeachingAllocationPanel({
       sectionId: ctSectionId,
     });
     if (!result.ok) return setError(result.error);
-    onCommit(
+    const [cls, sec] = [ctClassId, ctSectionId];
+    void onCommit(
       result.masters,
       result.replaced
         ? `${teacher.fullName} is now class teacher — ${result.replaced} was moved off`
         : `${teacher.fullName} set as class teacher`,
-    );
-    setCtClassId("");
-    setCtSectionId("");
+    ).then((saved) => {
+      // Cleared only after the server confirmed it (and only if not changed meanwhile).
+      if (!saved) return;
+      setCtClassId((c) => (c === cls ? "" : c));
+      setCtSectionId((x) => (x === sec ? "" : x));
+    });
   }
 
   const myClassLinks = (teacher?.classTeacherLinks ?? []).filter(
@@ -295,7 +307,7 @@ export function TeachingAllocationPanel({
               <button
                 type="button"
                 onClick={addClassTeacher}
-                disabled={!ctClassId || !ctSectionId}
+                disabled={saving || !ctClassId || !ctSectionId}
                 className={`${btn} disabled:opacity-50`}
               >
                 Set class teacher
@@ -327,8 +339,9 @@ export function TeachingAllocationPanel({
                     <button
                       type="button"
                       aria-label="Remove class teacher role"
+                      disabled={saving}
                       onClick={() =>
-                        onCommit(
+                        void onCommit(
                           removeClassTeacher(masters, teacher.id, l.id),
                           "Class teacher role removed",
                         )
@@ -460,7 +473,7 @@ export function TeachingAllocationPanel({
                       <button
                         type="button"
                         onClick={addSubjects}
-                        disabled={picked.size === 0}
+                        disabled={saving || picked.size === 0}
                         className={`${btn} inline-flex items-center gap-1.5 disabled:opacity-50`}
                       >
                         <Plus className="h-3.5 w-3.5" />
@@ -492,8 +505,9 @@ export function TeachingAllocationPanel({
                     <button
                       type="button"
                       aria-label="Remove subject assignment"
+                      disabled={saving}
                       onClick={() =>
-                        onCommit(
+                        void onCommit(
                           removeSubjectTeaching(masters, teacher.id, l.id),
                           "Assignment removed",
                         )

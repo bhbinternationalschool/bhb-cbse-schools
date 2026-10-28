@@ -4,6 +4,7 @@ import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
   deskReadGate,
   deskWriteGate,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -18,12 +19,36 @@ import {
 
 export const runtime = "nodejs";
 
+/**
+ * The lists Transport → Dashboard & reports (read only) reads: the
+ * dashboard and every report in lib/transportReportCatalog. That function
+ * owns no slice (each list has one owner), so they are served to it here.
+ */
+const TRANSPORT_REPORT_KEYS = [
+  "routes",
+  "assignments",
+  "staffRiders",
+  "vehicles",
+  "insurancePolicies",
+  "certificateRenewals",
+  "fuelRefillLogs",
+  "boardingEvents",
+  "dealers",
+  "vehicleLoans",
+  "emiSchedule",
+] as const;
+
 export async function GET(req: Request) {
   // The whole desk, or — holding Transport functions only — their slices.
   const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["transport-desk"]);
   if (gate.mode === "deny") return gate.response;
   const { bundle: full, meta, ok } = await fetchTransportDeskFromDb();
-  const bundle = gate.mode === "feature" ? stripDeskForFeatures("transport", full, gate) : full;
+  let bundle = gate.mode === "feature" ? stripDeskForFeatures("transport", full, gate) : full;
+  if (gate.mode === "feature" && gate.access("transport.reports", "view").allowed) {
+    const add: Partial<typeof full> = {};
+    for (const k of TRANSPORT_REPORT_KEYS) Object.assign(add, { [k]: full[k] });
+    bundle = { ...bundle, ...add };
+  }
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Transport desk fetch failed — tenant/db unavailable" },
@@ -64,6 +89,20 @@ export async function POST(req: Request) {
 
   // Function-only writers (e.g. Transport → Fuel log): merged onto the
   // stored desk, only their functions' slices — never the body as sent.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (gate.mode === "full") {
+    const refused = await deniedSliceGuard(
+      req,
+      "transport",
+      async () => {
+        const s = await fetchTransportDeskFromDb();
+        return s.ok ? (s.bundle as unknown as Record<string, unknown>) : null;
+      },
+      body,
+    );
+    if (refused) return refused;
+  }
   if (gate.mode === "feature") {
     const stored = await fetchTransportDeskFromDb();
     if (!stored.ok) {

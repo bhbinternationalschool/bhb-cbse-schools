@@ -43,13 +43,27 @@ export async function POST(req: Request) {
   const by = auth.ctx.session.fullName || "office";
   if (body.action === "decide") {
     await ensureSchoolMirrorHydrated();
+    const id = String(body.id ?? "");
     const r = await decideOfficeLink({
-      id: String(body.id ?? ""),
+      id,
       approve: body.approve === true,
       householdId: typeof body.householdId === "string" ? body.householdId : undefined,
       by,
     });
-    return r.ok ? NextResponse.json({ ok: true }) : NextResponse.json({ ok: false, error: r.message }, { status: r.status });
+    if (!r.ok) return NextResponse.json({ ok: false, error: r.message }, { status: r.status });
+    // Approved: tell the parent on WhatsApp that they can log in now.
+    let told = "";
+    if (body.approve === true) {
+      const state = await readParentLinks();
+      const req = state?.requests.find((x) => x.id === id);
+      const link = req ? state?.linked.find((l) => l.mobile10 === req.mobile10) : undefined;
+      if (req) {
+        const { notifyNumberLinked } = await import("@/lib/waNumberVerify.server");
+        const n = await notifyNumberLinked(req.mobile10, link?.childName || req.matchedChild || req.childName).catch((e) => ({ ok: false, error: String(e) }));
+        told = n.ok ? "parent told on WhatsApp" : `parent not told: ${n.error ?? "send failed"}`;
+      }
+    }
+    return NextResponse.json({ ok: true, told });
   }
   if (body.action === "unlink") {
     const m = String(body.mobile10 ?? "");

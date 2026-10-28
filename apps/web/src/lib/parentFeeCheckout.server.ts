@@ -9,8 +9,14 @@
 import "server-only";
 
 import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { ApiError } from "@/lib/api/v1/errors";
-import { computeHouseholdDues, loadFees, openFeeDues } from "@/lib/fees";
+import { ApiError, authFailureStatus } from "@/lib/api/v1/errors";
+import {
+  computeHouseholdDues,
+  loadFees,
+  openFeeDues,
+  type CollectionVoucher,
+  type FeeDueLine,
+} from "@/lib/fees";
 import {
   GATEWAY_METHOD_GROUPS,
   GATEWAY_METHOD_LABELS,
@@ -20,7 +26,8 @@ import {
   type GatewayMethodGroup,
 } from "@/lib/gatewayFees";
 import { fetchEligibleMethodGroups, loadGatewayFeePolicy } from "@/lib/gatewayFeePolicy.server";
-import { loadMasters } from "@/lib/masters";
+import { uniqueDuesByKey } from "@/lib/payments";
+import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadSis } from "@/lib/sis";
 
@@ -34,7 +41,7 @@ export async function parentHouseholdFrom(req: Request): Promise<ParentAuth> {
     }
     return { ok: true, householdId: ctx.session.householdId };
   } catch (e) {
-    return { ok: false, status: 401, error: e instanceof ApiError ? e.message : "Unauthorized" };
+    return { ok: false, status: authFailureStatus(e), error: e instanceof ApiError ? e.message : "Unauthorized" };
   }
 }
 
@@ -55,22 +62,144 @@ export function readMethodGroup(raw: unknown): GatewayMethodGroup | undefined {
  * keys are collected.
  */
 export async function resolveChosenDues(householdId: string, wanted: Set<string>) {
-  // Hydrated from the database: the local mirror file does not exist on Cloud
-  // Run, so "loaded" meant no fee structure and nothing to pay.
-  await ensureSchoolMirrorHydrated();
+  await hydrateDuesInputs();
   const sis = loadSis();
   const masters = loadMasters();
   const fees = loadFees();
   const hh = sis.households.find((h) => h.id === householdId);
   if (!hh) return { ok: false as const, status: 404, error: "Household not found" };
   const bundle = computeHouseholdDues(hh.id, sis, masters, fees, { includeFuture: true });
-  const dues = openFeeDues(bundle.flatMap((r) => r.dues)).filter(
+  // One line per due key (lib/payments.ts uniqueDuesByKey): the link stores
+  // its lines by key, and a key listed twice would be charged twice.
+  const dues = uniqueDuesByKey(openFeeDues(bundle.flatMap((r) => r.dues))).filter(
     (d) => wanted.has(d.dueKey) && d.balancePaise > 0,
   );
   if (dues.length === 0) {
     return { ok: false as const, status: 400, error: "Nothing left to pay on the selected fees" };
   }
   return { ok: true as const, sis, masters, hh, dues };
+}
+
+/**
+ * Everything a server-side dues figure is computed from: the school mirror
+ * (students, fee structure, receipts) from the database — the local mirror
+ * file does not exist on Cloud Run, so "loaded" meant no fee structure and
+ * nothing to pay — and the two desks that live outside it, transport (every
+ * bus month) and fee adjustments. The mirror's own refresh pulls those too,
+ * but only when it re-reads; this is TTL-gated, so it costs nothing after
+ * the first call. See lib/feeDuesInputs.server.ts.
+ */
+async function hydrateDuesInputs(): Promise<void> {
+  await ensureSchoolMirrorHydrated();
+  const { ensureFeeDuesInputsHydrated } = await import("@/lib/feeDuesInputs.server");
+  await ensureFeeDuesInputsHydrated();
+}
+
+/** One child as the parent's fee page shows them — not the whole SIS row. */
+export type ParentFeesChild = {
+  id: string;
+  fullName: string;
+  admissionNo: string;
+  classLabel: string;
+  photoUrl: string | null;
+};
+
+export type ParentFeesView = {
+  householdId: string;
+  guardianName: string;
+  academicYearCode: string;
+  children: { student: ParentFeesChild; dues: FeeDueLine[] }[];
+  /** Non-voided receipts of this household, newest first. */
+  receipts: CollectionVoucher[];
+  /**
+   * The open lines due NOW: exactly what a /pay/due link, the WhatsApp
+   * reminders and the parent app's summary ask for — everything owing up to
+   * the running month (lib/duePayCheckout.server.ts `directDues`, scope
+   * "open"). The page's "Due now" and its Pay button use these only; open
+   * lines not listed are the rest of the year, shown apart and never in the
+   * total to pay.
+   */
+  dueNowKeys: string[];
+  dueNowPaise: number;
+  restOfYearPaise: number;
+};
+
+export type ParentFeesRead =
+  | { ok: true; view: ParentFeesView }
+  | { ok: false; status: number; error: string };
+
+/**
+ * The parent's own fee page, computed here — the parent web portal used to
+ * compute it in the browser from the office's desks (fees, transport, SIS),
+ * which refuse a parent session, so a real parent saw "No household linked"
+ * and no dues at all (found 15 Oct 2026, PR #667/#668).
+ *
+ * `householdId` comes from the signed session only. The figures come from
+ * the same recomputation the checkout charges (`resolveChosenDues`): dues
+ * owing and paid for the current session's children, future months included
+ * (a family may pay ahead), and every transport month by the shared rule in
+ * lib/transportPaidMonths.ts.
+ *
+ * An unreadable school is a failed read (503), never an empty family: a
+ * mirror with no households at all means the database was not read.
+ */
+export async function readParentFees(householdId: string): Promise<ParentFeesRead> {
+  await hydrateDuesInputs();
+  const sis = loadSis();
+  const masters = loadMasters();
+  const fees = loadFees();
+  if (sis.households.length === 0) {
+    return { ok: false, status: 503, error: "School records are unavailable right now" };
+  }
+  const hh = sis.households.find((h) => h.id === householdId);
+  if (!hh) return { ok: false, status: 404, error: "Your family's record was not found — please contact the school office" };
+
+  const ay = currentAcademicYearCode(masters);
+  const rows = computeHouseholdDues(hh.id, sis, masters, fees, {
+    includeFuture: true,
+    includePaid: true,
+    // A promoted child keeps one student row per year, all "active"; without
+    // the scope each child is listed once per year and the balance multiplies.
+    academicYearCode: ay,
+  });
+  const classLabel = (classId: string, sectionId: string) => {
+    const cls = masters.classes.find((c) => c.id === classId)?.name ?? "";
+    const sec = masters.sections.find((s) => s.id === sectionId)?.name ?? "";
+    return sec ? `${cls}-${sec}` : cls || "—";
+  };
+  // Not re-derived: the pay link's own definition of "due now".
+  const { directDues } = await import("@/lib/duePayCheckout.server");
+  const dueNow = directDues({ householdId: hh.id, scope: "open" });
+  const dueNowKeys = new Set(dueNow.dues.map((d) => d.dueKey));
+  const restOfYearPaise = openFeeDues(rows.flatMap((r) => r.dues))
+    .filter((d) => d.balancePaise > 0 && !dueNowKeys.has(d.dueKey))
+    .reduce((s, d) => s + d.balancePaise, 0);
+  const receipts = fees.vouchers
+    .filter((v) => v.householdId === hh.id && !v.voidedAt)
+    .sort((a, b) => b.collectedAt.localeCompare(a.collectedAt));
+
+  return {
+    ok: true,
+    view: {
+      householdId: hh.id,
+      guardianName: hh.guardianName,
+      academicYearCode: ay,
+      children: rows.map(({ student, dues }) => ({
+        student: {
+          id: student.id,
+          fullName: student.fullName,
+          admissionNo: student.admissionNo,
+          classLabel: classLabel(student.classId, student.sectionId),
+          photoUrl: student.photoUrl || null,
+        },
+        dues,
+      })),
+      receipts,
+      dueNowKeys: [...dueNowKeys],
+      dueNowPaise: dueNow.totalPaise,
+      restOfYearPaise,
+    },
+  };
 }
 
 /** The rails offered when Cashfree cannot be asked which ones it takes. */

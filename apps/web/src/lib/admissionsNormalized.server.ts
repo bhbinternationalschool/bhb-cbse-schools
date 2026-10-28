@@ -20,6 +20,30 @@ import { fetchAllPages } from "@/lib/supabase/pageAll";
 import { stampsOf, storedNewerIds, writeStampedRows } from "@/lib/rowStampWrite.server";
 import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
 import { mergeFieldOps, type FieldOpsLists } from "@/lib/admissionsFieldOpsMerge";
+import { readSurveyTeamFromDb } from "@/lib/surveyTeamRead";
+import type { SurveyBeatRow, SurveyMemberRow } from "@/lib/surveyTeamShared";
+
+/** A stored beat row as the admissions desk's SurveyBeat. */
+function surveyBeatOfRow(b: SurveyBeatRow): AdmissionsState["surveyBeats"][number] {
+  return { id: b.id, code: b.code, name: b.name, area: b.area, targetHouseholds: b.targetHouseholds, isActive: b.isActive, note: b.note, createdAt: b.createdAt };
+}
+
+/** A stored member row as the admissions desk's SurveyTeamMember. */
+function surveyMemberOfRow(m: SurveyMemberRow): AdmissionsState["surveyTeam"][number] {
+  return {
+    id: m.id,
+    kind: m.kind,
+    staffId: m.staffId,
+    externalId: m.externalId,
+    fullName: m.fullName,
+    mobile: m.mobile,
+    empCode: m.empCode,
+    role: m.role,
+    assigned: m.assigned,
+    startMode: m.startMode,
+    createdAt: m.createdAt,
+  };
+}
 import type { NamedDeletes } from "@/lib/deskNamedDeletes.server";
 
 export type AdmissionDeskSyncMeta = {
@@ -146,7 +170,7 @@ function leadToRow(tenantId: string, l: AdmissionLead): Record<string, unknown> 
   };
 }
 
-function rowToLead(r: Record<string, unknown>): AdmissionLead {
+export function rowToLead(r: Record<string, unknown>): AdmissionLead {
   const fromJson = r.lead_json as Partial<AdmissionLead> | undefined;
   if (fromJson?.id) return normalizeAdmissionLead(fromJson);
   return normalizeAdmissionLead({
@@ -531,8 +555,17 @@ const LEAD_LIST_COLUMNS =
  * reversible in seconds, not in a build.
  */
 function leadProjectionEnabled(): boolean {
-  const flag = process.env.ADMISSIONS_LIST_PROJECTION?.trim().toLowerCase();
-  return flag === "true" || flag === "1";
+  // DISABLED (10 Oct 2026 audit) whatever ADMISSIONS_LIST_PROJECTION says.
+  // Not safe to switch on: (1) rowToLead normalizes a stub, filling every
+  // missing field with a default ("" / false / []), and restorePartialLeads
+  // copies any value !== undefined over the stored lead_json — so a saved
+  // stub blanks dob, notes and the follow-up history; (2) logFollowUp,
+  // mergeLeadsSameMobile, enrollLead and the SIS reconcile read-modify-write
+  // whole leads and would save the loss; (3) ~25 non-projected fields are
+  // read by list screens; (4) the check sits in fetchAdmissionDeskFromDb, so
+  // it would also hand stubs to the WhatsApp bot and server reports. Fix all
+  // four before re-enabling.
+  return false;
 }
 
 /**
@@ -625,9 +658,21 @@ export async function fetchAdmissionDeskFromDb(): Promise<{
       .maybeSingle(),
   ]);
 
-  if (hhErr || leadErr || payErr) {
+  // The survey team and beats are rows of their own since 15 Oct 2026
+  // (lib/surveyTeam.server.ts); the copy in ops_json is no longer read. A
+  // failed read fails the desk (never "no team", never seeded beats).
+  let survey: Awaited<ReturnType<typeof readSurveyTeamFromDb>> | null = null;
+  let surveyErr = "";
+  try {
+    survey = await readSurveyTeamFromDb();
+  } catch (e) {
+    surveyErr = (e as Error).message;
+  }
+
+  if (hhErr || leadErr || payErr || !survey) {
     console.warn(
       "[admissions-db] fetch failed",
+      surveyErr,
       hhErr?.message,
       leadErr?.message,
       payErr?.message,
@@ -662,10 +707,10 @@ export async function fetchAdmissionDeskFromDb(): Promise<{
     households,
     leads,
     registrationPayments,
-    surveyBeats: opsJson.surveyBeats as AdmissionsState["surveyBeats"],
+    surveyBeats: survey.beats.map(surveyBeatOfRow),
     surveyAttendance: opsJson.surveyAttendance as AdmissionsState["surveyAttendance"],
     surveyExternals: opsJson.surveyExternals as AdmissionsState["surveyExternals"],
-    surveyTeam: opsJson.surveyTeam as AdmissionsState["surveyTeam"],
+    surveyTeam: survey.members.map(surveyMemberOfRow),
     surveySessions: opsJson.surveySessions as AdmissionsState["surveySessions"],
     leadCallerStaffIds: opsJson.leadCallerStaffIds as string[],
     nextEnquirySeq: seqJson.nextEnquirySeq as number,

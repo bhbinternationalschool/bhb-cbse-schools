@@ -1,0 +1,783 @@
+{
+  "name": "Office: Telegram bot",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "* * * * *"
+            }
+          ]
+        }
+      },
+      "id": "25449a67-a58b-4758-9bb4-43f37f572565",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nif (!TG_TOKEN) return [];\n// The offset confirms every earlier update to Telegram; it survives restarts\n// in the workflow's static data (saved after each production execution).\nconst st = $getWorkflowStaticData('global');\nconst offset = Number(st.tg_offset || 0);\nreturn [{ json: { tg_method: 'getUpdates', tg: { offset, timeout: 0, limit: 100, allowed_updates: ['message', 'callback_query'] } } }];\n"
+      },
+      "id": "2189862a-a13f-4c91-b756-6b40d74c61ea",
+      "name": "Build: getUpdates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + $json.tg_method }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.tg) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "8e12614d-2eb6-4b70-86fc-c030e95f0a0c",
+      "name": "Telegram: getUpdates",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nconst res = $input.first().json || {};\nconst updates = res.ok && Array.isArray(res.result) ? res.result : [];\nif (!updates.length) return [];\nconst st = $getWorkflowStaticData('global');\nst.tg_offset = Math.max(...updates.map((u) => Number(u.update_id || 0))) + 1;\n// (?![a-z]) instead of \\b: JS word boundaries are ASCII-only, so Devanagari words never matched.\nconst APPROVE = /^\\s*\\/?(approve|approved|ok|okay|yes|send|haan|ha|हाँ|हां|ठीक|भेज)(?![a-z])[^0-9]*#?\\s*(\\d+)?/i;\nconst REJECT = /^\\s*\\/?(reject|rejected|no|cancel|nahi|nahin|नहीं|रद्द)(?![a-z])[^0-9]*#?\\s*(\\d+)?/i;\nconst COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan' };\nconst out = [];\nfor (const u of updates) {\n  const cq = u.callback_query;\n  if (cq) {\n    const chat_id = String((cq.message && cq.message.chat && cq.message.chat.id) || (cq.from && cq.from.id) || '');\n    const role = tgRoleOf(chat_id);\n    const data = String(cq.data || '');\n    const base = { chat_id, role, callback_id: cq.id, message_id: cq.message ? cq.message.message_id : null, message_text: cq.message ? String(cq.message.text || '') : '' };\n    if (!role) continue;\n    const m = /^(approve|reject):(\\d+)$/.exec(data);\n    if (m && role === 'director') { out.push({ json: { kind: 'decision', decision: m[1], task_id: Number(m[2]), via: 'tap', ...base } }); continue; }\n    if (m) { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    if (data === 'tasks') { out.push({ json: { kind: 'command', cmd: 'tasks', ...base } }); continue; }\n    continue;\n  }\n  const msg = u.message;\n  if (!msg || !msg.text) continue;\n  const chat_id = String(msg.chat && msg.chat.id || '');\n  const role = tgRoleOf(chat_id);\n  const text = String(msg.text || '').trim();\n  const base = { chat_id, role, callback_id: null, message_id: null, message_text: '' };\n  const cmd = /^\\/([a-z]+)(?:@\\w+)?\\b/i.exec(text);\n  if (cmd && COMMANDS[cmd[1].toLowerCase()]) {\n    const name = COMMANDS[cmd[1].toLowerCase()];\n    if (role || name === 'start') out.push({ json: { kind: 'command', cmd: name, ...base } });\n    continue;\n  }\n  if (!role) continue;\n  let decision = null; let m = text.match(APPROVE);\n  if (m) decision = 'approve'; else { m = text.match(REJECT); if (m) decision = 'reject'; }\n  if (!decision) continue;\n  if (role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n  out.push({ json: { kind: 'decision', decision, task_id: m[2] ? Number(m[2]) : null, via: 'text', ...base } });\n}\nreturn out;\n"
+      },
+      "id": "1aa9fe01-e49f-4dc2-b17d-cf5b173de01e",
+      "name": "Parse: updates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "b46feffd-d994-4037-a7e3-7c608c8612e8",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "decision",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "decision"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "f69744c0-699b-4bec-a32b-c09774c2b417",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "command",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "command"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "76da64d5-8565-4196-9653-06ac267e01b9",
+      "name": "Switch: update kind",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1040,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/office_tasks?tenant_id=eq.{{ $env.OFFICE_TENANT_ID }}&approval_state=eq.pending&source=eq.receptionist&status=eq.open&select=*&order=created_at.asc&limit=50",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "e79fff19-d36d-4675-bda1-d9467d62f0c3",
+      "name": "Fetch: pending drafts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        0
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst pending = $input.all().map((i) => i.json).filter((r) => r && r.id);\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'decision');\nconst out = []; const decided = new Set();\nfor (const a of asks) {\n  let task = null;\n  if (a.task_id) task = pending.find((t) => Number(t.id) === Number(a.task_id));\n  else if (pending.length === 1) task = pending[0];\n  let ack = '';\n  if (!task) ack = a.task_id ? 'No draft #' + a.task_id + ' is waiting.' : (pending.length ? 'Which draft? ' + pending.map((t) => '#' + t.id).join(', ') + ' are waiting — tap its button or reply APPROVE <id>.' : 'No draft is waiting.');\n  else if (decided.has(task.id)) ack = 'Draft #' + task.id + ' is already decided.';\n  if (ack) { out.push({ json: { ...a, decision: 'none', task: null, ack } }); continue; }\n  decided.add(task.id);\n  out.push({ json: { ...a, task } });\n}\nreturn out;\n"
+      },
+      "id": "63c1328c-38dc-4432-8476-6f3a64fba7bf",
+      "name": "Match: decisions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "1e488706-ab95-49c6-b67a-36dd9bfc7f50",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "approve",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "approve"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "aed6d848-3632-4620-88a8-b31891c81f1a",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "reject",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reject"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "fac8b74a-2f6a-46e6-9076-91a7462b2c40",
+                    "leftValue": "={{ $json.decision }}",
+                    "rightValue": "none",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "none"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b942ab20-81ff-44fb-b01c-044324b71806",
+      "name": "Switch: decision",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1820,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $json.task.payload.gmail_message_id }}",
+        "emailType": "text",
+        "message": "={{ $json.task.payload.body }}",
+        "options": {}
+      },
+      "id": "7cb39d45-7aae-4f20-9de7-4a92607cd6ff",
+      "name": "Gmail: send approved reply",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2080,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst d = $('Match: decisions').item.json;\nconst sent = $input.item.json;\nconst now = new Date().toISOString();\nreturn { json: { ...d, task_id: d.task.id, patch: { approval_state: 'approved', status: 'done', decided_by: 'director', decided_at: now, updated_at: now,\n  payload: { ...d.task.payload, decision_reply: 'telegram ' + d.via, sent_at: now, gmail_sent_id: sent.id || '' } },\n  ack: '✅ Sent reply #' + d.task.id + ' to ' + (d.task.payload.to_name || d.task.payload.to) + '.' } };\n"
+      },
+      "id": "c2a602f5-371a-43f8-b417-0e99dd3f32d7",
+      "name": "Build: approved patch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nconst d = $input.item.json;\nconst now = new Date().toISOString();\nreturn { json: { ...d, task_id: d.task.id, patch: { approval_state: 'rejected', status: 'cancelled', decided_by: 'director', decided_at: now, updated_at: now,\n  payload: { ...d.task.payload, decision_reply: 'telegram ' + d.via } },\n  ack: '🚫 Draft #' + d.task.id + ' rejected — nothing sent to ' + (d.task.payload.to_name || d.task.payload.to) + '.' } };\n"
+      },
+      "id": "3a74e610-0224-484e-b690-e1046d2194f2",
+      "name": "Build: rejected patch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2600,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/office_tasks?id=eq.{{ $json.task_id }}&tenant_id=eq.{{ $env.OFFICE_TENANT_ID }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=representation"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.patch) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "37a0be62-b78b-4402-8fdf-4c6a7a9b7037",
+      "name": "Patch: task decided",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2860,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "\nreturn { json: { ...$input.item.json, patched: false } };\n"
+      },
+      "id": "6d7c92b0-9973-4601-a27f-8a9731f25bc5",
+      "name": "Build: no decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\n// Answer the tap, edit the draft message so the decision shows under it\n// (the keyboard goes away), or reply to a typed decision.\nconst built = [];\nfor (const name of ['Build: approved patch', 'Build: rejected patch', 'Build: no decision']) {\n  try { for (const x of $(name).all()) built.push(x.json); } catch (e) { /* branch did not run */ }\n}\nconst out = [];\nfor (const b of built) {\n  const ack = String(b.ack || '');\n  if (b.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: b.callback_id, text: ack.slice(0, 200) } } });\n  if (b.message_id && b.decision !== 'none') {\n    const text = tgChunks(String(b.message_text || '') + '\\n\\n' + ack).slice(-1)[0];\n    out.push({ json: { tg_method: 'editMessageText', tg: { chat_id: b.chat_id, message_id: b.message_id, text } } });\n  } else {\n    out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: b.chat_id, text: ack } } });\n  }\n}\nreturn out;\n"
+      },
+      "id": "409e87a9-baf1-4b45-999f-bb0fa061adff",
+      "name": "Build: decision replies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3380,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/' + $json.tg_method }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.tg) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "70858534-8f1b-46cb-bb11-143fe8fab24d",
+      "name": "Telegram: reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3640,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/office_tasks?tenant_id=eq.{{ $env.OFFICE_TENANT_ID }}&status=in.(open,doing)&select=id,from_role,to_role,title,detail,status,due_on,source,approval_state,payload,created_at&order=created_at.asc&limit=100",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "918c330e-0ee2-4825-9204-1449e7f2856e",
+      "name": "Fetch: open tasks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3900,
+        220
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/office_meetings?tenant_id=eq.{{ $env.OFFICE_TENANT_ID }}&kind=eq.huddle&select=meeting_date,minutes,decisions&order=meeting_date.desc&limit=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "1c3e4ca6-d222-4dfa-a2f6-ba01abe2f71e",
+      "name": "Fetch: latest huddle",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4160,
+        220
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/office_notes?tenant_id=eq.{{ $env.OFFICE_TENANT_ID }}&role=eq.academic_incharge&select=body,facts,created_at&order=created_at.desc&limit=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_ROLE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "6d2ece72-a4ba-4d0c-a766-fb6e98b8f529",
+      "name": "Fetch: latest plan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4420,
+        220
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nfunction istNow() { return new Date(Date.now() + 5.5 * 3600 * 1000); }\nfunction isoDate(d) { return d.toISOString().slice(0, 10); }\nfunction academicYearCode(d) {\n  const y = d.getUTCMonth() + 1 >= 4 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;\n  return y + '-' + String((y + 1) % 100).padStart(2, '0');\n}\n\nconst rows = (name) => { try { return $(name).all().map((i) => i.json).filter((r) => r && Object.keys(r).length); } catch (e) { return []; } };\nconst tasks = rows('Fetch: open tasks').filter((r) => r.id);\nconst meeting = rows('Fetch: latest huddle')[0] || null;\nconst planNote = rows('Fetch: latest plan')[0] || null;\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'command');\nconst today = isoDate(istNow());\nconst line = (t) => '#' + t.id + ' [' + t.to_role + '] ' + t.title + (t.due_on ? ' (due ' + t.due_on + ')' : '') + (t.approval_state === 'pending' ? ' — waiting for you' : '');\nconst out = [];\nconst send = (chat_id, text, keyboard) => {\n  const chunks = tgChunks(text);\n  chunks.forEach((c, i) => {\n    const tg = { chat_id, text: c, parse_mode: 'HTML', disable_web_page_preview: true };\n    if (keyboard && i === chunks.length - 1) tg.reply_markup = { inline_keyboard: keyboard };\n    out.push({ json: { tg_method: 'sendMessage', tg } });\n  });\n};\nfor (const a of asks) {\n  if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });\n  if (a.cmd === 'start') {\n    const who = a.role ? 'You are the ' + a.role + '.' : 'This chat is not registered yet. Give the office this chat id: <code>' + tgEscape(a.chat_id) + '</code>';\n    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n/drafts — replies waiting for your decision\\n/tasks — open office tasks\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan' : ''));\n    continue;\n  }\n  if (a.cmd === 'not_director') { send(a.chat_id, 'Only the director decides drafts.'); continue; }\n  if (a.cmd === 'drafts') {\n    const drafts = tasks.filter((t) => t.approval_state === 'pending' && t.source === 'receptionist');\n    if (!drafts.length) { send(a.chat_id, 'No draft is waiting for a decision.'); continue; }\n    const text = '<b>Drafts waiting (' + drafts.length + ')</b>\\n' + drafts.map((t) => { const p = t.payload || {}; return '#' + t.id + ' ' + tgEscape((p.category || '') + ' → ' + (p.to_name || p.to || '') + ' — ' + (p.subject || t.title)); }).join('\\n');\n    const keyboard = a.role === 'director' ? drafts.slice(0, 10).map((t) => [{ text: '✅ Approve ' + t.id, callback_data: 'approve:' + t.id }, { text: '❌ Reject ' + t.id, callback_data: 'reject:' + t.id }]) : null;\n    send(a.chat_id, text, keyboard);\n    continue;\n  }\n  if (a.cmd === 'tasks') {\n    send(a.chat_id, tasks.length ? '<b>Open tasks (' + tasks.length + ')</b>\\n' + tasks.map((t) => tgEscape(line(t))).join('\\n') : 'No open tasks.');\n    continue;\n  }\n  if (a.cmd === 'huddle') {\n    if (!meeting) { send(a.chat_id, 'No huddle on record yet.'); continue; }\n    const dec = Array.isArray(meeting.decisions) ? meeting.decisions : [];\n    send(a.chat_id, '<b>Huddle ' + tgEscape(meeting.meeting_date) + '</b>\\n' + tgEscape(String(meeting.minutes || '').slice(0, 3000)) + (dec.length ? '\\n\\n<b>Decisions</b>\\n' + dec.map((d) => tgEscape('• ' + (d.to_role || '') + ': ' + (d.title || '') + (d.due_on ? ' by ' + d.due_on : ''))).join('\\n') : ''));\n    continue;\n  }\n  if (a.cmd === 'plan') {\n    if (!planNote) { send(a.chat_id, 'No substitution plan on record yet.'); continue; }\n    const when = String(planNote.created_at || '').slice(0, 10);\n    send(a.chat_id, (when === today ? '<b>Today\\'s plan</b>\\n' : '<b>No plan yet today — last plan ' + tgEscape(when) + '</b>\\n') + tgEscape(String(planNote.body || '').slice(0, 3500)));\n    continue;\n  }\n}\nreturn out;\n"
+      },
+      "id": "51d15f16-b403-4e0a-81b5-fe6b53007c4c",
+      "name": "Build: command replies",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4680,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Build: getUpdates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build: getUpdates": {
+      "main": [
+        [
+          {
+            "node": "Telegram: getUpdates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram: getUpdates": {
+      "main": [
+        [
+          {
+            "node": "Parse: updates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse: updates": {
+      "main": [
+        [
+          {
+            "node": "Switch: update kind",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: update kind": {
+      "main": [
+        [
+          {
+            "node": "Fetch: pending drafts",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch: open tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch: pending drafts": {
+      "main": [
+        [
+          {
+            "node": "Match: decisions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match: decisions": {
+      "main": [
+        [
+          {
+            "node": "Switch: decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: decision": {
+      "main": [
+        [
+          {
+            "node": "Gmail: send approved reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build: rejected patch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build: no decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail: send approved reply": {
+      "main": [
+        [
+          {
+            "node": "Build: approved patch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build: approved patch": {
+      "main": [
+        [
+          {
+            "node": "Patch: task decided",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build: rejected patch": {
+      "main": [
+        [
+          {
+            "node": "Patch: task decided",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Patch: task decided": {
+      "main": [
+        [
+          {
+            "node": "Build: decision replies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build: no decision": {
+      "main": [
+        [
+          {
+            "node": "Build: decision replies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build: decision replies": {
+      "main": [
+        [
+          {
+            "node": "Telegram: reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch: open tasks": {
+      "main": [
+        [
+          {
+            "node": "Fetch: latest huddle",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch: latest huddle": {
+      "main": [
+        [
+          {
+            "node": "Fetch: latest plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch: latest plan": {
+      "main": [
+        [
+          {
+            "node": "Build: command replies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build: command replies": {
+      "main": [
+        [
+          {
+            "node": "Telegram: reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Kolkata",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "description": "Polls @BHB_Office_bot every minute: approve/reject taps and typed decisions on the Receptionist's drafts (Gmail reply on approve), and the /drafts /tasks /huddle /plan commands for the director and the principal."
+  },
+  "tags": []
+}

@@ -556,3 +556,39 @@ export async function generateBlueprintCellsLlm(input: {
   }
   return { cells: out, engine, generationIds };
 }
+
+/**
+ * Remedial worksheet — questions aimed at the units / areas a class was weak
+ * on. The "more questions" generator with the remedial purpose line; shared
+ * by the web route (/api/ai/remedial-worksheet) and the staff app's
+ * (/api/v1/staff/ai/remedial-worksheet) so the purpose line lives once.
+ */
+export async function suggestRemedialWorksheetLlm(input: {
+  masters: MastersState;
+  classId: string;
+  subjectId: string;
+  units: ExamPaperUnitFact[];
+  weakLabels: string[];
+  count: number;
+  hardness: ExamPaperHardness;
+}) {
+  const weak = input.weakLabels.join("; ") || input.units.map((u) => u.title).join("; ");
+  return suggestMoreQuestionsLlm({
+    masters: input.masters,
+    classId: input.classId,
+    subjectId: input.subjectId,
+    hardness: input.hardness === "easy" || input.hardness === "hard" ? input.hardness : "medium",
+    count: Math.min(12, Math.max(3, Math.floor(Number(input.count) || 8))),
+    units: input.units,
+    focus: `Remedial practice worksheet for students who scored under 50% on: ${weak}. Start with two scaffolded items (worked pattern, then a near copy), then build to application. Every question must carry a full markingScheme and, where a unit has LO codes, a competencyCode.`,
+    promptVersion: "v2-remedial",
+  });
+}
+
+/** The remedial route's own input rules (≤ 8 areas of ≤ 80 chars). */
+export function cleanWeakLabels(raw: unknown): string[] {
+  return (Array.isArray(raw) ? raw : [])
+    .map((x) => String(x ?? "").trim().slice(0, 80))
+    .filter(Boolean)
+    .slice(0, 8);
+}

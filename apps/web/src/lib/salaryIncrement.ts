@@ -6,6 +6,8 @@
 
 import type { StaffStream } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
+import { isVisitingStaff } from "@/lib/visitingPay";
+import { carryNotOnPayroll, isOnPayroll, notOnPayrollLabel } from "@/lib/payrollNotOnPayroll";
 import {
   additionalFromLink,
   computeStructureAmounts,
@@ -19,6 +21,7 @@ import {
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { statutoryCoverFor } from "@/lib/payrollSetupSync";
 export type IncrementCycle = "april" | "anniversary" | "hold_month";
 export type IncrementMode = "percent" | "fixed";
 
@@ -310,12 +313,36 @@ export function buildIncrementDraft(input: {
     input.anniversaryOnly ?? policy.cycle === "anniversary";
   const effMonth = Number(effectiveFrom.slice(5, 7));
 
+  // Visiting staff have a rate on their profile, not a salary to raise.
   const roster = (input.masters.staff ?? []).filter(
-    (s) => s.status === "active",
+    (s) => s.status === "active" && !isVisitingStaff(s),
   );
   const lines: IncrementLine[] = [];
 
   for (const staff of roster) {
+    // Not on payroll (Masters → Salary setup): no salary, so nothing to
+    // raise — listed as skipped with the reason. Without this, the structure
+    // fallback gave a switch-only person a line, and applying it wrote a
+    // real structure + basic nobody had decided.
+    const nopLink = salary.staffLinks.find((l) => l.staffId === staff.id);
+    if (!isOnPayroll(nopLink)) {
+      lines.push({
+        staffId: staff.id,
+        empCode: staff.empCode,
+        fullName: staff.fullName,
+        stream: staff.stream,
+        joiningDate: staff.joiningDate,
+        structureId: "",
+        structureName: "",
+        oldBasic: 0,
+        mode: "percent",
+        value: 0,
+        newBasic: 0,
+        status: "skipped",
+        skipReason: notOnPayrollLabel(nopLink),
+      });
+      continue;
+    }
     const structure = resolveStructureForStaff(salary, staff);
     if (!structure) {
       lines.push({
@@ -341,7 +368,8 @@ export function buildIncrementDraft(input: {
       salary,
       structure,
       link?.basicOverride || 0,
-      link?.statutoryCover || "both",
+      // No salary setup: no PF/ESI (14 Oct 2026) — never PF + ESIC by default.
+      statutoryCoverFor(link).cover,
       input.masters.statutoryConfig,
       additionalFromLink(link),
     );
@@ -484,6 +512,23 @@ export function previewStaffIncrement(input: {
   const defaults = streamDefaults(policy, staff.stream);
   const mode = input.mode ?? defaults.mode;
   const value = input.value !== undefined ? input.value : defaults.value;
+  const nopLink = salary.staffLinks.find((l) => l.staffId === staff.id);
+  if (!isOnPayroll(nopLink)) {
+    return {
+      staffId: staff.id,
+      empCode: staff.empCode,
+      fullName: staff.fullName,
+      stream: staff.stream,
+      joiningDate: staff.joiningDate,
+      structureId: "",
+      structureName: "",
+      oldBasic: 0,
+      mode,
+      value,
+      newBasic: 0,
+      error: `${notOnPayrollLabel(nopLink)} — put them back on payroll in Masters → Salary setup first`,
+    };
+  }
   const structure = resolveStructureForStaff(salary, staff);
   if (!structure) {
     return {
@@ -506,7 +551,7 @@ export function previewStaffIncrement(input: {
     salary,
     structure,
     link?.basicOverride || 0,
-    link?.statutoryCover || "both",
+    statutoryCoverFor(link).cover,
     input.masters.statutoryConfig,
     additionalFromLink(link),
   );
@@ -765,7 +810,12 @@ export function rejectIncrementBatch(
 export function applyIncrementBatch(
   batchId: string,
   by: string,
-): { ok: true; applied: number } | { ok: false; error: string } {
+): {
+  ok: true;
+  applied: number;
+  /** Marked not on payroll since the batch was made — left untouched. */
+  skippedNotOnPayroll: string[];
+} | { ok: false; error: string } {
   const state = loadIncrementState();
   const batch = state.batches.find((b) => b.id === batchId);
   if (!batch) return { ok: false, error: "Batch not found" };
@@ -776,14 +826,24 @@ export function applyIncrementBatch(
   const salary = loadSalarySetup();
   const included = batch.lines.filter((l) => l.status === "included");
   let links = [...salary.staffLinks];
+  const skippedNotOnPayroll: string[] = [];
+  let applied = 0;
 
   for (const line of included) {
     const existing = links.find((l) => l.staffId === line.staffId);
+    // Switched off payroll after the batch was made: no raise, and never a
+    // structure or basic written onto a switch-only link.
+    if (!isOnPayroll(existing)) {
+      skippedNotOnPayroll.push(line.fullName);
+      continue;
+    }
+    applied += 1;
     const row: StaffSalaryLink = {
       staffId: line.staffId,
       structureId: existing?.structureId || line.structureId,
       basicOverride: line.newBasic,
-      statutoryCover: existing?.statutoryCover || "both",
+      // A first link made by an increment does not decide PF/ESI for them.
+      statutoryCover: statutoryCoverFor(existing).cover,
       // Increments move basic only; the additional amount is left as set.
       // This is exactly how a hand-typed PF/ESIC top-up went stale before
       // 2026-09-20 — a raise moved the basic, the typed top-up stayed put and
@@ -794,6 +854,8 @@ export function applyIncrementBatch(
       statutoryGrossUp: existing?.statutoryGrossUp === true,
       effectiveFrom: batch.effectiveFrom,
       salaryAccountNote: existing?.salaryAccountNote || "",
+      // A raise never puts someone back on payroll (Masters → Salary setup).
+      ...carryNotOnPayroll(existing),
     };
     links = [...links.filter((l) => l.staffId !== line.staffId), row];
   }
@@ -805,7 +867,7 @@ export function applyIncrementBatch(
     appliedBy: by,
     appliedAt: new Date().toISOString(),
   });
-  return { ok: true, applied: included.length };
+  return { ok: true, applied, skippedNotOnPayroll };
 }
 
 export function deleteIncrementBatch(batchId: string): boolean {

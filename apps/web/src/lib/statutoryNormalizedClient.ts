@@ -3,6 +3,7 @@
  * Mirrors payrollNormalizedClient.ts's debounced-push / fetch / hydrate shape.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { StatutoryRemitState } from "@/lib/statutoryRemit";
 import { normalizeStatutoryConfig, type StatutoryEstablishmentConfig } from "@/lib/foundationMasters";
 import { loadMasters } from "@/lib/masters";
@@ -72,7 +73,12 @@ export function scheduleStatutoryDeskSync(state: StatutoryRemitState) {
   }, DESK_PUSH_DEBOUNCE_MS);
 }
 
-async function pushStatutoryDeskApi(state: StatutoryRemitState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushStatutoryDeskApi(...args: Parameters<typeof pushStatutoryDeskApiNow>): ReturnType<typeof pushStatutoryDeskApiNow> {
+  return serialSave("statutory", () => pushStatutoryDeskApiNow(...args)) as ReturnType<typeof pushStatutoryDeskApiNow>;
+}
+
+async function pushStatutoryDeskApiNow(state: StatutoryRemitState) {
   const sentDeletes = pendingDeskDeletes(STATUTORY_DESK);
   try {
     const config = normalizeStatutoryConfig(loadMasters().statutoryConfig);

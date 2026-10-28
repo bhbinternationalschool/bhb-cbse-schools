@@ -1,4 +1,4 @@
-import { CRUD, type RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
+import { CRUD, type RbacFeatureDef, type RbacWholeModuleTab } from "@/lib/rbacFeatureCatalog/types";
 
 /**
  * Transport — wired 6 Oct 2026 (transport-desk POST/GET, TransportWorkspace
@@ -18,6 +18,10 @@ export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
       "/api/transport/pins-received",
       "/api/transport/boarding-point",
       "/api/transport/boarding-audit",
+      "/api/transport/gaps",
+      "/api/transport/gaps/act",
+      "/api/transport/gps-stops/tick",
+      "/api/transport/run-orders",
       "/api/transport/route-change-notice",
     ],
   },
@@ -34,11 +38,11 @@ export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
     id: "transport.fleet",
     module: "transport",
     label: "Vehicles & compliance",
-    blurb: "Vehicles, insurance and certificate renewals.",
+    blurb: "Vehicles and their papers — insurance, PUC, fitness, permit, road tax and the rest (Compliance tab). Booking a paper's fee also needs Accounts · edit.",
     actions: CRUD,
     slices: ["vehicles", "insurancePolicies", "certificateRenewals"],
     tabs: ["fleet", "compliance"],
-    routes: ["/api/transport/fleet-edge/vehicle-identity"],
+    routes: ["/api/transport/fleet-edge/vehicle-identity", "/api/transport/vehicle-docs", "/api/transport/vehicle-costs"],
   },
   {
     id: "transport.fuel",
@@ -62,10 +66,10 @@ export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
     id: "transport.boarding",
     module: "transport",
     label: "Boarding register",
-    blurb: "Who boarded and got off, run by run.",
+    blurb: "Who boarded and got off, run by run; the vehicle log book and its monthly reports. Holding edit reaches every bus; view reaches only the bus Staff → Duties or Fleet links the person to.",
     actions: ["view", "create", "edit"],
     slices: ["boardingEvents"],
-    tabs: ["board"],
+    tabs: ["board", "register"],
   },
   {
     id: "transport.finance",
@@ -94,4 +98,23 @@ export const TRANSPORT_FEATURES: RbacFeatureDef[] = [
       "/api/transport/fleet-edge/vehicle-status",
     ],
   },
+  {
+    id: "transport.reports",
+    module: "transport",
+    group: "Reports",
+    label: "Transport dashboard & reports (read only)",
+    blurb: "The transport dashboard and every transport report (riders, routes, vehicles, renewals, fuel, boarding, loans) — see and download. Changes nothing.",
+    actions: ["view"],
+    // Read-only, and no slices (each list has one owner): transport-desk
+    // serves this function every list the dashboard and the report
+    // catalogue (lib/transportReportCatalog) read — TRANSPORT_REPORT_KEYS.
+    tabs: ["dashboard", "reports"],
+    // The dashboard's vehicle-papers strip reads this; saving needs edit,
+    // which this function never holds. vehicle-costs: the fleet reports'
+    // fuel / papers / TCO / EMI figures (read only).
+    routes: ["/api/transport/vehicle-docs", "/api/transport/vehicle-costs"],
+  },
 ];
+
+/** Tabs of these modules that only the whole-module grant opens, and why. */
+export const TRANSPORT_WHOLE_MODULE_TABS: RbacWholeModuleTab[] = [];

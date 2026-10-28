@@ -16,6 +16,9 @@ import {
   renderFleetAlertText,
   tripPhase,
   DEFAULT_FLEET_ALERT_SETTINGS,
+  PUSH_ONLY_ALERTS,
+  detectIdling,
+  type IdleSpell,
   type FleetAlert,
   type LivePosition,
   type PositionFreshness,
@@ -24,11 +27,14 @@ import {
 import { getServerTenantContext } from "@/lib/serverTenant";
 import type { TransportRoute, FleetVehicle } from "@/lib/transport";
 import { fetchTransportDeskFromDb } from "@/lib/transportNormalized.server";
+import { readVehicleDocs } from "@/lib/transportFinance.server";
+import { papersAsCompliance } from "@/lib/transportVehicleCosts";
 import { TENANT } from "@/lib/types";
 import { inferStaffIsOwner } from "@/lib/waRoleResolver";
 import { buildWaTemplateBodyComponent, sendWaWithFailover } from "@/lib/waSend";
 import { normalizeWaTemplatesState, resolveTemplateForSend, templateVariablePositions, type WaTemplatesState } from "@/lib/waTemplates";
 import { fetchServerBlob } from "@/lib/serverBlob";
+import { normalizeVehicleKey } from "@/lib/fleetEdgeLink";
 import { sendPushToSubject } from "@/lib/webPush.server";
 
 type PositionRow = {
@@ -59,16 +65,50 @@ function rowToPosition(r: PositionRow): LivePosition {
   };
 }
 
-/** Latest position per tracker. Empty when nothing has ever reported. */
-export async function readLatestPositions(): Promise<LivePosition[]> {
+/**
+ * Latest position per tracker, saying whether the read worked. `ok:false`
+ * means the positions could not be read — NOT that no bus is reporting.
+ */
+export async function readLatestPositionsResult(): Promise<{ ok: true; positions: LivePosition[] } | { ok: false; error: string }> {
   const ctx = await getServerTenantContext();
-  if (!ctx) return [];
+  if (!ctx) return { ok: false, error: "No tenant context" };
   const { data, error } = await ctx.sb.rpc("fleet_latest_positions", { p_tenant_id: ctx.tenantId });
   if (error) {
     console.warn("[fleetLive] latest positions failed", error.message);
-    return [];
+    return { ok: false, error: error.message };
   }
-  return ((data ?? []) as PositionRow[]).map(rowToPosition);
+  return { ok: true, positions: ((data ?? []) as PositionRow[]).map(rowToPosition) };
+}
+
+/** Latest position per tracker. Empty when nothing has ever reported (or the read failed). */
+export async function readLatestPositions(): Promise<LivePosition[]> {
+  const r = await readLatestPositionsResult();
+  return r.ok ? r.positions : [];
+}
+
+/**
+ * One vehicle's track since an instant, oldest first, saying whether the read
+ * worked. Read newest-first under the cap and reversed, so a cap can only cut
+ * the oldest end — and hitting it is reported, never a silently short trail.
+ */
+export async function readVehicleTrackSince(
+  vehicleRef: string,
+  sinceIso: string,
+  cap = 600,
+): Promise<{ ok: true; points: LivePosition[]; truncated: boolean } | { ok: false; error: string }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "No tenant context" };
+  const { data, error } = await ctx.sb
+    .from("fleet_vehicle_positions")
+    .select("vehicle_ref, registration_number, recorded_at, lat, lng, speed_kmh, course_deg, ignition_on, fuel_percent, odometer_km")
+    .eq("tenant_id", ctx.tenantId)
+    .eq("vehicle_ref", vehicleRef)
+    .gte("recorded_at", sinceIso)
+    .order("recorded_at", { ascending: false })
+    .limit(cap);
+  if (error) return { ok: false, error: error.message };
+  const rows = (data ?? []) as PositionRow[];
+  return { ok: true, points: rows.map(rowToPosition).reverse(), truncated: rows.length >= cap };
 }
 
 /** A vehicle's track for the last N minutes, oldest first — for the trail on the map. */
@@ -192,13 +232,15 @@ export async function buildParentBusViews(input: {
 
 /* ── owner alerts ─────────────────────────────────────────────── */
 
-const ALERT_KINDS = ["out_of_hours", "low_fuel", "fuel_drain", "service_due", "compliance_due"] as const;
+const ALERT_KINDS = ["out_of_hours", "low_fuel", "fuel_drain", "service_due", "compliance_due", "idling", "tracker_silent"] as const;
 
 export type FleetAlertsTickResult = {
   evaluated: number;
   alerts: { key: string; title: string; vehicle: string; recipients: { name: string; wa: string; push: number }[] }[];
   pruned: number;
   dryRun: boolean;
+  /** The vehicle papers could not be read: no "paper expiring" alert was evaluated this tick. */
+  papersUnread?: boolean;
 };
 
 /**
@@ -210,8 +252,19 @@ export type FleetAlertsTickResult = {
 export async function runFleetAlertsTick(opts: { dryRun?: boolean; nowMs?: number } = {}): Promise<FleetAlertsTickResult> {
   const nowMs = opts.nowMs ?? Date.now();
   const ctx = await getServerTenantContext();
-  const [{ bundle }, positions] = await Promise.all([fetchTransportDeskFromDb(), readLatestPositions()]);
-  const vehicles = bundle.vehicles as FleetVehicle[];
+  const [{ bundle }, positions, papers] = await Promise.all([
+    fetchTransportDeskFromDb(),
+    readLatestPositions(),
+    readVehicleDocs().catch(() => null),
+  ]);
+  // Papers come from the server register (transport_vehicle_docs), never the
+  // desk's vehicle.compliance[] — that list was never saved (14 Oct 2026).
+  // Unread papers evaluate no paper alert; they are not "nothing expiring".
+  if (!papers) console.warn("[fleet-alerts] vehicle papers could not be read — no compliance_due alert this tick");
+  const vehicles = (bundle.vehicles as FleetVehicle[]).map((v) => ({
+    ...v,
+    compliance: papers ? papersAsCompliance(papers.state.docs, v.id) : [],
+  }));
 
   // Cooldown: the last time each alert key went out.
   const lastSent: Record<string, string> = {};
@@ -257,8 +310,39 @@ export async function runFleetAlertsTick(opts: { dryRun?: boolean; nowMs?: numbe
     }
   }
 
-  const alerts = evaluateFleetAlerts({ vehicles, positions, nowMs, lastSent, fuelDrains });
-  const result: FleetAlertsTickResult = { evaluated: vehicles.length, alerts: [], pruned: 0, dryRun: !!opts.dryRun };
+  // Engine-on standing spells: the last 25 minutes of every tracker.
+  const idleSpells: IdleSpell[] = [];
+  if (ctx) {
+    const since = new Date(nowMs - 25 * 60_000).toISOString();
+    const { data } = await ctx.sb
+      .from("fleet_vehicle_positions")
+      .select("vehicle_ref, registration_number, recorded_at, lat, lng, speed_kmh, course_deg, ignition_on, fuel_percent, odometer_km")
+      .eq("tenant_id", ctx.tenantId)
+      .gte("recorded_at", since)
+      .order("recorded_at", { ascending: true })
+      .limit(2000);
+    const track = ((data ?? []) as PositionRow[]).map(rowToPosition);
+    for (const v of vehicles) {
+      if (!v.isActive) continue;
+      const key = normalizeVehicleKey(v.registrationNo);
+      if (!key) continue;
+      const mine = track.filter((p) => normalizeVehicleKey(p.registrationNumber) === key || normalizeVehicleKey(p.vehicleRef) === key);
+      const spell = detectIdling(mine, nowMs);
+      if (spell) {
+        const atSchool = Math.hypot((spell.lat - TENANT.schoolLat) * 110_540, (spell.lng - TENANT.schoolLng) * 100_500) <= 300;
+        idleSpells.push({ vehicleId: v.id, ...spell, atSchool });
+      }
+    }
+  }
+
+  const alerts = evaluateFleetAlerts({ vehicles, positions, nowMs, lastSent, fuelDrains, idleSpells });
+  const result: FleetAlertsTickResult = {
+    evaluated: vehicles.length,
+    alerts: [],
+    pruned: 0,
+    dryRun: !!opts.dryRun,
+    ...(papers ? {} : { papersUnread: true }),
+  };
   if (!alerts.length) {
     result.pruned = await prunePositions(nowMs);
     return result;
@@ -273,6 +357,48 @@ export async function runFleetAlertsTick(opts: { dryRun?: boolean; nowMs?: numbe
   const timeLabel = `${dateIso} ${hhmm} IST`;
 
   for (const a of alerts) {
+    if (PUSH_ONLY_ALERTS.has(a.kind)) {
+      // Phones only: management (the owners on the roster) and, for idling,
+      // the vehicle's own driver — the one person who can turn the key.
+      const vehicle = vehicles.find((x) => x.id === a.vehicleId);
+      const people = [...owners];
+      if (a.kind === "idling" && vehicle?.driverStaffId) {
+        const driver = (masters.staff ?? []).find((s) => s.id === vehicle.driverStaffId && s.status === "active");
+        if (driver && !people.some((p) => p.id === driver.id)) people.push(driver);
+      }
+      const recipients: FleetAlertsTickResult["alerts"][number]["recipients"] = [];
+      for (const s of people) {
+        let push = 0;
+        if (!opts.dryRun) {
+          const p = await sendPushToSubject("staff", s.id, {
+            title: `${a.title} · ${a.vehicleLabel}`,
+            body: a.detail.slice(0, 160),
+            url: "/transport?tab=live",
+            data: { kind: "fleet_alert", alert: a.kind },
+          }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
+          push = p.sent;
+        }
+        recipients.push({ name: s.fullName, wa: "push only", push });
+      }
+      if (ctx && !opts.dryRun) {
+        // Logged once per alert so the cooldown holds even when nobody has
+        // the app installed — otherwise the same alert would retry every tick.
+        await ctx.sb.from("fleet_edge_notifications").insert({
+          tenant_id: ctx.tenantId,
+          event_id: null,
+          alert_name: a.kind,
+          vehicle_ref: a.vehicleId,
+          registration_number: vehicle?.registrationNo ?? null,
+          channel: "push",
+          recipient: recipients.map((r) => r.name).join(", ").slice(0, 500),
+          status: "sent",
+          detail: `push to ${recipients.length} (${recipients.reduce((n, r) => n + r.push, 0)} devices)`,
+          body: `${a.title} · ${a.vehicleLabel}: ${a.detail}`,
+        });
+      }
+      result.alerts.push({ key: a.key, title: a.title, vehicle: a.vehicleLabel, recipients });
+      continue;
+    }
     const text = renderFleetAlertText(a, TENANT.nameDisplay, timeLabel);
     const recipients: FleetAlertsTickResult["alerts"][number]["recipients"] = [];
     for (const s of owners) {
@@ -322,14 +448,19 @@ export async function runFleetAlertsTick(opts: { dryRun?: boolean; nowMs?: numbe
   return result;
 }
 
-/** Thirty days of track is plenty for a school bus; older rows go. */
+/** Thirty days of track is plenty for a school bus; older rows go. Raw pushes: 90 days. */
 async function prunePositions(nowMs: number): Promise<number> {
   const ctx = await getServerTenantContext();
   if (!ctx) return 0;
   const cutoff = new Date(nowMs - 30 * 86_400_000).toISOString();
   const { data, error } = await ctx.sb.from("fleet_vehicle_positions").delete().eq("tenant_id", ctx.tenantId).lt("recorded_at", cutoff).select("id");
+  // Raw Tata telemetry/details pushes are kept 90 days (reports and the
+  // halt analysis read them); alerts are never pruned. Batched, so a tick
+  // never stalls on a backlog.
+  const raw = await ctx.sb.rpc("fleet_prune_raw_events", { p_tenant_id: ctx.tenantId, p_keep_days: 90, p_batch: 5000 });
+  if (raw.error) console.warn("[fleetLive] raw event prune failed", raw.error.message);
   if (error) return 0;
-  return (data ?? []).length;
+  return (data ?? []).length + (typeof raw.data === "number" ? raw.data : 0);
 }
 
 export type { FleetAlert };

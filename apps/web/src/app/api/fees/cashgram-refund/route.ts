@@ -42,6 +42,8 @@ export async function GET(req: Request) {
   const isOwner = !auth.viaMirrorSecret && isSuperAdminSession(auth.ctx.session);
 
   if (cashgramId) {
+    const own = await getCashgramRefund(cashgramId);
+    if (!own || own.purpose !== "fee_refund") return NextResponse.json({ ok: false, error: "No such refund" }, { status: 404 });
     const row = await refreshCashgramRefund(cashgramId);
     if (!row) return NextResponse.json({ ok: false, error: "No such refund" }, { status: 404 });
     return NextResponse.json({ ok: true, refund: row });
@@ -112,6 +114,9 @@ export async function POST(req: Request) {
   }
 
   if (!cashgramId) return NextResponse.json({ ok: false, error: "cashgramId is required" }, { status: 400 });
+  // Salary links are not the fee desk's to approve or cancel.
+  const own = await getCashgramRefund(cashgramId);
+  if (!own || own.purpose !== "fee_refund") return NextResponse.json({ ok: false, error: "No such refund" }, { status: 404 });
 
   if (action === "refresh") {
     const row = await refreshCashgramRefund(cashgramId);

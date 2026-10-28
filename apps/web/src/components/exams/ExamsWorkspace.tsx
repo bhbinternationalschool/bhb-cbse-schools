@@ -22,6 +22,7 @@ import {
   parseCoScholasticRating,
   coScholasticDomainLabel,
   componentsForSubject,
+  gradedPartsForSubject,
   createExamTerm,
   deactivateExamTerm,
   deleteExamTerm,
@@ -69,7 +70,9 @@ import { AssessmentSchemesPanel } from "@/components/exams/AssessmentSchemesPane
 import { ReportCardTemplatesPanel } from "@/components/exams/ReportCardTemplatesPanel";
 import { coScholasticRatingsFor, pickableGrades, type CoScholasticArea, type GradeBand } from "@/lib/examSchemes";
 import { rosterForSection } from "@/lib/attendance";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
 import {
   checkHold,
@@ -96,16 +99,17 @@ import {
   HoldStatusBanner,
   PrincipalHoldOverrideDialog,
 } from "@/components/fees/PrincipalHoldOverrideDialog";
-import {
-  ReportCardSheet,
-  printReportCard,
-} from "@/components/exams/ReportCardSheet";
+import { ReportCardSheet, printReportCard } from "@/components/exams/ReportCardSheet";
 import {
   ClassResultSheetView,
   printClassResultSheet,
 } from "@/components/exams/ClassResultSheet";
+import { PrintWithSignaturesButton } from "@/components/shared/PrintWithSignaturesButton";
+import { usePrintSignatures } from "@/components/shared/usePrintSignatures";
+import { reportCardSignatureRequest, resultSheetSignatureRequest } from "@/lib/printSignatures";
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { ExamDateSheetGrid } from "@/components/exams/ExamDateSheetGrid";
+import { ParentReleasePanel } from "@/components/exams/ParentReleasePanel";
 import { ExamSeatingPanel } from "@/components/exams/ExamSeatingPanel";
 import { InvigilationPanel } from "@/components/exams/InvigilationPanel";
 import { ExamPapersPanel } from "@/components/exams/ExamPapersPanel";
@@ -173,7 +177,7 @@ const SETUP_STEPS: StepDef<SetupStep>[] = [
   {
     id: "schemes",
     title: "Assessment schemes",
-    what: "How each class band is graded: marks or grades, grade bands, subject splits (e.g. written + oral) and co-scholastic areas. Classes not given a scheme use the default.",
+    what: "How each class band is graded: marks or grades, grade bands, subject splits (e.g. written + oral, with a graded part like Handwriting A/B/C that is not counted in the total) and co-scholastic areas. Classes not given a scheme use the default.",
   },
   {
     id: "exams",
@@ -191,8 +195,10 @@ function cellKey(studentId: string, subjectId: string, component = "") {
   return `${studentId}:${subjectId}:${component}`;
 }
 
-/** One column of the marks grid: a subject, or one component of it. */
-type GridColumn = { subject: ExamSubject; component: SchemeComponent | null };
+/** One column of the marks grid: a subject, or one component of it. A
+ * graded part (Handwriting A/B/C) carries `grades` — a letter picker, never
+ * a number, and outside every total. */
+type GridColumn = { subject: ExamSubject; component: SchemeComponent | null; grades?: string[] };
 
 function columnKey(col: GridColumn): string {
   return `${col.subject.id}:${col.component?.code ?? ""}`;
@@ -226,6 +232,9 @@ type MarkRowProps = {
   onAbsentReason: (studentId: string, reason: string) => void;
   onMark: (studentId: string, subjectId: string, component: string, value: string) => void;
   onGrade: (studentId: string, subjectId: string, component: string, grade: string) => void;
+  /** A graded part's letter (AB included) — that part only, never the
+   * subject's absence or its marks. */
+  onPartGrade: (studentId: string, subjectId: string, component: string, grade: string) => void;
   onRating: (studentId: string, domain: CoScholasticDomain, value: string) => void;
   /** Photograph this child's answer sheet for suggested marks; absent = not offered here. */
   onScan?: (studentId: string) => void;
@@ -265,6 +274,7 @@ const MarkRow = memo(function MarkRow({
   onAbsentReason,
   onMark,
   onGrade,
+  onPartGrade,
   onRating,
   onScan,
 }: MarkRowProps) {
@@ -335,6 +345,36 @@ const MarkRow = memo(function MarkRow({
               >
                 —
               </span>
+            ) : col.grades ? (
+              (() => {
+                const v = values[key] ?? "";
+                // A letter saved before the part's list changed: shown as it
+                // is, flagged, until someone changes or clears it.
+                const stale = v !== "" && v !== "AB" && !col.grades.includes(v);
+                return (
+              <select
+                className={`field !w-16 !px-1 !py-1 text-center ${stale ? "!border-[var(--danger)] !text-[var(--danger)]" : ""}`}
+                disabled={locked}
+                value={v}
+                onChange={(e) => onPartGrade(st.id, sub.id, code, e.target.value)}
+                aria-label={`${st.fullName} ${name} grade`}
+                title={
+                  stale
+                    ? `"${v}" is not on this part's list (${col.grades.join(", ")}) — change it or clear it (—)`
+                    : "Graded — type the letter to pick it. AB = absent for this part only. Not counted in the total."
+                }
+              >
+                <option value="">—</option>
+                {stale ? <option value={v}>{v} · not on list</option> : null}
+                {col.grades.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+                <option value="AB">AB · absent</option>
+              </select>
+                );
+              })()
             ) : entryMode === "grades" ? (
               <select
                 className="field !w-16 !px-1 !py-1 text-center"
@@ -578,6 +618,9 @@ const EXAM_TABS: ModuleTabItem[] = [
   { id: "setup", label: "Exams & policy", tone: "navy" },
 ];
 
+/** Tabs drawn only from Masters (classes, rooms, staff) — "Loading…" until it answers. */
+const MASTERS_TABS = new Set<string>(["datesheet", "seating", "invigilation", "admitcards", "papers"]);
+
 export function ExamsWorkspace() {
   // Fee holds are server truth. Without this the gates below read an
   // unloaded snapshot and every child looks allowed.
@@ -593,10 +636,16 @@ export function ExamsWorkspace() {
   // written back to the URL.
   useEffect(() => {
     if (urlAsksForTab(window.location.search, "papers")) setTab("papers");
+    // Reports Center links ("Open module") land on the report tabs they name
+    // (14 Oct 2026: /exams?tab=result_reports opened the dashboard).
+    for (const t of ["result_reports", "results", "reports"] as const) {
+      if (urlAsksForTab(window.location.search, t)) setTab(t);
+    }
   }, []);
-  const [masters, setMasters] = useState<MastersState | null>(() =>
-    typeof window !== "undefined" ? loadMasters() : null,
-  );
+  // data-layer 2.1h: the server's book + the access copy's staff side
+  // (invigilators, permission checks); kept fresh by the versions poll — no
+  // mount-time read, no 'bhb-masters-updated' listener, no ensureMastersHydrated.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(() =>
     typeof window !== "undefined" ? loadSis() : null,
   );
@@ -667,7 +716,6 @@ export function ExamsWorkspace() {
   const ay = session.academicYearCode || DEFAULT_AY;
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
     const p = getExamPolicy();
     setPolicyDraft(p);
@@ -683,18 +731,6 @@ export function ExamsWorkspace() {
     const onFailed = () => setConflicts(examSheetConflicts());
     window.addEventListener("bhb-desk-sync-failed", onFailed);
     return () => window.removeEventListener("bhb-desk-sync-failed", onFailed);
-  }, []);
-
-  // Masters is read once at mount, and the staff roster is the slice that
-  // arrives last: it has its own hydrate, kicked from whichever desk asked for
-  // it. This desk never asked, so a browser that opened on Exams held masters
-  // with no staff and the invigilator picker had nobody to offer. Repaint
-  // whenever a hydrate reports masters changed.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const onMasters = () => setMasters(loadMasters());
-    window.addEventListener("bhb-masters-updated", onMasters);
-    return () => window.removeEventListener("bhb-masters-updated", onMasters);
   }, []);
 
   // Corrected result attendance hydrates from module_local_state after
@@ -713,20 +749,17 @@ export function ExamsWorkspace() {
       const [
         { ensureSisHydrated },
         { ensureExamsHydrated },
-        { ensureMastersHydrated },
         { ensureStaffHydrated },
         { withHydrationSlot },
       ] = await Promise.all([
         import("@/lib/sisPersistence"),
         import("@/lib/examsPersistence"),
-        import("@/lib/mastersPersistence"),
         import("@/lib/staffPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
         withHydrationSlot(() => ensureSisHydrated()),
         withHydrationSlot(() => ensureExamsHydrated()),
-        withHydrationSlot(() => ensureMastersHydrated()),
         // Invigilation, seating and admit cards all read masters.staff.
         withHydrationSlot(() => ensureStaffHydrated()),
       ]);
@@ -846,6 +879,14 @@ export function ExamsWorkspace() {
       const parts = scheme ? componentsForSubject(scheme, term.code, subject.code) : [];
       if (parts.length === 0) out.push({ subject, component: null });
       else for (const component of parts) out.push({ subject, component });
+      // Graded parts after the marks: English Oral · Written · Handwriting.
+      for (const g of scheme ? gradedPartsForSubject(scheme, term.code, subject.code) : []) {
+        out.push({
+          subject,
+          component: { code: g.code, label: g.label, maxMarks: 0, kind: "internal" },
+          grades: g.grades,
+        });
+      }
     }
     return out;
   }, [subjects, scheme, term]);
@@ -871,7 +912,7 @@ export function ExamsWorkspace() {
         const c = gridIndex.get(cellKey(st.id, col.subject.id, col.component?.code ?? ""));
         values[columnKey(col)] = absentCells.has(absenceKey(st.id, col.subject.id))
           ? "AB"
-          : entryMode === "grades"
+          : entryMode === "grades" || col.grades
             ? c?.grade && c.grade !== "—"
               ? c.grade
               : ""
@@ -1048,6 +1089,25 @@ export function ExamsWorkspace() {
       setDirty(true);
     },
     [takesBy, setAbsentCell],
+  );
+
+  /** A graded part (Handwriting): the letter, "AB" included, on that part's
+   * row alone. Absence of the subject (and its Oral/Written marks) is not
+   * touched — AB here means absent for the handwriting check only. */
+  const setPartGrade = useCallback(
+    (studentId: string, subjectId: string, component: string, grade: string) => {
+      const takes = takesBy.get(studentId);
+      if (takes && !takes.has(subjectId)) return;
+      setGrid((prev) =>
+        prev.map((m) =>
+          m.studentId === studentId && m.subjectId === subjectId && m.component === component
+            ? { ...m, marksObtained: null, grade: grade || "—" }
+            : m,
+        ),
+      );
+      setDirty(true);
+    },
+    [takesBy],
   );
 
   const setCoScholasticRating = useCallback(
@@ -1480,6 +1540,17 @@ export function ExamsWorkspace() {
     return { sheet: built } as const;
   }, [tab, tick, examTermId, classId, sectionId, roster, classLabel, ay, examDeps]);
 
+  // Signatures on the printed sheets (lib/printSignatures); Print waits for
+  // them (PrintWithSignaturesButton) so a slow answer never prints blank lines.
+  const previewSigRequest = useMemo(() => (preview ? reportCardSignatureRequest(preview) : null), [preview]);
+  const previewSigs = usePrintSignatures(previewSigRequest);
+  const resultSheetForSigs = classResult && "sheet" in classResult ? classResult.sheet : null;
+  const resultSigRequest = useMemo(
+    () => (resultSheetForSigs ? resultSheetSignatureRequest(resultSheetForSigs) : null),
+    [resultSheetForSigs],
+  );
+  const resultSigs = usePrintSignatures(resultSigRequest);
+
   // The result sheet, best first; every column sorts (decision by its label).
   const resultSort = useTableSort(
     classResult?.sheet?.rows ?? [],
@@ -1599,6 +1670,10 @@ export function ExamsWorkspace() {
       error={error}
       notice={notice}
     >
+      {!masters && mastersError ? (
+        <QueryError what="the school's classes, subjects and staff" error={mastersError} retry={retryMasters} />
+      ) : (
+      <>
       <ModuleTabs
         aria-label="Exams sections"
         value={tab}
@@ -1695,13 +1770,26 @@ export function ExamsWorkspace() {
         </div>
       ) : null}
 
+      {!masters && MASTERS_TABS.has(tab) ? (
+        // Masters not answered yet (a failed read shows QueryError above):
+        // say so, never an empty tab.
+        <p className="mt-4 text-sm text-[var(--muted)]">Loading…</p>
+      ) : null}
+
       {tab === "datesheet" && masters ? (
-        <ExamDateSheetGrid
-          academicYearCode={ay}
-          masters={masters}
-          terms={terms}
-          onChanged={refresh}
-        />
+        <>
+          <ParentReleasePanel
+            kind="dateSheet"
+            terms={terms}
+            canEdit={hasPermission(session, masters, "exams", "edit")}
+          />
+          <ExamDateSheetGrid
+            academicYearCode={ay}
+            masters={masters}
+            terms={terms}
+            onChanged={refresh}
+          />
+        </>
       ) : null}
 
       {tab === "seating" && masters ? (
@@ -2638,8 +2726,13 @@ export function ExamsWorkspace() {
                               {col.component.label}
                             </span>
                           ) : null}
-                          <div className="text-[10px] font-normal text-[var(--muted)]">
-                            {entryMode === "grades"
+                          <div
+                            className="text-[10px] font-normal text-[var(--muted)]"
+                            title={col.grades ? "Graded part — not counted in the subject total" : undefined}
+                          >
+                            {col.grades
+                              ? `graded ${col.grades.join("/")} · not in total`
+                              : entryMode === "grades"
                               ? "grade"
                               : `/${col.component ? col.component.maxMarks : term ? effectiveMaxMarks(term, col.subject) : "—"}`}
                           </div>
@@ -2671,6 +2764,7 @@ export function ExamsWorkspace() {
                             onAbsentReason={setAbsentReason}
                             onMark={setMark}
                             onGrade={setGrade}
+                            onPartGrade={setPartGrade}
                             onRating={setCoScholasticRating}
                             onScan={canScan ? setScanStudentId : undefined}
                           />
@@ -2784,8 +2878,11 @@ export function ExamsWorkspace() {
         />
       ) : null}
 
-      {tab === "remarks" ? (
+      {tab === "remarks" && !masters ? (
+        <p className="mt-4 text-sm text-[var(--muted)]">Loading…</p>
+      ) : tab === "remarks" && masters ? (
         <RemarksPanel
+          masters={masters}
           ay={ay}
           term={term}
           terms={terms}
@@ -2795,7 +2892,7 @@ export function ExamsWorkspace() {
           roster={roster}
           subjects={subjects}
           policy={policy}
-          canEdit={!!masters && canWriteModuleTab(session, masters, "exams", "remarks")}
+          canEdit={canWriteModuleTab(session, masters, "exams", "remarks")}
           onSaved={refresh}
           onFlash={flash}
           onError={setError}
@@ -2872,10 +2969,11 @@ export function ExamsWorkspace() {
                   <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                     Preview
                   </h2>
-                  <button
-                    type="button"
-                    className="btn-accent rounded-lg px-3 py-1.5 text-xs font-bold"
-                    onClick={() => {
+                  <PrintWithSignaturesButton
+                    label="Print report card"
+                    status={previewSigs.status}
+                    onRetry={previewSigs.retry}
+                    onPrint={() => {
                       const gate = canPrintReportCard(preview.student.id);
                       if (!gate.allowed) {
                         setError(gate.message);
@@ -2890,11 +2988,9 @@ export function ExamsWorkspace() {
                         preview.examTerm.id,
                       );
                     }}
-                  >
-                    Print report card
-                  </button>
+                  />
                 </div>
-                <ReportCardSheet card={preview} />
+                <ReportCardSheet card={preview} signatures={previewSigs.signatures} />
               </div>
             ) : (
               <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
@@ -2908,6 +3004,11 @@ export function ExamsWorkspace() {
 
       {tab === "results" ? (
         <div className="mt-6 space-y-4">
+          <ParentReleasePanel
+            kind="results"
+            terms={terms}
+            canEdit={!!masters && hasPermission(session, masters, "exams", "edit")}
+          />
           {!classId || !sectionId || !examTermId ? (
             <p className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-10 text-center text-sm text-[var(--muted)]">
               Select exam, class and section. Use Annual / Half-yearly for
@@ -2946,17 +3047,17 @@ export function ExamsWorkspace() {
                   >
                     Apply promotions to SIS
                   </button>
-                  <button
-                    type="button"
+                  <PrintWithSignaturesButton
+                    label="Print result sheet"
                     className="btn-accent rounded-lg px-3 py-1.5 text-xs font-semibold"
-                    onClick={() =>
+                    status={resultSigs.status}
+                    onRetry={resultSigs.retry}
+                    onPrint={() =>
                       printClassResultSheet(
                         `class-result-${classResult.sheet.examTerm.id}-${classResult.sheet.sectionId}`,
                       )
                     }
-                  >
-                    Print result sheet
-                  </button>
+                  />
                 </div>
               </div>
 
@@ -3169,7 +3270,7 @@ export function ExamsWorkspace() {
                 </div>
               </ErpTableShell>
 
-              <ClassResultSheetView sheet={classResult.sheet} />
+              <ClassResultSheetView sheet={classResult.sheet} signatures={resultSigs.signatures} />
             </>
           ) : null}
         </div>
@@ -3198,6 +3299,8 @@ export function ExamsWorkspace() {
           onGranted={retryReportAfterUnlock}
         />
       ) : null}
+      </>
+      )}
     </ErpWorkspaceShell>
   );
 }

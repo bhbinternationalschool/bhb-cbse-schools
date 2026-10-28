@@ -1,4 +1,4 @@
-import { CRUD, type RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
+import { CRUD, type RbacFeatureDef, type RbacWholeModuleTab } from "@/lib/rbacFeatureCatalog/types";
 
 /**
  * Campus — discipline, health, visitors, complaints (6 Oct 2026).
@@ -30,6 +30,19 @@ export const CAMPUS_FEATURES: RbacFeatureDef[] = [
     slices: ["module-state/discipline"],
     tabs: ["log", "all", "student"],
     routes: ["/api/wa/dispatch"],
+  },
+  {
+    // School chat (16 Oct 2026): the review queue, mute / block and the
+    // behaviour summary. Holders of Discipline · approve (built in: owner,
+    // principal, admin) have it through the module; the office can give it
+    // on its own in Masters → Roles. The member routes (send, read) are not
+    // RBAC-gated — membership is decided per request by the server.
+    id: "discipline.chat_moderate",
+    module: "discipline",
+    label: "School chat moderation",
+    blurb: "Review held chat messages (approve / remove / warn), mute or block anyone, and see the behaviour summary.",
+    actions: ["view", "approve"],
+    routes: ["/api/v1/school-chat/moderation"],
   },
   {
     id: "health.infirmary",
@@ -80,5 +93,15 @@ export const CAMPUS_FEATURES: RbacFeatureDef[] = [
     blurb: "Tutor replies a parent flagged: read them and mark reviewed or dismissed.",
     actions: ["view", "edit"],
     tabs: ["ai"],
+  },
+];
+
+/** Tabs of these modules that only the whole-module grant opens, and why. */
+export const CAMPUS_WHOLE_MODULE_TABS: RbacWholeModuleTab[] = [
+  {
+    module: "visitors",
+    tab: "gateduty",
+    reason:
+      "Gate duty reads the staff duty roster, a Staff-module book (module-state/duty_roster) a Visitors function cannot read — the tab would say nobody is on duty when it simply could not read the roster. Grant Staff → Duty roster for it.",
   },
 ];

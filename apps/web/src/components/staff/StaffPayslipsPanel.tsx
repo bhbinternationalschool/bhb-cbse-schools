@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { loadMasters } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   approvedPayslipsForStaff,
   formatInr,
@@ -19,18 +20,17 @@ export function StaffPayslipsPanel() {
   const session = useDemoSession();
   const [tick, setTick] = useState(0);
 
-  const masters = useMemo(() => {
-    void tick;
-    return loadMasters();
-  }, [tick]);
+  // Masters + the roster the permission checks resolve against (data-layer
+  // 2.1c). Null = not known yet — never "no staff record".
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
 
   const self = useMemo(
-    () => resolveSessionStaff(session, masters),
+    () => (masters ? resolveSessionStaff(session, masters) : null),
     [session, masters],
   );
 
   const manager = useMemo(
-    () => canManagePayroll(session, masters),
+    () => (masters ? canManagePayroll(session, masters) : false),
     [session, masters],
   );
 
@@ -43,6 +43,13 @@ export function StaffPayslipsPanel() {
   useEffect(() => {
     setTick((n) => n + 1);
   }, []);
+
+  if (mastersError) {
+    return <QueryError what="the school's setup" error={mastersError} retry={retryMasters} />;
+  }
+  if (!masters) {
+    return <p className="text-sm text-[var(--muted)]">Loading payslips…</p>;
+  }
 
   return (
     <div className="space-y-4">

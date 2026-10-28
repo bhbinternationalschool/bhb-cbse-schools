@@ -6,6 +6,7 @@ import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { loadMasters } from "@/lib/masters";
 import { classLabelForStudent } from "@/lib/parentPortal";
 import {
+  aadhaarOnRecord,
   documentChecklist,
   householdForParent,
   studentProfileForParent,
@@ -60,6 +61,8 @@ export async function GET(request: Request) {
       children: [...byAdmission.values()].map((s) => ({
         ...studentProfileForParent(s, classLabelForStudent(s, masters)),
         completeness: profileCompleteness(s, household),
+        // Last 4 digits + verified or not, for "Correct Aadhaar" in the app.
+        aadhaar: aadhaarOnRecord(s),
       })),
     });
   } catch (e) {

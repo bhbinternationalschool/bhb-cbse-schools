@@ -57,7 +57,8 @@ export async function writePortalTeachersSnapshot(
 export async function readStaffWithRevisions(): Promise<{ staff: StaffRecord[]; revisions: Record<string, string> } | null> {
   const ctx = await getServerTenantContext();
   if (!ctx) return null;
-  const { data, error } = await ctx.sb.from("sis_staff").select("*").eq("tenant_id", ctx.tenantId);
+  // Removed members (2.2b soft remove) are not ERP teachers to compare with.
+  const { data, error } = await ctx.sb.from("sis_staff").select("*").eq("tenant_id", ctx.tenantId).is("deleted_at", null);
   if (error) {
     console.warn("[udise-teacher-sync] staff read failed", error.message);
     return null;

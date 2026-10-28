@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 #
-# Local stand-in for the CI merge gate.
+# Local twin of the CI merge gate.
 #
-# GitHub Actions cannot currently run on this repo — every workflow dies at
-# startup with zero jobs — so nothing checks a change before it reaches main
-# or production. This runs the same steps .github/workflows/ci.yml would, in
-# one command, so a change can be verified without Actions.
+# GitHub Actions runs .github/workflows/ci.yml on every pull request and on
+# main (it has since the repo moved to bhbinternationalschool in Aug 2026; an
+# older note here said Actions could not run — that was the locked
+# ashishsingh80-web account). This runs the same steps locally in one command,
+# so a change can be checked before it is pushed.
+#
+# Green here, or in CI, proves the code type-checks, lints and passes the
+# self-tests. It does NOT prove a screen shows the right data: no test here
+# opens a page (docs/data-layer-rebuild/COMMAND.md step 1.1 adds that).
 #
 #   npm run verify              typecheck, lint, self-tests, production build
 #   SKIP_BUILD=1 npm run verify  everything except the build (~2 min faster)
@@ -57,14 +62,15 @@ run() {
 SELFTESTS=(
   test:session-cookie
   test:masters-write-guard
-  test:masters-revision-guard
-  test:masters-revision-lifecycle
-  test:masters-revision-everywhere
   test:masters-cold-client
+  test:masters-teacher-no-fees
+  test:screen-masters-dues
+  test:certificate-dues-gate
   test:masters-freeze
   test:session-year
   test:academic-year-resolve
   test:workspace-policy
+  test:workspace-idle
   test:tone-tokens
   test:masters-read-failure
   test:save-full-cache
@@ -124,8 +130,9 @@ SELFTESTS=(
   test:parent-bot-day-app
   test:comms-tab-access
   test:fee-store-discount
-  test:masters-subject-guard
   test:subject-requests
+  test:custom-fields
+  test:custom-fields-import
   test:udise-nudge
   test:apaar-consent
   test:aadhaar-certificate
@@ -149,6 +156,8 @@ SELFTESTS=(
   test:udise-doc-intake
   test:homework-expand
   test:homework-page-scan
+  test:staff-scan
+  test:staff-scan-route
   test:homework-submission
   test:exam-drill
   test:drill-skills
@@ -182,6 +191,7 @@ SELFTESTS=(
   test:sis-bot-thread-merge
   test:job-applications
   test:online-classes
+  test:learning-games
   test:online-class-qa
   test:puter-ai
   test:open-lookups
@@ -192,10 +202,18 @@ SELFTESTS=(
   test:subject-masters
   test:upi-pay
   test:upi-proof-match
+  test:upi-proof-wa-senders
   test:expense-range
   test:payroll-paid-on
+  test:payroll-deduction-heads
+  test:picker-search
+  test:payroll-per-date-pay
+  test:payroll-ledger-post-definer
+  test:payroll-setup-sync
+  test:payroll-adjust-table
   test:masters-change-auth
   test:timetable-free-grid
+  test:teacher-load-published
   test:udise-teacher-apaar
   test:udise-teacher-sync
   test:login-unknown-numbers
@@ -205,6 +223,7 @@ SELFTESTS=(
   test:holiday-calendar-view
   test:student-working-days
   test:leave-allotment
+  test:staff-leave-rules
   test:class-group-message
   test:comms-reach
   test:wa-timeline
@@ -232,8 +251,20 @@ SELFTESTS=(
   test:class-channel-subject
   test:review-demo-hidden
   test:payment-link-reuse
+  test:payment-link-concurrent-save
   test:student-leave-status-guard
   test:ptm-row-stamps
+  test:ptm-schedule
+  test:attendance-month-register-edit
+  test:propel-robot
+  test:library-ebooks
+  test:pinnacle-books
+  test:pinnacle-assets
+  test:parent-aadhaar-on-record
+  test:serial-save
+  test:desk-load-guard
+  test:desk-on-demand
+  test:accounts-row-stamps
   test:desk-stamps
   test:attendance-row-stamps
   test:fee-extras-forward-only
@@ -244,10 +275,14 @@ SELFTESTS=(
   test:school-comms-newer-wins
   test:class-gallery
   test:class-media-link
+  test:app-popup-responses
   test:staff-attendance-row-stamps
   test:admissions-row-stamps
   test:payment-link-status-guard
   test:attendance-today
+  test:staff-signature
+  test:print-signatures
+  test:staff-month-register
   test:sis-wire-payload
   test:print-palette
   test:receipt-head-grouping
@@ -261,6 +296,7 @@ SELFTESTS=(
   test:transport-start-month
   test:transport-misrouted
   test:transport-amend
+  test:transport-paid-months
   test:table-sort
   test:transport-fee-policy
   test:transport-nearest-stops
@@ -270,6 +306,11 @@ SELFTESTS=(
   test:transport-phone-empty-desk
   test:transport-seats
   test:boarding-suggest
+  test:wa-number-verify
+  test:transport-gaps
+  test:gps-stop-discovery
+  test:run-stop-order
+  test:transport-audit
   test:defaulter-hold-policy
   test:hold-resolve
   test:live-bus-marker
@@ -279,12 +320,16 @@ SELFTESTS=(
   test:transport-crew-access
   test:transport-crew
   test:transport-stop-links
+  test:transport-boarding-log
+  test:transport-fuel-register
+  test:transport-vehicle-costs
   test:transport-concession
   test:transport-by-class
   test:transport-staff-riders
   test:fleet-edge-link
   test:fleet-edge-push
   test:fleet-edge-fuel
+  test:fleet-edge-windows
   test:boarding-point-audit
   test:halt-clustering
   test:transport-parent-messages
@@ -292,6 +337,7 @@ SELFTESTS=(
   test:village-market
   test:lead-score
   test:fuel-expense-line
+  test:fuel-two-way
   test:vendor-history
   test:site-seo
   test:approval-gate
@@ -300,6 +346,7 @@ SELFTESTS=(
   test:sibling-carry-over
   test:sibling-separate
   test:udise-upload-store
+  test:udise-upload-server
   test:udise-student-details
   test:udise-compliance
   test:udise-robot
@@ -321,11 +368,15 @@ SELFTESTS=(
   test:admissions-ai
   test:admissions-enquiry-form
   test:admissions-kb
+  test:admission-entrance-test
   test:birthday-cards
   test:collections-ai
   test:concession-per-due
   test:concession-ground
   test:fee-backdate
+  test:month-groups
+  test:month-range
+  test:class-upgrade-fee-group
   test:receipt-auto-wa
   test:review-login
   test:desk-sync-status
@@ -334,9 +385,12 @@ SELFTESTS=(
   test:exam-invigilation
   test:exams
   test:exam-date-sheet
+  test:parent-results
+  test:bus-mark-push
   test:exams-sheet-safety
   test:exam-schemes
   test:exam-readiness
+  test:exam-graded-parts
   test:exam-report-templates
   test:exam-paper-question-types
   test:exam-paper-print-layout
@@ -361,7 +415,18 @@ SELFTESTS=(
   test:closing-balance
   test:accounts-position-rbac
   test:voucher-filter
+  test:pg-settlement-failed
+  test:notice-push
+  test:staff-self-profile
+  test:attendance-cover
+  test:transport-finance
+  test:loans
+  test:udise-robot-fetch-all
+  test:staff-otp-mobile
+  test:accounts-today-tile
+  test:attendance-exception-ids
   test:voucher-amend
+  test:last-entry-cancelled-pairs
   test:lesson-plan-ai
   test:marketing-content-ai
   test:module-filters
@@ -391,9 +456,16 @@ SELFTESTS=(
   test:nucleus-assessments
   test:staff-home-kind
   test:staff-teaching-scope
+  test:staff-scope-timetable
+  test:teaching-server-read
+  test:timetable-server-callers
+  test:teacher-contacts
   test:staff-month-calendar
   test:staff-roster-redact
+  test:staff-profile-validate
   test:sis-class-teacher
+  test:student-contact
+  test:student-doc-types
   test:punch-code
   test:wa-language-gate
   test:answer-sheet-ai
@@ -415,12 +487,24 @@ SELFTESTS=(
   test:secure-id
   test:payouts
   test:cashgram
+  test:fee-bulk-pdc-templates
+  test:payout-requests
+  test:visiting-pay
+  test:visiting-exclusions
+  test:payroll-staggered-runs
+  test:bank-file-safety
+  test:staff-payslips
+  test:staff-admissions-app
   test:diksha-index
   test:teacher-contact
   test:question-bank
   test:rbac-infer
+  test:rbac-assigned-roles
   test:rbac-scope
   test:rbac-user-grants
+  test:rbac-catalog-complete
+  test:rbac-function-grants
+  test:rbac-editor
   test:visitor-gate
   test:play-billing
   test:ai-content-report
@@ -432,13 +516,24 @@ SELFTESTS=(
   test:receipt-lookup
   test:referrals
   test:report-export
+  test:aadhaar-export-mask
+  test:report-data-guard
+  test:reports-center-hub
+  test:reports-academic-new
+  test:reports-registers-new
+  test:reports-wrong-figures
+  test:fee-reports-year-scope
+  test:report-export-format
   test:report-remark-ai
   test:salary-additional
   test:salary-gross-up
+  test:payroll-not-on-payroll
   test:school-receipt-no
+  test:fee-tender-ref
   test:session-cookie-edge
   test:staff-geo
   test:punch-screen-geofence
+  test:punch-screen-keep
   test:app-min-build
   test:canva-birthday
   test:standing-discount-change
@@ -457,6 +552,36 @@ SELFTESTS=(
   test:erp-commands
   test:wa-real-chats-oct
   test:class-channel-apply
+  test:dashboard-no-refetch-loop
+  test:short-promise-cache
+  test:library-fine
+  test:desk-conflict-reload
+  test:masters-desk-read-failed
+  test:server-masters-cache
+  test:school-mirror-disk-off
+  test:coalesced-refresh
+  test:desk-probe-ancillary
+  test:update-reload
+  test:client-metrics-route
+  test:client-metrics-sender
+  test:stale-build
+  test:erp-fetch
+  test:reference-cache
+  test:versions-route
+  test:query-kernel
+  test:reference-views
+  test:masters-bridge
+  test:masters-pending
+  test:staff-kernel
+  test:masters-writes
+  test:masters-element-commit
+  test:masters-lib-writes
+  test:staff-book-commit
+  test:staff-own-doc-url
+  test:desk-feature-rev
+  test:staff-requests
+  test:survey-team-plan
+  test:parent-api-scope
   # Added 2026-09-12, in CI's order, after the drift check below reported that
   # ci.yml had been running these for weeks while this script did not:
   # WhatsApp failure reasons, household numbers, audience specs, the tutor and
@@ -478,6 +603,7 @@ SELFTESTS=(
   test:wa-number-gap
   test:session-scoped-students
   test:counter-discount-settled
+  test:staff-fee-collect
   test:student-attendance
   test:student-homework
   test:student-transport

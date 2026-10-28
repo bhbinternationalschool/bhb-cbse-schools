@@ -3,7 +3,9 @@
  * Monthly dues derived from assignments for Fee Take.
  */
 
+import { transportMonthAmount } from "@/lib/transportPaidMonths";
 import { assertModulePermission } from "@/lib/rbacGuard";
+import { hydrateOnFirstRead } from "@/lib/deskLazyHydrate";
 import {
   DEFAULT_AY,
   SESSION_MONTHS,
@@ -262,6 +264,16 @@ export type ServiceScheduleItem = {
 export type FleetVehicle = {
   id: string;
   registrationNo: string;
+  /**
+   * Chassis number (VIN), normalised uppercase; "" when not recorded.
+   *
+   * Tata Fleet Edge identifies a vehicle by VIN and sends "NA" as the plate
+   * of an unregistered one, so before this field existed the office typed
+   * Magic-3's VIN into registrationNo to make tracking link. Every Fleet Edge
+   * join now matches on registration OR chassis (vehicleFleetKeys), so the
+   * plate field can hold the plate.
+   */
+  chassisNo?: string;
   name: string;
   type: VehicleType;
   fuelType: FuelType;
@@ -884,6 +896,27 @@ function normalizeAssignment(
   };
 }
 
+/** Chassis numbers get typed with spaces and hyphens; stored bare, uppercase. */
+export function normalizeChassisNo(raw: string | null | undefined): string {
+  return String(raw ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * A warning for a chassis number that does not look like a 17-character VIN
+ * (letters I, O and Q never appear in one), or "" when it does or is blank.
+ * A warning, not a refusal: an old or imported vehicle may carry a shorter
+ * frame number, and refusing it would push it back into the plate field.
+ */
+export function chassisNoWarning(raw: string | null | undefined): string {
+  const c = normalizeChassisNo(raw);
+  if (!c) return "";
+  if (/^[A-HJ-NPR-Z0-9]{17}$/.test(c)) return "";
+  if (c.length !== 17) {
+    return `A VIN has 17 characters; this has ${c.length}. Check it against the RC or the Fleet Edge vehicle list.`;
+  }
+  return "A VIN never contains the letters I, O or Q. Check for a 1 or 0 typed as a letter.";
+}
+
 export function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
   const fuelType = (v.fuelType as FuelType) || "diesel";
   // A secondary fuel that repeats the primary says nothing, so it is dropped.
@@ -891,6 +924,7 @@ export function normalizeVehicle(v: Partial<FleetVehicle>): FleetVehicle {
   return {
     id: v.id ?? id("veh"),
     registrationNo: (v.registrationNo ?? "").trim().toUpperCase() || "TBD",
+    chassisNo: normalizeChassisNo(v.chassisNo),
     name: v.name ?? v.registrationNo ?? "Bus",
     type: (v.type as VehicleType) || "bus",
     fuelType,
@@ -979,6 +1013,14 @@ export function loadTransport(): TransportState {
   // tables; an instance that has not hydrated yet still reads empty, which
   // is why the dues paths hydrate before they compute.
   if (typeof window === "undefined") return memoryTransportState ?? emptyTransport();
+  // In the browser, the first read on a page loads the desk (as loadFees
+  // does), and `bhb-desk-hydrated` tells listening screens to re-read. Every
+  // dues figure reads this desk through computeStudentDues; a screen that got
+  // here before anything had loaded it computed dues with no bus months in
+  // them, owing or paid (15 Oct 2026).
+  hydrateOnFirstRead("transport", () =>
+    import("@/lib/transportPersistence").then((m) => m.ensureTransportHydrated()),
+  );
   try {
     const raw2 = readCache(STORAGE_KEY);
     // A cache that could not be written (or was evicted to make room for
@@ -1112,6 +1154,11 @@ export function sessionPeriodKeys(ayCode: string): string[] {
     const year = m.month >= 4 ? start : start + 1;
     return `${year}-${String(m.month).padStart(2, "0")}`;
   });
+}
+
+/** "2026-09" → "September 2026". */
+export function transportPeriodLabel(periodKey: string): string {
+  return periodLabel(periodKey);
 }
 
 function periodLabel(periodKey: string): string {
@@ -2312,213 +2359,15 @@ export function listOpenPayables(state?: TransportState): FleetPayable[] {
 
 /* ─── Fuel ─────────────────────────────────────────────────── */
 
-export function upsertFuelStockLocation(
-  patch: Partial<FuelStockLocation> & { name: string; fuelType: FuelType },
-):
-  | { ok: true; location: FuelStockLocation }
-  | { ok: false; error: string } {
-  const state = loadTransport();
-  const existing = patch.id
-    ? state.fuelStockLocations.find((l) => l.id === patch.id)
-    : undefined;
-  const location: FuelStockLocation = {
-    id: existing?.id ?? patch.id ?? id("fsl"),
-    name: patch.name.trim(),
-    fuelType: patch.fuelType,
-    qtyOnHand: patch.qtyOnHand ?? existing?.qtyOnHand ?? 0,
-    minAlert: patch.minAlert ?? existing?.minAlert ?? 50,
-    maxCapacity: patch.maxCapacity ?? existing?.maxCapacity ?? 500,
-  };
-  if (!location.name) return { ok: false, error: "Location name required" };
-  const fuelStockLocations = existing
-    ? state.fuelStockLocations.map((l) =>
-        l.id === location.id ? location : l,
-      )
-    : [...state.fuelStockLocations, location];
-  saveTransport({ ...state, fuelStockLocations });
-  return { ok: true, location };
-}
-
-export function recordFuelPurchase(input: {
-  locationId: string;
-  dealerId: string;
-  purchasedOn: string;
-  qty: number;
-  ratePaise: number;
-  billNo?: string;
-  paymentStatus?: "paid_cash" | "on_account";
-}):
-  | { ok: true; purchase: FuelPurchase }
-  | { ok: false; error: string } {
-  const state = loadTransport();
-  const loc = state.fuelStockLocations.find((l) => l.id === input.locationId);
-  if (!loc) return { ok: false, error: "Depot location not found" };
-  const qty = Math.max(0, input.qty);
-  if (qty <= 0) return { ok: false, error: "Quantity required" };
-  const amountPaise = Math.round(qty * input.ratePaise);
-  const purchase: FuelPurchase = {
-    id: id("fpur"),
-    locationId: input.locationId,
-    dealerId: input.dealerId,
-    purchasedOn: input.purchasedOn || todayIso(),
-    qty,
-    ratePaise: Math.max(0, input.ratePaise),
-    amountPaise,
-    billNo: input.billNo ?? "",
-    paymentStatus: input.paymentStatus ?? "on_account",
-    createdAt: new Date().toISOString(),
-  };
-  let next: TransportState = {
-    ...state,
-    fuelPurchases: [purchase, ...state.fuelPurchases],
-    fuelStockLocations: state.fuelStockLocations.map((l) =>
-      l.id === loc.id ? { ...l, qtyOnHand: l.qtyOnHand + qty } : l,
-    ),
-  };
-  if (purchase.paymentStatus === "on_account") {
-    next = addPayable(next, {
-      dealerId: input.dealerId,
-      vehicleId: "",
-      sourceType: "fuel_purchase",
-      sourceId: purchase.id,
-      amountPaise,
-      dueOn: purchase.purchasedOn,
-      note: `Fuel purchase ${loc.name}`,
-    });
-  }
-  saveTransport(next);
-  return { ok: true, purchase };
-}
-
-export function recordFuelRefill(input: {
-  vehicleId: string;
-  filledAt: string;
-  odometerKm: number;
-  qty: number;
-  ratePerUnitPaise?: number;
-  amountPaise?: number;
-  source: "depot_stock" | "dealer_pump";
-  dealerId?: string;
-  locationId?: string;
-  billNo?: string;
-  filledBy?: string;
-  paymentStatus?: "paid_cash" | "on_account" | "adjusted_from_stock";
-}):
-  | { ok: true; log: FuelRefillLog }
-  | { ok: false; error: string } {
-  const state = loadTransport();
-  const vehicle = state.vehicles.find((v) => v.id === input.vehicleId);
-  if (!vehicle) return { ok: false, error: "Vehicle not found" };
-  if (vehicle.status === "in_workshop") {
-    return { ok: false, error: "Vehicle is in workshop — refill blocked" };
-  }
-  const odo = Math.max(0, Math.round(input.odometerKm));
-  if (odo < vehicle.odometerKm) {
-    return {
-      ok: false,
-      error: `Odometer ${odo} < last reading ${vehicle.odometerKm}`,
-    };
-  }
-  const qty = Math.max(0, Number(input.qty) || 0);
-  if (qty <= 0) return { ok: false, error: "Quantity required" };
-
-  if (input.source === "depot_stock") {
-    const loc = state.fuelStockLocations.find(
-      (l) => l.id === input.locationId,
-    );
-    if (!loc) return { ok: false, error: "Select depot location" };
-    if (loc.qtyOnHand < qty) {
-      return { ok: false, error: `Insufficient stock (${loc.qtyOnHand})` };
-    }
-  }
-
-  const priorLogs = state.fuelRefillLogs
-    .filter((l) => l.vehicleId === vehicle.id)
-    .sort((a, b) => b.filledAt.localeCompare(a.filledAt));
-  const last = priorLogs[0];
-  const kmSinceLast = last ? Math.max(0, odo - last.odometerKm) : 0;
-  const mileage = qty > 0 && kmSinceLast > 0 ? kmSinceLast / qty : 0;
-  const anomaly =
-    vehicle.avgMileage > 0 &&
-    mileage > 0 &&
-    (mileage < vehicle.avgMileage * 0.8 || mileage > vehicle.avgMileage * 1.2);
-
-  const rate = Math.max(0, input.ratePerUnitPaise ?? 0);
-  const amount =
-    input.amountPaise != null
-      ? Math.max(0, input.amountPaise)
-      : Math.round(qty * rate);
-
-  const paymentStatus =
-    input.paymentStatus ??
-    (input.source === "depot_stock"
-      ? "adjusted_from_stock"
-      : "on_account");
-
-  const log: FuelRefillLog = {
-    id: id("fuel"),
-    vehicleId: vehicle.id,
-    filledAt: input.filledAt || new Date().toISOString(),
-    odometerKm: odo,
-    qty,
-    ratePerUnitPaise: rate,
-    amountPaise: amount,
-    source: input.source,
-    dealerId: input.dealerId ?? "",
-    locationId: input.locationId ?? "",
-    billNo: input.billNo ?? "",
-    filledBy: input.filledBy ?? "",
-    paymentStatus,
-    kmSinceLast,
-    mileage: Math.round(mileage * 100) / 100,
-    anomaly,
-    createdAt: new Date().toISOString(),
-  };
-
-  let nextAvg = vehicle.avgMileage;
-  if (mileage > 0) {
-    nextAvg =
-      vehicle.avgMileage > 0
-        ? Math.round(((vehicle.avgMileage + mileage) / 2) * 100) / 100
-        : mileage;
-  }
-
-  let next: TransportState = {
-    ...state,
-    fuelRefillLogs: [log, ...state.fuelRefillLogs],
-    vehicles: state.vehicles.map((v) =>
-      v.id === vehicle.id
-        ? { ...v, odometerKm: odo, avgMileage: nextAvg }
-        : v,
-    ),
-  };
-
-  if (input.source === "depot_stock" && input.locationId) {
-    next = {
-      ...next,
-      fuelStockLocations: next.fuelStockLocations.map((l) =>
-        l.id === input.locationId
-          ? { ...l, qtyOnHand: Math.max(0, l.qtyOnHand - qty) }
-          : l,
-      ),
-    };
-  }
-
-  if (paymentStatus === "on_account" && amount > 0) {
-    next = addPayable(next, {
-      dealerId: input.dealerId ?? "",
-      vehicleId: vehicle.id,
-      sourceType: "fuel_refill",
-      sourceId: log.id,
-      amountPaise: amount,
-      dueOn: log.filledAt.slice(0, 10),
-      note: `Fuel refill ${vehicle.registrationNo}`,
-    });
-  }
-
-  saveTransport(next);
-  return { ok: true, log };
-}
+/*
+ * Fuel is no longer written to this desk. Since 14 Oct 2026 the one fuel
+ * record is the server table transport_fuel_fills (Transport → Fuel and the
+ * driver's log book; lib/transportFuelRegister*.ts), which also posts the
+ * Vehicle Fuel voucher. The desk's fuelRefillLogs are read only by the
+ * one-time import there and by old reports. The depot-stock forms (Mode A:
+ * fuelStockLocations / fuelPurchases) were dropped unported — production
+ * held no depot and no purchase.
+ */
 
 /* ─── Finance: EMI / insurance / certs ─────────────────────── */
 
@@ -3228,38 +3077,16 @@ export function lastGpsPingByVehicle(state?: TransportState) {
 
 /* ─── TCO + compliance alerts ──────────────────────────────── */
 
-export function vehicleTcoPaise(
-  vehicleId: string,
-  state?: TransportState,
-): {
-  fuel: number;
-  emi: number;
-  insurance: number;
-  certs: number;
-  jobs: number;
-  total: number;
-} {
+/**
+ * Completed job cards' labour + parts for one vehicle — the service & repair
+ * part of TCO (lib/transportVehicleCosts vehicleTco). Fuel, EMI and papers
+ * are no longer read from this desk: see transportVehicleCosts.
+ */
+export function completedJobsPaise(vehicleId: string, state?: TransportState): number {
   const s = state ?? loadTransport();
-  const fuel = s.fuelRefillLogs
-    .filter((l) => l.vehicleId === vehicleId)
-    .reduce((n, l) => n + l.amountPaise, 0);
-  const loanIds = new Set(
-    s.vehicleLoans.filter((l) => l.vehicleId === vehicleId).map((l) => l.id),
-  );
-  const emi = s.emiSchedule
-    .filter((e) => loanIds.has(e.loanId) && e.status === "paid")
-    .reduce((n, e) => n + e.paidAmountPaise, 0);
-  const insurance = s.insurancePolicies
-    .filter((p) => p.vehicleId === vehicleId)
-    .reduce((n, p) => n + p.premiumPaise, 0);
-  const certs = s.certificateRenewals
-    .filter((c) => c.vehicleId === vehicleId && c.paymentStatus === "paid")
-    .reduce((n, c) => n + c.feePaise, 0);
-  const jobs = s.serviceJobCards
+  return s.serviceJobCards
     .filter((j) => j.vehicleId === vehicleId && j.status === "completed")
     .reduce((n, j) => n + j.laborPaise + j.partsPaise, 0);
-  const total = fuel + emi + insurance + certs + jobs;
-  return { fuel, emi, insurance, certs, jobs, total };
 }
 
 export function computeTransportComplianceAlerts(options?: {
@@ -3314,7 +3141,8 @@ export function computeTransportComplianceAlerts(options?: {
     }
 
     for (const d of dues) {
-      const paid = paidMap.get(d.dueKey) ?? 0;
+      // By child + month, not by assignment id — see transportPaidMonths.ts.
+      const paid = transportMonthAmount(paidMap, d.studentId, d.periodKey);
       const bal = Math.max(0, d.amountPaise - paid);
       if (bal > 0 && d.dueOn < asOf) {
         alerts.push({
@@ -3377,6 +3205,54 @@ export function computeTransportComplianceAlerts(options?: {
 
 /* ─── CSV ──────────────────────────────────────────────────── */
 
+/**
+ * A re-imported route's stops, keeping every stop id that can be kept.
+ *
+ * The CSV import used to assign its freshly-minted stops straight onto an
+ * existing route, giving every row a new id and orphaning every rider on it —
+ * the stop-id churn PR #214 removed from the route editor, still live on the
+ * export → edit → import round trip until 15 Oct 2026. Rows now go through
+ * `planRouteStops` (same name → same id). A CSV carries no pin, place or stop
+ * price, so a matched stop keeps its own, and its km unless the file gives one.
+ *
+ * Pure — exported for the self-test.
+ */
+export function mergeImportedStops(
+  existingStops: TransportStop[],
+  imported: TransportStop[],
+): TransportStop[] {
+  const priorById = new Map(existingStops.map((st) => [st.id, st]));
+  const rows = imported.filter((st) => st.name.trim());
+  return planRouteStops(
+    existingStops,
+    rows.map((st) => ({
+      name: st.name,
+      ...(st.distanceKm > 0
+        ? { distanceKm: st.distanceKm, distanceSource: st.distanceSource }
+        : {}),
+    })),
+  ).map((st, idx) => {
+    const prior = priorById.get(st.id);
+    if (!prior) return st;
+    const fileKm = (rows[idx]?.distanceKm ?? 0) > 0;
+    return {
+      ...prior,
+      ...st,
+      ...(fileKm
+        ? {}
+        : { distanceKm: prior.distanceKm, distanceSource: prior.distanceSource }),
+      ...(prior.geoLat != null && st.geoLat == null
+        ? { geoLat: prior.geoLat, geoLng: prior.geoLng }
+        : {}),
+      ...(prior.placeId && !st.placeId ? { placeId: prior.placeId } : {}),
+      ...(prior.geoAddress && !st.geoAddress ? { geoAddress: prior.geoAddress } : {}),
+      ...(prior.monthlyFeePaise && !st.monthlyFeePaise
+        ? { monthlyFeePaise: prior.monthlyFeePaise }
+        : {}),
+    };
+  });
+}
+
 export function importTransportRoutesCsv(text: string): {
   added: number;
   state: TransportState;
@@ -3426,7 +3302,8 @@ export function importTransportRoutesCsv(text: string): {
       existing.busNo = busNo;
       existing.vehicleReg = vehicleReg;
       existing.monthlyFeePaise = Math.max(0, monthlyFeePaise);
-      if (stops.length) existing.stops = stops;
+      // Stop ids kept — see mergeImportedStops.
+      if (stops.length) existing.stops = mergeImportedStops(existing.stops, stops);
       existing.isActive = true;
     } else {
       const route = normalizeRoute({
@@ -3510,6 +3387,7 @@ function buildRealFleetVehicles(): FleetVehicle[] {
   return REAL_FLEET.map((v) =>
     normalizeVehicle({
       registrationNo: v.registrationNo || v.vin,
+      chassisNo: v.vin,
       name: v.registrationNo || `Bus — registration pending (VIN ${v.vin})`,
     }),
   );

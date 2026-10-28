@@ -23,6 +23,8 @@ import {
   teachingPeriods,
   type TimetableState,
 } from "@/lib/timetable";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type TimetableReportFormat = "excel" | "pdf";
 
@@ -54,7 +56,7 @@ export const TIMETABLE_REPORTS: TimetableReportDef[] = [
     id: "teacher_load",
     category: "load",
     label: "Teacher load",
-    hint: "Periods/week per teacher, this session",
+    hint: "Periods/week per teacher, from the published timetable",
   },
   {
     id: "free_periods",
@@ -87,9 +89,19 @@ function teachingStaff(masters: MastersState) {
   );
 }
 
+/**
+ * Periods a week per teacher from the PUBLISHED timetable only (director,
+ * 14 Oct 2026) — the timetable teachers actually work to, and the one that
+ * grants them their sections. It counted the draft grids, so a half-built
+ * draft read as each teacher's load.
+ */
+export function publishedGridsFor(tt: TimetableState, ay: string) {
+  return (tt.publishedGrids ?? []).filter((g) => g.academicYearCode === ay);
+}
+
 function runTeacherLoad(masters: MastersState, tt: TimetableState, ay: string) {
   const counts = new Map<string, { periods: number; classes: Set<string> }>();
-  for (const g of tt.grids) {
+  for (const g of publishedGridsFor(tt, ay)) {
     if (g.academicYearCode !== ay) continue;
     for (const s of g.slots) {
       if (!s.teacherId) continue;
@@ -278,8 +290,11 @@ function runSubstitutionRegister(
   tt: TimetableState,
   fromDate?: string,
   toDate?: string,
+  ay?: string,
 ) {
+  // The selected session only (with no dates it listed every year's).
   const rows = tt.substitutions
+    .filter((s) => !ay || !s.academicYearCode || s.academicYearCode === ay)
     .filter((s) => (!fromDate || s.date >= fromDate) && (!toDate || s.date <= toDate))
     .sort((a, b) => a.date.localeCompare(b.date) || a.periodNo - b.periodNo)
     .map((s) => ({
@@ -312,10 +327,16 @@ function runSubstitutionRegister(
   };
 }
 
+/** Self-test access (lib/teacherLoadPublished.selftest.ts). */
+export const __timetableReportInternalsForTests = { runTeacherLoad };
+
 export function runTimetableReport(
   id: TimetableReportId,
   filters: TimetableReportFilters,
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("timetable", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const masters = filters.masters ?? loadMasters();
   const tt = filters.timetable ?? loadTimetable();
   const ay = filters.academicYearCode || currentAcademicYearCode(masters);
@@ -332,13 +353,20 @@ export function runTimetableReport(
   let built: { columns: ReportColumn[]; rows: Record<string, string | number>[] };
   switch (id) {
     case "teacher_load":
+      if (publishedGridsFor(tt, ay).length === 0) {
+        // Every teacher at 0 periods would read as fact; say why instead.
+        return {
+          ok: false,
+          error: `No published timetable for ${ay} — Teacher load counts only the published timetable. Publish it in Timetable first.`,
+        };
+      }
       built = runTeacherLoad(masters, tt, ay);
       break;
     case "free_periods":
       built = runFreePeriods(masters, tt, ay, filters.weekday);
       break;
     case "substitution_register":
-      built = runSubstitutionRegister(masters, tt, filters.fromDate, filters.toDate);
+      built = runSubstitutionRegister(masters, tt, filters.fromDate, filters.toDate, ay);
       break;
     default:
       return { ok: false, error: "Unknown report" };

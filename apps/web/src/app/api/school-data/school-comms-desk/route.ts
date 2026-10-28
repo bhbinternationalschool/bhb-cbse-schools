@@ -3,6 +3,7 @@ import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
   deskReadGate,
   deskWriteGate,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -44,6 +45,11 @@ export async function GET(req: Request) {
   });
 }
 
+function recentlyPublished(at: string | undefined): boolean {
+  const t = at ? Date.parse(at) : NaN;
+  return Number.isFinite(t) && Date.now() - t < 24 * 3600 * 1000;
+}
+
 export async function POST(req: Request) {
   const gate = await deskWriteGate(req, SCHOOL_DATA_DESK_RBAC["school-comms-desk"]);
   if (gate.mode === "deny") return gate.response;
@@ -65,6 +71,20 @@ export async function POST(req: Request) {
   // stored desk, their notices only — never the body as sent. Their copy of
   // news and albums is empty (GET serves them only their slices), and this
   // push would otherwise prune the school's news and gallery with it.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (gate.mode === "full") {
+    const refused = await deniedSliceGuard(
+      req,
+      "notices",
+      async () => {
+        const s = await fetchSchoolCommsDeskFromDb();
+        return s.ok ? (canonicalCommsDesk(s.bundle) as unknown as Record<string, unknown>) : null;
+      },
+      canonicalCommsDesk(body),
+    );
+    if (refused) return refused;
+  }
   if (gate.mode === "feature") {
     const stored = await fetchSchoolCommsDeskFromDb();
     if (!stored.ok) {
@@ -94,6 +114,21 @@ export async function POST(req: Request) {
   }, deletes);
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
+  }
+
+  // Phones: a notice this save published (13 Oct 2026). Read back from the
+  // database — the desk is "newer wins", so the row that stands is the one to
+  // trust — and pushed once per notice (lib/noticePush.server).
+  const justPublished = (body.notices ?? []).filter((n) => n.status === "published" && recentlyPublished(n.publishedAt));
+  if (justPublished.length) {
+    const stored = await fetchSchoolCommsDeskFromDb();
+    if (stored.ok) {
+      const { pushPublishedNotice } = await import("@/lib/noticePush.server");
+      for (const n of justPublished) {
+        const saved = stored.bundle.notices.find((x) => x.id === n.id);
+        if (saved?.status === "published") await pushPublishedNotice(saved);
+      }
+    }
   }
 
   if (gate.mode === "feature") return featureSavedResponse(true);

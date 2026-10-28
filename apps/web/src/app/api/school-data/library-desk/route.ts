@@ -13,26 +13,64 @@ import {
 } from "@/lib/libraryNormalized.server";
 import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { readStampsParam } from "@/lib/rowStampClient";
+import { isLibraryMigrationPending, LIBRARY_NOT_MIGRATED } from "@/lib/libraryCounter";
+import { mergeLibraryEbooks, readLibraryEbooks } from "@/lib/libraryEbooks.server";
+import { deskReadGate } from "@/lib/deskFeatureGate.server";
+import { LIBRARY_READER_FUNCTIONS, libraryDeskKeysFor } from "@/lib/rbacFeatureCatalog/store";
 
 export const runtime = "nodejs";
 
 export async function GET(req: Request) {
-  const auth = await authorizeSchoolDataDesk(req, SCHOOL_DATA_DESK_RBAC["library-desk"], "GET");
-  if (!auth.ok) return auth.response
-  const { bundle, meta, ok, stamps, settingsStamp } = await fetchLibraryDeskFromDb();
+  // The Store grant reads the whole desk. A library function (counter,
+  // copies, circulation, reports — Masters → Roles) reads what its job
+  // needs (LIBRARY_FUNCTION_DESK_KEYS): procurement documents and e-books go
+  // to the reports reader only. A store function that is not a library one
+  // (the store counter) reads nothing here. Saving the desk stays
+  // module-level (POST below).
+  const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["library-desk"]);
+  if (gate.mode === "deny") return gate.response;
+  let keys: Set<string> | null = null;
+  if (gate.mode === "feature") {
+    const holds = (id: string) =>
+      (["view", "create", "edit", "approve", "export"] as const).some((a) => gate.access(id, a).allowed);
+    keys = libraryDeskKeysFor(LIBRARY_READER_FUNCTIONS.filter(holds));
+    if (keys.size === 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Reading the library needs the Store grant or a library function.",
+          reason: "feature_forbidden",
+        },
+        { status: 403 },
+      );
+    }
+  }
+  const { bundle, meta, ok, stamps, settingsStamp, error } = await fetchLibraryDeskFromDb();
   if (!ok) {
     return NextResponse.json(
-      { ok: false, error: "Library desk fetch failed — tenant/db unavailable" },
+      { ok: false, error: error || "Library desk fetch failed — tenant/db unavailable" },
       { status: 503 },
     );
   }
+  // The e-book shelves live in their own server store; a failed read sends
+  // none (the browser keeps what it has) rather than an empty shelf.
+  const ebooks = !keys || keys.has("ebooks") ? await readLibraryEbooks() : null;
+  if (keys) {
+    if (!keys.has("procurementDocs")) bundle.procurementDocs = [];
+  }
+  const sentStamps =
+    keys && stamps && typeof stamps === "object"
+      ? Object.fromEntries(Object.entries(stamps).filter(([k]) => keys!.has(k)))
+      : stamps;
   return NextResponse.json({
     ok: true,
     ...bundle,
+    ...(ebooks ? { ebooks } : {}),
+    ...(keys ? { functionOnly: true } : {}),
     titleCount: bundle.titles.length,
     updatedAt: meta?.updatedAt || new Date().toISOString(),
     meta,
-    stamps,
+    stamps: sentStamps,
     settingsStamp,
   });
 }
@@ -73,7 +111,14 @@ export async function POST(req: Request) {
     settingsBase: typeof body.settingsBase === "string" ? body.settingsBase : null,
   });
   if (!result.ok) {
-    return NextResponse.json({ ok: false, error: result.error }, { status: 502 });
+    const error = isLibraryMigrationPending(result.error) ? LIBRARY_NOT_MIGRATED : result.error;
+    return NextResponse.json({ ok: false, error }, { status: 502 });
+  }
+  // Shelves the browser sent (only when it changed them): merged by id into
+  // their own store — none is ever removed by absence.
+  if (Array.isArray(body.ebooks) && body.ebooks.length) {
+    const shelves = await mergeLibraryEbooks(body.ebooks);
+    if (!shelves.ok) return NextResponse.json({ ok: false, error: shelves.error }, { status: 502 });
   }
   if (result.kept) console.warn(`[library-desk] unstamped save left ${result.kept} stored row(s) as they were`);
 
@@ -84,5 +129,7 @@ export async function POST(req: Request) {
     stamps: result.stamps,
     conflicts: result.conflicts,
     settingsStamp: result.settingsStamp,
+    // Named deletes the server kept because the row has loan history.
+    refusedDeletes: result.refusedDeletes ?? [],
   });
 }

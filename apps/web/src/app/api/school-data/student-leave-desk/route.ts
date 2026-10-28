@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   deskReadGate,
   featurePushOutcome,
   featureSavedResponse,
@@ -31,7 +32,12 @@ export async function GET(req: Request) {
   const gate = await deskReadGate(req, SCHOOL_DATA_DESK_RBAC["student-leave-desk"]);
   if (gate.mode === "deny") return gate.response;
   const { bundle: full, meta, ok } = await fetchStudentLeaveDeskFromDb();
-  const bundle = gate.mode === "feature" ? stripDeskForFeatures("student_leave", full, gate) : full;
+  // Student leave → Dashboard & reports (read only) owns no slice — the
+  // requests have one owner — and reads every request.
+  const readsAll =
+    gate.mode === "feature" && gate.access("student_leave.reports", "view").allowed;
+  const bundle =
+    gate.mode === "feature" && !readsAll ? stripDeskForFeatures("student_leave", full, gate) : full;
   if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Failed to fetch student leave desk" },
@@ -68,7 +74,9 @@ export async function POST(req: Request) {
   // not that a class teacher's browser may push the school's desk.
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {
@@ -100,6 +108,20 @@ export async function POST(req: Request) {
   let deletes = readNamedDeletes(body.deletes, STUDENT_LEAVE_DELETABLE_TABLES);
 
   // Function holders: merged onto the stored desk, request by request.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (!gate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "student_leave",
+      async () => {
+        const s = await fetchStudentLeaveDeskFromDb();
+        return s.ok ? (s.bundle as unknown as Record<string, unknown>) : null;
+      },
+      body,
+    );
+    if (refused) return refused;
+  }
   if (gate) {
     const stored = await fetchStudentLeaveDeskFromDb();
     if (!stored.ok) {

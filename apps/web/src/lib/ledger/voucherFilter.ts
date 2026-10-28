@@ -119,6 +119,15 @@ export function headGapForLine(
   return null;
 }
 
+/**
+ * Vouchers the payroll run writes itself. Their salary line belongs on the
+ * parent head: regular pay IS "Salary & Wages", and the sub-heads the office
+ * adds under it (extra work, corrections, inactive staff) are for the odd
+ * payment keyed by hand. Flagging every payroll voucher once a sub-head
+ * exists asked the office to reclassify what was already right (13 Oct 2026).
+ */
+const PAYROLL_SOURCES = new Set(["payroll_run", "payroll_payment", "payroll_reclass"]);
+
 /** Every unclassified line on this voucher, by line index. */
 export function headGaps(
   v: VoucherFacts,
@@ -126,9 +135,15 @@ export function headGaps(
   byParent = childCodesByParent(chart),
 ): { index: number; line: VoucherLineFacts; gap: HeadGap }[] {
   const out: { index: number; line: VoucherLineFacts; gap: HeadGap }[] = [];
+  // A reversal mirrors its original line for line; the head question
+  // belongs to the original, and a payroll reversal would otherwise carry
+  // the flag the payroll voucher no longer does.
+  const fromPayroll = PAYROLL_SOURCES.has(v.sourceType) || v.isReversal;
   v.lines.forEach((line, index) => {
     const gap = headGapForLine(line, chart, byParent);
-    if (gap) out.push({ index, line, gap });
+    if (!gap) return;
+    if (fromPayroll && gap.kind === "parent_with_subheads") return;
+    out.push({ index, line, gap });
   });
   return out;
 }
@@ -144,6 +159,14 @@ export type VoucherFilter = {
   sourceType?: string;
   /** An account code any line must sit on. */
   accountCode?: string;
+  /** Any line on any of these heads (a view such as "Vehicle loans" spans three). */
+  accountCodes?: string[];
+  /** Any line on a head whose code starts with this — "5" is every expense head. */
+  accountPrefix?: string;
+  /** Skip vouchers that touch any of these heads (Expenses without Salary). */
+  excludeAccountCodes?: string[];
+  /** Skip vouchers from these sources (fee receipts, store sales…). */
+  excludeSourceTypes?: string[];
   /** A party name any line must carry (substring, case-insensitive). */
   party?: string;
   minPaise?: number;
@@ -192,6 +215,10 @@ export function matchesVoucherFilter(
     if (src !== f.sourceType) return false;
   }
   if (f.accountCode && !v.lines.some((l) => l.accountCode === f.accountCode)) return false;
+  if (f.accountCodes?.length && !v.lines.some((l) => f.accountCodes!.includes(l.accountCode))) return false;
+  if (f.accountPrefix && !v.lines.some((l) => l.accountCode.startsWith(f.accountPrefix!))) return false;
+  if (f.excludeAccountCodes?.length && v.lines.some((l) => f.excludeAccountCodes!.includes(l.accountCode))) return false;
+  if (f.excludeSourceTypes?.length && f.excludeSourceTypes.includes(v.sourceType || "manual")) return false;
   if (f.party) {
     const p = norm(f.party);
     if (!v.lines.some((l) => norm(l.partyName).includes(p))) return false;
@@ -297,3 +324,54 @@ export function planHeadReclass(input: {
     ],
   };
 }
+
+/* ─── Ready-made views: "is this already in the book?" ───────────── */
+
+/**
+ * Where money is not a fee: fee receipts, their corrections, store sales and
+ * gateway settlements are entered by their own desks and are never keyed in
+ * Vouchers, so a view meant to stop the office re-entering an expense leaves
+ * them out.
+ */
+export const NOT_KEYED_IN_VOUCHERS = [
+  "fee_voucher",
+  "fee_receipt",
+  "void_redate",
+  "inv_sale",
+  "inv_sale_payment",
+  "pg_settlement",
+] as const;
+
+export type EntryView = { id: string; label: string; hint: string; filter: VoucherFilter };
+
+/**
+ * One click per register the office checks before keying an entry (director,
+ * 13 Oct 2026: after the expense/salary/advance clean-up, what was KEPT must
+ * be visible where it belongs so nobody enters it twice). Every view is
+ * "live" — a reversed entry and its reversal are both hidden.
+ */
+export const ENTRY_VIEWS: EntryView[] = [
+  {
+    id: "in_book",
+    label: "Everything entered (not fees)",
+    hint: "Every live payment, journal and receipt except fees and store sales",
+    filter: { status: "live", excludeSourceTypes: [...NOT_KEYED_IN_VOUCHERS] },
+  },
+  {
+    id: "expenses",
+    label: "Expenses",
+    hint: "Expense heads (5…), salary excluded",
+    filter: { status: "live", accountPrefix: "5", excludeAccountCodes: ["5070"], excludeSourceTypes: [...NOT_KEYED_IN_VOUCHERS] },
+  },
+  { id: "salary", label: "Salary", hint: "Salary & Wages (5070)", filter: { status: "live", accountCode: "5070" } },
+  { id: "advances", label: "Staff advances", hint: "Staff Advances (1070)", filter: { status: "live", accountCode: "1070" } },
+  { id: "pf_esic", label: "PF / ESIC", hint: "Statutory Dues (2300)", filter: { status: "live", accountCode: "2300" } },
+  { id: "trustee", label: "Trustee loans", hint: "Owner / Trustee Loans (2100) — money in and repayments", filter: { status: "live", accountCode: "2100" } },
+  {
+    id: "vehicle_loans",
+    label: "Vehicle loans",
+    hint: "The three Mahindra bus/van loans (2150–2152)",
+    filter: { status: "live", accountCodes: ["2150", "2151", "2152"] },
+  },
+  { id: "assets", label: "Fixed assets", hint: "Fixed Assets (1030)", filter: { status: "live", accountCode: "1030" } },
+];

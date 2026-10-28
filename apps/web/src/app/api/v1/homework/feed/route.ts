@@ -1,10 +1,14 @@
 import { assertSectionScope } from "@/lib/api/v1/staffScope";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
+import { assertParentOwnsChild } from "@/lib/api/v1/household";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureHomeworkHydratedServer } from "@/lib/homeworkPersistence";
 import { loadHomework } from "@/lib/homework";
+import { homeworkAttachmentsForReaders } from "@/lib/homeworkAttachments";
 import { loadSis } from "@/lib/sis";
+import { isStudentAsset } from "@/lib/pinnacleAssets";
+import { publisherAssetsFor, readPinnacleAssets } from "@/lib/pinnacleAssets.server";
 
 export const runtime = "nodejs";
 
@@ -37,12 +41,7 @@ export async function GET(request: Request) {
       const sis = loadSis();
       const student = sis.students.find((s) => s.id === studentId);
       if (!student) throw new ApiError("not_found", "Student not found", 404);
-      if (
-        ctx.session.householdId &&
-        student.householdId !== ctx.session.householdId
-      ) {
-        throw new ApiError("forbidden", "Not your child", 403);
-      }
+      assertParentOwnsChild(ctx, student);
       classId = student.classId;
       sectionId = student.sectionId;
     } else {
@@ -62,7 +61,7 @@ export async function GET(request: Request) {
       ctx.masters.subjects.find((s) => s.id === id)?.nameEn || "";
 
     const state = loadHomework();
-    const posts = state.posts
+    const shown = state.posts
       .filter(
         (p) =>
           p.status === "published" &&
@@ -71,8 +70,28 @@ export async function GET(request: Request) {
           (!p.academicYearCode || p.academicYearCode === ay),
       )
       .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt))
-      .slice(0, limit)
-      .map((p) => ({
+      .slice(0, limit);
+
+    // "Revise in the LEAD app" (director, 12 Oct 2026): homework that names
+    // a chapter ("Ch 7 — …" in the AI tutor hint) and whose book has
+    // publisher assets gets the ones a child opens in the LEAD Group Student
+    // App — animations, games, mind maps. Titles only; the app plays them.
+    // Any failure just leaves the card out.
+    const className = ctx.masters.classes.find((c) => c.id === classId)?.name || "";
+    const revision = new Map<string, { book: string; chapter: string; items: { type: string; title: string }[] }>();
+    const index = (await readPinnacleAssets().catch(() => null))?.books ?? [];
+    if (index.length && className) {
+      for (const p of shown) {
+        const m = /(?:ch|chapter|अध्याय|पाठ)\s*(\d{1,2})/i.exec(p.aiTutorHint || "");
+        if (!m) continue;
+        const pos = Number(m[1]);
+        const hit = (await publisherAssetsFor(className, subjectNameOf(p.subjectId), [pos], index).catch(() => null))?.get(pos);
+        const items = hit?.assets.filter(isStudentAsset).slice(0, 5) ?? [];
+        if (hit && items.length) revision.set(p.id, { book: hit.bookTitle, chapter: `Ch ${pos} · ${hit.chapter}`, items });
+      }
+    }
+
+    const posts = shown.map((p) => ({
         id: p.id,
         date: p.date,
         title: p.title,
@@ -83,6 +102,10 @@ export async function GET(request: Request) {
         dueAt: p.dueAt || null,
         requiresSubmit: p.requiresSubmit,
         attachmentCount: p.attachments.length,
+        // Opened through /api/v1/homework/attachment (parents cannot read
+        // /api/file) — the same for an app upload and a web one.
+        attachments: homeworkAttachmentsForReaders(p),
+        leadRevision: revision.get(p.id) ?? null,
       }));
 
     const diary = state.diary

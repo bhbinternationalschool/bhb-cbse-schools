@@ -26,6 +26,7 @@ import {
   readCashgramStatus,
   readCashgramStatusResponse,
   readCashgramWebhook,
+  staffLinkProblem,
   voidRefundProblem,
   type CashgramStatus,
 } from "@/lib/cashgram";
@@ -247,6 +248,22 @@ console.log("cashgram.selftest.ts");
     false,
   );
   assert.equal(cashgramRefundLines({ feeEffect: "excess", amountPaise: 0, householdId: "", narration: "n" }).ok, false);
+}
+
+/* ── staff salary by link: one way of paying at a time ───────────────── */
+{
+  const base = { runStatus: "posted", payablePaise: 25000_00, requestedPaise: 25000_00, alreadyPaidUtr: "", liveLinkStatus: "" as const };
+  assert.equal(staffLinkProblem(base), "");
+  assert.equal(staffLinkProblem({ ...base, runStatus: "paid" }), "", "a paid run may still have unpaid lines");
+  assert.match(staffLinkProblem({ ...base, runStatus: "approved" }), /Publish/);
+  assert.match(staffLinkProblem({ ...base, payablePaise: 0, requestedPaise: 0 }), /Nothing payable/);
+  // The screen's figure is checked against the run's, never trusted.
+  assert.match(staffLinkProblem({ ...base, requestedPaise: 26000_00 }), /Refresh/);
+  assert.match(staffLinkProblem({ ...base, alreadyPaidUtr: "123456789012" }), /Already paid — UTR 123456789012/);
+  for (const s of ["PENDING_APPROVAL", "SENDING", "UNKNOWN", "ACTIVE", "REDEEMING"] as CashgramStatus[]) {
+    assert.match(staffLinkProblem({ ...base, liveLinkStatus: s }), /already open/, `${s} blocks a second link`);
+  }
+  assert.match(staffLinkProblem({ ...base, liveLinkStatus: "REDEEMED" }), /Already paid by a Cashgram/);
 }
 
 console.log("cashgram.selftest.ts: all passed");

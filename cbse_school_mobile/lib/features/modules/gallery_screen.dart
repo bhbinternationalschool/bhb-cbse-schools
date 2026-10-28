@@ -2,6 +2,7 @@ import "package:flutter/material.dart";
 import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/ui/thumb_size.dart";
 import "../../core/theme/app_theme.dart";
 import "module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
@@ -153,6 +154,11 @@ class _PhotoTile extends StatelessWidget {
             photo.url,
             headers: headers,
             fit: BoxFit.cover,
+            // At most the screen's width (the carousel's widest item).
+            cacheWidth: thumbCacheWidth(
+              context,
+              MediaQuery.sizeOf(context).width,
+            ),
             // A carousel of broken tiles is worse than a carousel of grey ones:
             // the parent cannot tell whether the school posted nothing or the
             // phone lost the connection.

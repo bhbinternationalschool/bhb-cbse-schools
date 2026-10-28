@@ -17,6 +17,10 @@
 
 import { formatInrCompact } from "@/lib/masters";
 import type { ModuleDashboardModel } from "@/components/dashboard/ModuleDashboard";
+import { shortCached } from "@/lib/shortPromiseCache";
+
+/** Redraws within this window reuse one answer (see shortPromiseCache). */
+const DASH_FIGURES_TTL_MS = 15_000;
 
 export type StoreDuesSummary = {
   balancePaise: number;
@@ -24,7 +28,11 @@ export type StoreDuesSummary = {
   studentCount: number;
 };
 
-export async function fetchStoreDuesSummary(): Promise<StoreDuesSummary | null> {
+export function fetchStoreDuesSummary(): Promise<StoreDuesSummary | null> {
+  return shortCached("store-dues-summary", DASH_FIGURES_TTL_MS, readStoreDuesSummary);
+}
+
+async function readStoreDuesSummary(): Promise<StoreDuesSummary | null> {
   try {
     const res = await fetch("/api/inventory/sales?view=dues-summary", {
       credentials: "same-origin",
@@ -60,7 +68,15 @@ export type OpenDuesSummary = {
  * data will drift. One figure, from the table the parent's message is built
  * from, cannot.
  */
-export async function fetchOpenDuesSummary(
+export function fetchOpenDuesSummary(
+  academicYearCode?: string,
+): Promise<OpenDuesSummary | null> {
+  return shortCached(`open-dues-summary:${academicYearCode ?? ""}`, DASH_FIGURES_TTL_MS, () =>
+    readOpenDuesSummary(academicYearCode),
+  );
+}
+
+async function readOpenDuesSummary(
   academicYearCode?: string,
 ): Promise<OpenDuesSummary | null> {
   try {

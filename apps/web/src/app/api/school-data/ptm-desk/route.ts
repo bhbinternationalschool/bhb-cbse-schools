@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -84,7 +85,9 @@ export async function GET(req: Request) {
   // holder outside the office gets the same cut, then their functions' part.
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope) {
       return NextResponse.json({ ok: false, error: "Could not work out your classes" }, { status: 503 });
     }
@@ -154,7 +157,9 @@ export async function POST(req: Request) {
   // change, not that a teacher's browser may push the school's desk.
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {
@@ -189,6 +194,20 @@ export async function POST(req: Request) {
 
   // Function holders (e.g. PTM → Meeting slots): merged onto the stored
   // desk, only their functions' slices — never the body as sent.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (!gate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "ptm",
+      async () => {
+        const s = await fetchPtmDeskFromDb();
+        return s.ok ? (s.bundle as unknown as Record<string, unknown>) : null;
+      },
+      body,
+    );
+    if (refused) return refused;
+  }
   if (gate) {
     const stored = await fetchPtmDeskFromDb();
     if (!stored.ok) {

@@ -6,7 +6,8 @@
  * POST { popupId, action: "done", aadhaar?: {stu_…|father|mother: digits} }
  * POST { popupId, action: "done", consent: "yes" | "no" }
  *   A form is "done" only once its answer is saved: Aadhaar numbers onto the
- *   children's records (checked, never written over an existing number), an
+ *   children's records (checked; a family may correct its own unverified
+ *   number, never one the school verified for UDISE+), an
  *   APAAR consent exactly as WhatsApp records it.
  */
 
@@ -22,6 +23,7 @@ import {
   saveFamilyAadhaar,
 } from "@/lib/appPopups.server";
 import type { SisStudent } from "@/lib/sis";
+import { routeTimer, type RouteTimer } from "@/lib/data/server/routeTiming";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,11 +32,13 @@ function istToday(): string {
   return new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
 }
 
-async function whoIs(request: Request) {
+async function whoIs(request: Request, timer?: RouteTimer) {
   const ctx = await resolveApiAuth(request);
+  timer?.phase("query");
   const s = ctx.session;
   if (s.persona === "parent") {
     if (!s.householdId) throw new ApiError("forbidden", "No family linked to this login", 403);
+    // SQL scoped to this household (data-layer 4.1a), never the whole roster.
     const children: SisStudent[] = await householdChildren(s.householdId, s.academicYearCode || "");
     return { ctx, audience: "parents" as const, subjectKey: `hh:${s.householdId}`, children };
   }
@@ -42,15 +46,27 @@ async function whoIs(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const timer = routeTimer("v1/app/popups");
+  let res: Response;
   try {
-    const who = await whoIs(request);
+    const who = await whoIs(request, timer);
+    timer.note("persona", who.audience);
+    timer.note("children", who.children.length);
     const [state, events] = await Promise.all([readAppPopups(), readPopupEvents(who.subjectKey)]);
-    // Unreadable is not "nothing to show"… but it is nothing worth an error on the home screen.
-    if (!state || !events) return apiOk({ popups: [] });
-    return apiOk({ popups: popupsFor(state, { audience: who.audience, children: who.children, today: istToday() }, events) });
+    // Unknown is not "nothing to show" (R6): an unreadable pop-up list or
+    // event history is a 503. The app shows nothing either way — it skips a
+    // failed pop-up read silently (core/popups/app_popups.dart) — but a 200
+    // with an empty list told it, and the logs, that there was nothing.
+    if (!state || !events) {
+      throw new ApiError("server_error", "Could not read the pop-ups just now.", 503);
+    }
+    timer.phase("build");
+    res = apiOk({ popups: popupsFor(state, { audience: who.audience, children: who.children, today: istToday() }, events) });
   } catch (e) {
-    return apiErr(e);
+    res = apiErr(e);
   }
+  timer.done(res.status);
+  return res;
 }
 
 export async function POST(request: Request) {
@@ -80,7 +96,10 @@ export async function POST(request: Request) {
       if (!r.ok) throw new ApiError("bad_request", r.error, 400);
       // Which ones were given — never the numbers.
       await recordPopupEvent(popupId, who.subjectKey, "done", { aadhaarFor: Object.keys(numbers) });
-      return apiOk({ saved: r.saved });
+      // Per person: saved / corrected / unchanged / kept (verified by the
+      // school) with the last 4 digits, so the app can show what was stored
+      // and offer a correction (12 Oct 2026).
+      return apiOk({ saved: r.saved, outcomes: r.outcomes });
     }
 
     if (popup.form === "consent") {

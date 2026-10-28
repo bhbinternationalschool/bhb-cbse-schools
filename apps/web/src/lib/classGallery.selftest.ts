@@ -9,6 +9,10 @@ import {
   classGalleryType,
   cleanEventName,
   CLASS_GALLERY_TYPES,
+  albumSectionKey,
+  galleryViewUrl,
+  officeGalleryFilePath,
+  SCHOOL_SECTION,
   bucketCopyDue,
   CLASS_GALLERY_KEEP_DAYS,
   parentMaySee,
@@ -60,7 +64,22 @@ const media = read("../app/api/v1/gallery/media/[id]/route.ts");
 assert.ok(/albumVisibleTo\(\{ sectionIds: media\.sectionIds \}/.test(media) && /This photo is for another class's families/.test(media), "every file request is checked");
 assert.ok(/createSignedUrl\(path, 10 \* 60\)/.test(read("classGallery.server.ts")), "links last ten minutes and are never stored");
 const server = read("classGallery.server.ts");
-assert.ok(/assertMaySection\(ctx, album\.sectionIds!\[0\]!\)/.test(server), "only that class's teacher (or leadership) adds");
+assert.ok((server.match(/assertMaySection\(ctx, albumSectionKey\(album\)\)/g) ?? []).length === 2, "only that class's teacher (or the gallery leader) adds");
+assert.ok(/isGalleryLeader/.test(server) && /scope\.unrestricted/.test(server) && /hasPermission\(ctx\.session, ctx\.masters, "gallery", a, ctx\.rbac\)/.test(server), "the gallery leader: school-wide AND the Gallery grant");
+assert.ok(/isGalleryLeader\(ctx\)/.test(read("../app/api/v1/staff/features/route.ts")), "the principal and the office get the tile");
+
+// ── The whole school, and the office's web uploads (15 Oct 2026) ──────────
+assert.equal(albumSectionKey({ sectionIds: ["c3|A"] }), "c3|A");
+assert.equal(albumSectionKey({ sectionIds: [] }), SCHOOL_SECTION, "a school album's section is the whole school");
+assert.equal(albumSectionKey({}), SCHOOL_SECTION);
+assert.equal(officeGalleryFilePath("/api/file/gallery/alb_1/1700_x.jpg"), "gallery/alb_1/1700_x.jpg");
+assert.equal(officeGalleryFilePath("/api/file/staff/BHB001/photo.jpg"), "", "only gallery files");
+assert.equal(officeGalleryFilePath("/api/file/gallery/../staff/x.jpg"), "", "no climbing out");
+assert.equal(officeGalleryFilePath("https://x.supabase.co/storage/v1/object/public/site-media/a.jpg"), "");
+assert.equal(galleryViewUrl({ id: "pho_1", url: "/api/file/gallery/alb_1/a.jpg" }), "/api/v1/gallery/media/pho_1", "a parent opens an office upload through the gallery route");
+assert.equal(galleryViewUrl({ id: "pho_2", url: "https://cdn/x.jpg" }), "https://cdn/x.jpg");
+assert.ok(/url: galleryViewUrl\(p\)/.test(read("../app/api/v1/gallery/albums/route.ts")), "the albums list hands parents the gallery route");
+assert.ok(/media\.albumPublished/.test(read("../app/api/v1/gallery/media/[id]/route.ts")), "a parent never opens a draft album's file");
 assert.ok(/opts\.path !== classGalleryPath\(/.test(server), "only a path the server issued is recorded");
 const review = read("classGalleryReview.server.ts");
 assert.ok(/classGalleryDriveFolder\(album\.academicYearCode, album\.classLabel/.test(review), "Drive: Class gallery / year / class / event");
@@ -90,12 +109,16 @@ assert.equal(parentMaySee({}), true, "school-wide photos from before the check")
 assert.equal(reviewStatusOf("held"), "held");
 assert.equal(reviewStatusOf(undefined), "ok");
 assert.ok(/\.eq\("section_ids", "\{\}"\)/.test(read("../app/api/website/publishable/route.ts")), "never on the website");
-assert.ok(/!a\.sectionIds\?\.length/.test(read("../components/parent/ParentCommsPortal.tsx")), "not in the web parent portal's school albums");
+{
+  const portal = read("../components/parent/ParentCommsPortal.tsx");
+  assert.ok(/fetch\("\/api\/v1\/gallery\/albums"/.test(portal), "the web parent portal reads the same scoped route as the app");
+  assert.ok(/Could not load the gallery/.test(portal) && !/listAlbums\(/.test(portal), "a failed read says so — never the browser's sample album");
+}
 const comms = read("schoolCommsNormalized.server.ts");
 assert.ok(/keepStoredAudience\(sb, tenantId, rows\)/.test(comms), "a save from an older browser keeps a class album's audience");
 assert.ok(/section_ids: Array\.isArray\(a\.sectionIds\) \? a\.sectionIds : undefined/.test(comms));
 assert.ok(/features\.push\("class_gallery"\)/.test(read("../app/api/v1/staff/features/route.ts")), "class teachers get the tile");
-const mig = readFileSync(join(__dirname, "../../../../supabase/migrations/20261010210000_class_gallery_bucket.sql"), "utf8");
+const mig = readFileSync(join(__dirname, "../../../../supabase/migrations/20261010230000_class_gallery_bucket.sql"), "utf8");
 assert.ok(/'class-gallery',\s*'class-gallery',\s*false/.test(mig), "the bucket is private");
 for (const t of Object.keys(CLASS_GALLERY_TYPES)) assert.ok(mig.includes(`'${t}'`), `bucket allows ${t}`);
 assert.ok(/524288000/.test(mig), "the bucket takes a 500 MB video");

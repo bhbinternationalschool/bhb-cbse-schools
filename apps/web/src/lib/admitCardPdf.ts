@@ -248,9 +248,11 @@ function drawSignatureLine(
   usable: number,
   pageW: number,
   pageH: number,
+  principalSignature: string | null,
 ) {
   const y = pageH - 60;
   const x = pageW - margin - 140;
+  if (principalSignature) drawSignatureOnLine(doc, principalSignature, x, y, 140, 38);
   doc.setDrawColor(120, 120, 120);
   doc.line(x, y, x + 140, y);
   doc.setFont("helvetica", "normal");
@@ -269,6 +271,7 @@ function drawAdmitCardPage(
   letterhead: PdfLetterheadInfo,
   photoDataUrl: string | null,
   qrDataUrl: string | null,
+  principalSignature: string | null,
 ) {
   let y = drawPdfLetterhead(doc, letterhead, margin, usable, pageW);
 
@@ -286,7 +289,7 @@ function drawAdmitCardPage(
   y = drawInfoBox(doc, a, margin, usable, y, photoDataUrl, qrDataUrl);
   y = drawSubjectTable(doc, a.subjects, margin, usable, y);
   drawInstructions(doc, margin, usable, y);
-  drawSignatureLine(doc, margin, usable, pageW, pageH);
+  drawSignatureLine(doc, margin, usable, pageW, pageH, principalSignature);
 
   doc.setFontSize(8);
   doc.setTextColor(130, 130, 130);
@@ -298,9 +301,32 @@ function drawAdmitCardPage(
   );
 }
 
+/**
+ * A signature image standing on a signing line: fitted into w × h above
+ * the line at (x, lineY), centred. An image jsPDF cannot read is left out
+ * — the line stays blank.
+ */
+export function drawSignatureOnLine(doc: jsPDF, dataUrl: string, x: number, lineY: number, w: number, h: number): boolean {
+  try {
+    const props = doc.getImageProperties(dataUrl);
+    if (!props.width || !props.height) return false;
+    const scale = Math.min(w / props.width, h / props.height);
+    const dw = props.width * scale;
+    const dh = props.height * scale;
+    doc.addImage(dataUrl, imageFormatFromDataUrl(dataUrl), x + (w - dw) / 2, lineY - dh - 2, dw, dh);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function downloadAdmitCardsPdf(
   docs: AdmitCardDoc[],
-  options?: { masters?: MastersState },
+  options?: {
+    masters?: MastersState;
+    /** The principal's signature (data URL, lib/printSignatures); absent = blank line. */
+    principalSignature?: string | null;
+  },
 ): Promise<void> {
   if (!docs.length) throw new Error("No students selected for admit cards");
   if (docs.length > MAX_ADMIT_CARDS_PER_RUN) {
@@ -335,6 +361,7 @@ export async function downloadAdmitCardsPdf(
       letterhead,
       a.photoUrl,
       qrDataUrls[i] ?? null,
+      options?.principalSignature ?? null,
     );
   });
 

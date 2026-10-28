@@ -10,8 +10,6 @@ import {
 import { setMirrorSlice } from "@/lib/schoolDataMirror";
 import {
   hydrateMastersDeskFromDb,
-  mastersDeskPushPending,
-  scheduleMastersDeskSync,
 } from "@/lib/mastersNormalizedClient";
 import { mergeDbDeskIntoMastersState } from "@/lib/mastersNormalizedMerge";
 import { mastersReadFromDbEnabled } from "@/lib/mastersDbConfig";
@@ -19,7 +17,6 @@ import { deskSkipMirrorBlobSliceClient } from "@/lib/deskCutover";
 import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
 import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
-import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "masters";
 
@@ -70,52 +67,6 @@ export function writeMastersLocalRaw(state: MastersState): void {
   setMirrorSlice("masters", safe);
 }
 
-export function scheduleMastersSync(state: MastersState) {
-  if (typeof window === "undefined") {
-    void trackServerWork(pushMastersRemoteServer(state));
-    return;
-  }
-  scheduleMastersDeskSync(state);
-}
-
-export async function pushMastersRemoteServer(
-  state: MastersState,
-): Promise<{ ok: boolean; error?: string }> {
-  const { pushMastersDeskToDb } = await import("@/lib/mastersNormalized.server");
-  // A server-side copy carries no desk revision, so it can only bootstrap a
-  // desk that has never been written — never overwrite one (the writer
-  // refuses "unversioned"). Masters edits go through the browser's push.
-  const desk = await pushMastersDeskToDb(state, { baseUpdatedAt: null });
-  if (!desk.ok) return { ok: false, error: desk.error };
-
-  const { deskSkipMirrorBlobSlice } = await import("@/lib/deskCutover");
-  if (deskSkipMirrorBlobSlice("masters")) return { ok: true };
-
-  const { fetchServerBlob, pushServerBlob } = await import("@/lib/serverBlob");
-  const { stripStaffFromMastersForBlob } = await import("@/lib/staffPersistence");
-  const remote = await fetchServerBlob<{ masters?: MastersState }>(
-    "school_mirror_state",
-  );
-  const remoteClasses = remote.state?.masters?.classes?.length ?? 0;
-  const nextClasses = state.classes?.length ?? 0;
-  if (nextClasses < remoteClasses && remote.state?.masters) return { ok: true };
-
-  const mirror = remote.state ?? {
-    version: 1 as const,
-    updatedAt: new Date().toISOString(),
-    sis: null,
-    fees: null,
-    payments: null,
-    masters: null,
-    admissions: null,
-  };
-  return pushServerBlob("school_mirror_state", {
-    ...mirror,
-    masters: stripStaffFromMastersForBlob(state),
-    updatedAt: new Date().toISOString(),
-  });
-}
-
 export async function ensureMastersHydrated(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
   // Same collapse as fees and sis: concurrent callers share one fetch.
@@ -159,20 +110,22 @@ async function hydrateMastersOnce(): Promise<boolean> {
       bundle.feeHeads.length > 0 ||
       mastersMirrorIsEmpty(localBefore))
   ) {
+    // Merge into the copy as it is NOW, not localBefore: the staff hydrate
+    // runs in parallel and writes the roster while this fetch is out. Writing
+    // localBefore back put staff to [] on every load where the roster landed
+    // first — the Staff page showed 0 however often it was refreshed
+    // (12 Oct 2026), and the staff desk, already marked loaded, never re-read.
     writeMastersLocalRaw(
-      mergeDbDeskIntoMastersState(localBefore, bundle, {
+      mergeDbDeskIntoMastersState(loadMasters(), bundle, {
         preferDb: readFromDb,
       }),
     );
     normChanged = true;
-    // DB-read mode: hydrate is pull-only — edits sync via saveMasters().
-    if (!readFromDb) {
-      scheduleMastersSync(loadMasters());
-    }
-  } else if (readFromDb && mastersDeskPushPending()) {
-    // Local edits never reached DB (tab closed, failed push) — push now.
-    scheduleMastersSync(loadMasters());
   }
+  // (data-layer 2.2c: a read no longer re-sends "local edits that never
+  // reached the DB" — that pushed the tab's whole copy from a READ, and the
+  // masters-desk re-read after every element write would have sent a refused
+  // fee save's stale book again. A failed save says so and is redone by hand.)
   const changedAnything = mirrorChanged || normChanged;
   // Tell the screens already painted from the old copy. Until now only
   // saveMasters() and the staff hydrate raised this, so a workspace that

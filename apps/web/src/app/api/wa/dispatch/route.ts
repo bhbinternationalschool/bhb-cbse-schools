@@ -3,10 +3,19 @@
  * POST body: {
  *   messages: {
  *     mobile, body?, messageId?,
- *     template?: { name, language, variables?, variableKeys?, components?, mediaHeader? }
+ *     template?: { name, language, variables?, variableKeys?, components?, mediaHeader?, quickReplyPayloads? }
+ *     buttons?: { id?, title }[]   // ≤ 3 reply buttons under `body` (no template)
+ *     footer?
  *   }[],
  *   dryRun?: boolean
  * }
+ *
+ * A message with `buttons` goes out as Meta's interactive reply-buttons
+ * message; a tap comes back through the webhook as text (the id) and is
+ * logged in wa_messages as the label with `button_id`. Like free text it
+ * needs the 24-hour window: the result then says `windowClosed: true`, and
+ * the caller resends as a template — `quickReplyPayloads` lets a template's
+ * quick-reply taps carry a value (e.g. "Approve 9") instead of their label.
  */
 
 import { NextResponse } from "next/server";
@@ -16,16 +25,22 @@ import {
   timingSafeStringEqual,
 } from "@/lib/apiRouteAuth.server";
 import type { RbacModule } from "@/lib/rbac";
-import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { sectionKey, readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import { loadSis } from "@/lib/sis";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import {
   buildWaTemplateBodyComponent,
   buildWaTemplateMediaHeader,
   sendWaWithFailover,
+  shouldRetryWithFallback,
   waOutboundConfigured,
   type WaTemplateComponent,
 } from "@/lib/waSend";
+import { sendWhatsAppReplyButtonsChecked } from "@/lib/waInteractive";
+import {
+  buildTemplateQuickReplyComponents,
+  normalizeReplyButtons,
+} from "@/lib/waReplyButtons";
 import { logHouseholdWaSend } from "@/lib/householdMessageLog.server";
 import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { isInQuietHours, quietHoursLabel } from "@/lib/householdPrefs";
@@ -44,6 +59,11 @@ type DispatchTemplate = {
     link: string;
     filename?: string;
   };
+  /**
+   * One payload per QUICK_REPLY button of the template, in button order.
+   * A tap then arrives as that payload rather than the button's label.
+   */
+  quickReplyPayloads?: string[];
 };
 
 type DispatchItem = {
@@ -56,6 +76,14 @@ type DispatchItem = {
   fallbackMobile?: string;
   body?: string;
   template?: DispatchTemplate;
+  /**
+   * Reply buttons under `body` (ignored when `template` is set): at most
+   * three, titles of up to 20 characters; `id` defaults to a slug of the
+   * title. See lib/waReplyButtons.ts.
+   */
+  buttons?: { id?: string; title: string }[];
+  /** Small grey line under the buttons' body (≤ 60 characters). */
+  footer?: string;
   /**
    * Which of the school's WhatsApp numbers to send FROM.
    *
@@ -139,7 +167,9 @@ export async function POST(req: Request) {
     // WhatsApp. A teacher (not school-wide) may message only the families
     // of children in the sections they teach.
     if (!auth.viaMirrorSecret) {
-      const scope = await staffSectionScope(auth.ctx).catch(() => null);
+      const scopeRead = await readStaffScopeForDesk(auth.ctx);
+      if (!scopeRead.ok) return scopeRead.response;
+      const scope = scopeRead.scope;
       if (scope && !scope.unrestricted) {
         await ensureSisHydratedServer().catch(() => false);
         const sis = loadSis();
@@ -197,7 +227,7 @@ export async function POST(req: Request) {
         messageId: m.messageId,
         mobile: m.mobile,
         status: "queued_stub",
-        via: m.template?.name ? "template" : "text",
+        via: m.template?.name ? "template" : m.buttons?.length ? "buttons" : "text",
       })),
       hint: waOutboundConfigured()
         ? "Pass dryRun:false to send"
@@ -214,6 +244,8 @@ export async function POST(req: Request) {
     mode?: string;
     via?: string;
     usedFallback?: boolean;
+    /** The number has not written to the school in 24 h: resend as a template. */
+    windowClosed?: boolean;
   }[] = [];
 
   const purpose = body?.module || "admissions";
@@ -269,6 +301,13 @@ export async function POST(req: Request) {
           buildWaTemplateBodyComponent(keys, item.template.variables),
         );
       }
+      if (Array.isArray(item.template.quickReplyPayloads) && item.template.quickReplyPayloads.length) {
+        components.push(
+          ...(buildTemplateQuickReplyComponents(
+            item.template.quickReplyPayloads.map((p) => String(p ?? "")),
+          ) as unknown as WaTemplateComponent[]),
+        );
+      }
       const r = await sendWaWithFailover({
         fromPhoneNumberId: item.fromPhoneNumberId,
         primaryMobile: mobile,
@@ -315,6 +354,50 @@ export async function POST(req: Request) {
       });
       continue;
     }
+
+    if (Array.isArray(item.buttons) && item.buttons.length) {
+      const norm = normalizeReplyButtons(item.buttons);
+      if (!norm.ok) {
+        results.push({ messageId: item.messageId, mobile, status: "failed", error: norm.error, via: "buttons" });
+        continue;
+      }
+      const sendButtons = (toMobile: string) =>
+        sendWhatsAppReplyButtonsChecked({
+          toMobile,
+          body: text,
+          footer: item.footer,
+          buttons: norm.buttons,
+          fromPhoneNumberId: item.fromPhoneNumberId,
+        });
+      let r = await sendButtons(mobile);
+      let usedFallback = false;
+      if (shouldRetryWithFallback({ primaryResult: r, primaryMobile: mobile, fallbackMobile })) {
+        r = await sendButtons(fallbackMobile!);
+        usedFallback = true;
+      }
+      results.push({
+        messageId: item.messageId,
+        mobile,
+        status: r.ok ? "sent" : "failed",
+        error: r.error,
+        providerId: r.providerId,
+        mode: r.mode,
+        via: "buttons",
+        usedFallback,
+        windowClosed: r.windowClosed,
+      });
+      await logHouseholdWaSend({
+        mobile,
+        purpose,
+        via: "text",
+        preview: `${text}\n${norm.buttons.map((b) => `[${b.title}]`).join(" ")}`,
+        status: r.ok ? "sent" : "failed",
+        error: r.error,
+        waMessageId: r.providerId,
+      });
+      continue;
+    }
+
     const r = await sendWaWithFailover({
       primaryMobile: mobile,
       fallbackMobile,

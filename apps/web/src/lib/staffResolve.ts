@@ -5,7 +5,7 @@ import {
   type StaffVehicleRole,
 } from "@/lib/foundationMasters";
 import type { MastersState } from "@/lib/masters";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, type RbacState } from "@/lib/rbac";
 
 export function resolveClassTeachers(
   masters: MastersState,
@@ -246,6 +246,11 @@ export type StaffFieldErrors = Partial<
   >
 >;
 
+/** The login username a staff record falls back to when none is typed. */
+export function defaultStaffLoginUsername(empCode: string): string {
+  return empCode.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "");
+}
+
 export function validateStaffProfile(
   draft: Pick<
     StaffRecord,
@@ -259,8 +264,17 @@ export function validateStaffProfile(
     | "loginUsername"
     | "loginEnabled"
   >,
+  /**
+   * `sensitive: false` — the person saving cannot edit Aadhaar, PAN or bank
+   * details (no "Bank, ID & pay details" function, not the owner): those
+   * inputs are locked, so they are not this save's to check. A malformed
+   * stored value (legacy data) must not refuse the office's Save and send it
+   * to a tab it cannot change (21 Oct 2026, fix/staff-locked-field-validation).
+   */
+  opts: { sensitive?: boolean } = {},
 ): StaffFieldErrors {
   const errors: StaffFieldErrors = {};
+  const checkSensitive = opts.sensitive !== false;
   if (!draft.empCode.trim()) errors.empCode = "Employee code is required";
   if (!draft.fullName.trim()) errors.fullName = "Full name is required";
   const mobile = draft.mobile.replace(/\D/g, "");
@@ -271,18 +285,22 @@ export function validateStaffProfile(
     errors.email = "Invalid email";
   }
   const aadhaar = draft.aadhaarNo.replace(/\D/g, "");
-  if (draft.aadhaarNo.trim() && aadhaar.length !== 12) {
+  if (checkSensitive && draft.aadhaarNo.trim() && aadhaar.length !== 12) {
     errors.aadhaarNo = "Aadhaar must be 12 digits";
   }
   const pan = draft.panNo.trim().toUpperCase();
-  if (pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
+  if (checkSensitive && pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(pan)) {
     errors.panNo = "PAN format: AAAAA9999A";
   }
   const ifsc = draft.bankIfsc.trim().toUpperCase();
-  if (ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
+  if (checkSensitive && ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) {
     errors.bankIfsc = "IFSC format: ABCD0XXXXXX";
   }
-  if (draft.loginEnabled && !draft.loginUsername.trim()) {
+  // A blank username is not an error while there is an employee code to
+  // default it from: Save fills it in (StaffProfileForm) and the field says
+  // "Defaults to emp code". Refusing it here kept Save from ever sending an
+  // edit for 29 of 35 staff (21 Oct 2026, hotfix/staff-editor-save).
+  if (draft.loginEnabled && !draft.loginUsername.trim() && !defaultStaffLoginUsername(draft.empCode)) {
     errors.loginUsername = "Username required when login is enabled";
   }
   return errors;
@@ -467,10 +485,12 @@ export function listSessionClassTeacherSections(
 export function canManageStaffLeave(
   session: { roleCode: string; staffId?: string; email?: string; fullName: string },
   masters: MastersState,
+  /** The saved roles on the server (ApiAuthContext.rbac); the browser's copy when omitted. */
+  rbac?: RbacState,
 ): boolean {
   if (
-    hasPermission(session, masters, "staff", "edit") ||
-    hasPermission(session, masters, "policies", "edit")
+    hasPermission(session, masters, "staff", "edit", rbac) ||
+    hasPermission(session, masters, "policies", "edit", rbac)
   ) {
     return true;
   }

@@ -10,8 +10,10 @@ import type {
   StaffStream,
 } from "@/lib/foundationMasters";
 import { DEFAULT_AY } from "@/lib/masters";
+import { isVisitingStaff } from "@/lib/visitingPay";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import { normalizeNotOnPayroll, type NotOnPayrollFields } from "@/lib/payrollNotOnPayroll";
 
 export type SalaryHeadKind = "earning" | "deduction" | "employer";
 
@@ -91,7 +93,7 @@ export type StaffSalaryLink = {
   statutoryGrossUp: boolean;
   effectiveFrom: string;
   salaryAccountNote: string;
-};
+} & NotOnPayrollFields;
 
 /** Virtual earning head for the per-staff additional amount (no master row). */
 export const ADDITIONAL_HEAD_CODE = "ADDL";
@@ -164,6 +166,8 @@ export type SalarySettings = {
   salaryBankBranch: string;
   salaryBankAccountNo: string;
   salaryBankIfsc: string;
+  /** Union Bank corporate net-banking ID — row 1 of the salary upload file. */
+  salaryBankCorporateId: string;
   salaryAccountLabel: string;
 };
 
@@ -199,6 +203,7 @@ export function defaultSalarySettings(): SalarySettings {
     salaryBankBranch: SCHOOL_SALARY_BANK.branch,
     salaryBankAccountNo: "",
     salaryBankIfsc: SCHOOL_SALARY_BANK.ifsc,
+    salaryBankCorporateId: "",
     salaryAccountLabel: "Salary account — Union Bank Murdaha Bazar",
   };
 }
@@ -234,6 +239,7 @@ export function normalizeSalarySettings(
       s?.salaryBankAccountNo ?? d.salaryBankAccountNo,
     ),
     salaryBankIfsc: bankIfsc || d.salaryBankIfsc,
+    salaryBankCorporateId: String(s?.salaryBankCorporateId ?? "").replace(/,/g, "").trim().slice(0, 32),
     salaryAccountLabel:
       String(s?.salaryAccountLabel ?? d.salaryAccountLabel).trim() ||
       d.salaryAccountLabel,
@@ -552,6 +558,7 @@ function normalizeLink(l: Partial<StaffSalaryLink>): StaffSalaryLink {
     statutoryGrossUp: l.statutoryGrossUp === true,
     effectiveFrom: String(l.effectiveFrom || "").slice(0, 10),
     salaryAccountNote: String(l.salaryAccountNote || ""),
+    ...normalizeNotOnPayroll(l),
   };
 }
 
@@ -648,11 +655,19 @@ export function newSalaryId(prefix: string) {
   return nid(prefix);
 }
 
-/** Resolve structure for a staff member (link → stream/category/designation match → first active). */
+/**
+ * Resolve structure for a staff member (link → stream/category/designation
+ * match → first active).
+ *
+ * Visiting staff (paid per period / hour / day — lib/visitingPay.ts) have no
+ * structure, ever: the `active[0]` fallback below would otherwise hand them a
+ * full monthly salary with PF and ESIC on it.
+ */
 export function resolveStructureForStaff(
   state: SalarySetupState,
   staff: StaffRecord,
 ): SalaryStructure | null {
+  if (isVisitingStaff(staff)) return null;
   const link = state.staffLinks.find((l) => l.staffId === staff.id);
   if (link?.structureId) {
     const hit = state.structures.find(

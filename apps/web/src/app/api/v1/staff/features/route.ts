@@ -1,8 +1,36 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
+import { hasPermission } from "@/lib/rbac";
 import { resolveMobileAccess } from "@/lib/api/v1/mobileAccess.server";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { isGalleryLeader } from "@/lib/classGallery.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
+import { MOBILE_FEATURES } from "@/lib/mobileFeatures";
+
+/**
+ * The heading each tile sits under on the app's home (director, 13 Oct 2026:
+ * "put actions in their grouping"). The same groups the office sees in
+ * Masters → Roles → Mobile app; tiles the server injects carry their own.
+ */
+const GROUP_ORDER = ["Teaching", "Students", "Fees", "Admissions", "Leadership", "Gate", "Transport", "Self service"] as const;
+const FEATURE_GROUP: Record<string, string> = {
+  ...Object.fromEntries(MOBILE_FEATURES.map((f) => [f.id, f.group])),
+  subject_requests: "Teaching",
+  class_gallery: "Students",
+  teacher_ai_tools: "Teaching",
+  notices_create: "Self service",
+  news_create: "Self service",
+};
+
+/**
+ * The app screens whose AI helpers the "AI tools" tile gathers (2026-10-13):
+ * answer-sheet marks, question paper and remedial worksheet sit on marks
+ * entry (exams.edit), the lesson-plan draft on the period log
+ * (teaching.edit), the PTM brief on PTM meetings (ptm.edit). The web ERP
+ * offers these to anyone holding those grants, with no switch of its own, so
+ * the tile follows them; switching the underlying screen off removes it.
+ */
+const AI_TOOL_BASES = ["marks_entry", "period_log", "ptm_meet"];
 
 export const runtime = "nodejs";
 
@@ -33,15 +61,35 @@ export async function GET(request: Request) {
       features.push("subject_requests");
     }
     // Class gallery (10 Oct 2026): a class teacher posts their class's photos
-    // and videos; only that class's families see them.
-    if (scope.classTeacherOf.size > 0 && !features.includes("class_gallery")) {
+    // and videos; only that class's families see them. The principal and the
+    // office (school-wide, with the Gallery grant) post to the whole school
+    // or any class and decide on held items (15 Oct 2026) — they had no way
+    // in on the phone.
+    if (
+      (scope.classTeacherOf.size > 0 || (await isGalleryLeader(ctx))) &&
+      !features.includes("class_gallery")
+    ) {
       features.push("class_gallery");
+    }
+    if (AI_TOOL_BASES.some((f) => features.includes(f)) && !features.includes("teacher_ai_tools")) {
+      features.push("teacher_ai_tools");
+    }
+    // "+ Create notice / news" on Notices & news (request mr_mv9y435vx6e5):
+    // whoever may create them on the web (Notices · create, News · create),
+    // with the app's Notices switch on. POST /api/v1/staff/notices checks
+    // the same; these only decide whether the button shows.
+    if (features.includes("notices")) {
+      const can = (m: "notices" | "news") => hasPermission(ctx.session, ctx.masters, m, "create", ctx.rbac);
+      if (can("notices")) features.push("notices_create");
+      if (can("news")) features.push("news_create");
     }
     return apiOk({
       staffId: ctx.session.staffId || "",
       fullName: ctx.session.fullName,
       homeKind: scope.kind,
       features,
+      groups: Object.fromEntries(features.map((f) => [f, FEATURE_GROUP[f] || "Self service"])),
+      groupOrder: GROUP_ORDER,
       blockedByRbac: access.blockedByRbac,
     });
   } catch (e) {

@@ -68,6 +68,16 @@ class PunchDeviceKey {
   }) =>
       'punch|$staffId|$kind|$code|$ts';
 
+  /// A survey-day step (the server's surveyMessage). [extra] is the gate
+  /// code for a school start, the client ref for a capture, the pairing
+  /// code for a pairing, and "" otherwise.
+  static String surveyMessage({
+    required String action,
+    required String extra,
+    required int ts,
+  }) =>
+      'survey|$action|$extra|$ts';
+
   /// ECDSA P-256 / SHA-256 signature, r‖s (64 bytes), base64url.
   String sign(String message) {
     final signer = Signer('SHA-256/ECDSA')

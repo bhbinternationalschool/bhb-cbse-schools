@@ -6,11 +6,8 @@ import { SurveyDayApp } from "@/components/field/SurveyDayApp";
 import {
   findSurveyMemberForSession,
   isSurveyTeamLeader,
-  leaderUpsertBeat,
   loadOfflineQueue,
-  persistAdmissions,
   reloadAdmissionsWithSurvey,
-  setSurveyBeatActive,
   type SurveyTeamMember,
 } from "@/lib/fieldSurvey";
 import { todayYmd, type AdmissionsState } from "@/lib/admissions";
@@ -28,10 +25,6 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
   const [mobileGate, setMobileGate] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
-  const [beatName, setBeatName] = useState("");
-  const [beatArea, setBeatArea] = useState("");
-  const [beatTarget, setBeatTarget] = useState("40");
-  const [editBeatId, setEditBeatId] = useState("");
 
   function flash(msg: string) {
     setNotice(msg);
@@ -80,27 +73,6 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
   function signOutAgent() {
     setMember(null);
     window.localStorage.removeItem(LOCAL_MEMBER_KEY);
-  }
-
-  function saveBeat() {
-    if (!state || !member || !beatName.trim()) return;
-    const r = leaderUpsertBeat(state, member.id, {
-      id: editBeatId || undefined,
-      name: beatName.trim(),
-      area: beatArea.trim(),
-      targetHouseholds: Math.round(Number(beatTarget) || 0),
-    });
-    if (!r.ok) {
-      flash(r.reason);
-      return;
-    }
-    persistAdmissions(r.state);
-    setState(r.state);
-    flash(editBeatId ? "Beat updated" : "Beat added");
-    setBeatName("");
-    setBeatArea("");
-    setBeatTarget("40");
-    setEditBeatId("");
   }
 
   if (!state) {
@@ -200,75 +172,10 @@ export function SurveyAgentApp({ session }: { session: DemoSession }) {
       </div>
 
       {isLeader ? (
-        <div className="mt-8 space-y-3 border-t border-[rgba(32,48,80,0.1)] pt-6">
-          <p className="text-[13px] font-semibold text-[var(--brand-deep)]">
-            Team leader · beats
-          </p>
-          <input
-            className={inp}
-            placeholder="Beat name *"
-            value={beatName}
-            onChange={(e) => setBeatName(e.target.value)}
-          />
-          <input
-            className={inp}
-            placeholder="Area"
-            value={beatArea}
-            onChange={(e) => setBeatArea(e.target.value)}
-          />
-          <input
-            className={inp}
-            type="number"
-            placeholder="Target HH"
-            value={beatTarget}
-            onChange={(e) => setBeatTarget(e.target.value)}
-          />
-          <button
-            type="button"
-            className="w-full rounded-xl bg-[var(--brand-deep)] py-3 text-sm font-semibold text-white"
-            onClick={saveBeat}
-          >
-            {editBeatId ? "Update beat" : "Add beat"}
-          </button>
-          <ul className="space-y-2 text-[12px]">
-            {state.surveyBeats.map((b) => (
-              <li
-                key={b.id}
-                className="flex items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] px-2 py-1.5"
-              >
-                <span>
-                  {b.code} {b.name}
-                  {!b.isActive ? " (off)" : ""}
-                </span>
-                <span className="flex gap-2">
-                  <button
-                    type="button"
-                    className="underline"
-                    onClick={() => {
-                      setEditBeatId(b.id);
-                      setBeatName(b.name);
-                      setBeatArea(b.area);
-                      setBeatTarget(String(b.targetHouseholds));
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className="underline"
-                    onClick={() => {
-                      const next = setSurveyBeatActive(state, b.id, !b.isActive);
-                      persistAdmissions(next);
-                      setState(next);
-                    }}
-                  >
-                    {b.isActive ? "Off" : "On"}
-                  </button>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <p className="mt-8 border-t border-[rgba(32,48,80,0.1)] pt-6 text-[13px] text-[var(--brand-deep)]">
+          <b>Team leader:</b> add or remove beats and staff from the staff app → <b>Field survey → Manage team</b>.
+          (They are saved on the server and reach the office and every surveyor at once.)
+        </p>
       ) : null}
 
       <div className="mt-8 space-y-2 text-[12px] text-[var(--muted)]">

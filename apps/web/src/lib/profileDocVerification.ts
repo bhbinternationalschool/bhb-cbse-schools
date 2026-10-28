@@ -9,7 +9,7 @@ import {
   type StaffDocKey,
   type StaffRecord,
 } from "@/lib/foundationMasters";
-import { loadMasters, saveMasters } from "@/lib/masters";
+import { loadMasters } from "@/lib/masters";
 import { getSessionActor } from "@/lib/sessionActor";
 import { hasPermission } from "@/lib/rbac";
 import { assertSessionWritable } from "@/lib/sessionWriteGuard";
@@ -186,47 +186,58 @@ export function decideStudentDocVerification(input: {
   return { ok: true, student: students[si]! };
 }
 
-export function submitStaffDocForVerification(input: {
+/**
+ * A member of staff submits one of their OWN documents (already uploaded) for
+ * the office's check — through POST /api/v1/staff/me/docs (data-layer 2.2d),
+ * which writes only that document on the caller's own record. It went
+ * through the whole-book Masters save before, which a member without Masters
+ * edit never sent while the screen said "Submitted". Resolves only after the
+ * server answered.
+ */
+export async function submitStaffDocForVerification(input: {
   staffId: string;
   docKey: StaffDocKey;
-  file: StaffDocFile;
+  /** driveReceipt: the upload route's proof that driveFileId is this upload's (never stored). */
+  file: StaffDocFile & { driveReceipt?: string };
   submittedBy: string;
-}): { ok: true; staff: StaffRecord } | { ok: false; error: string } {
+}): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!input.file.fileUrl) {
     return { ok: false, error: "Upload a file before submitting" };
   }
-  const masters = loadMasters();
-  const si = masters.staff.findIndex((s) => s.id === input.staffId);
-  if (si < 0) return { ok: false, error: "Staff not found" };
-  const staff = masters.staff[si]!;
-  const nextFile: StaffDocFile = {
-    ...input.file,
-    status: "pending",
-    submittedBy: input.submittedBy.trim() || staff.fullName,
-    submittedAt: nowIso(),
-    reviewedBy: "",
-    reviewedAt: "",
-    reviewNote: "",
-  };
-  const staffList = [...masters.staff];
-  staffList[si] = {
-    ...staff,
-    docs: { ...staff.docs, [input.docKey]: nextFile },
-    ...(input.docKey === "photo" && nextFile.fileUrl
-      ? { photoUrl: nextFile.fileUrl }
-      : {}),
-  };
-  saveMasters({ ...masters, staff: staffList });
-  return { ok: true, staff: staffList[si]! };
+  let res: Response;
+  try {
+    res = await fetch("/api/v1/staff/me/docs", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ docKey: input.docKey, file: input.file }),
+    });
+  } catch (e) {
+    return { ok: false, error: `Not submitted — the network failed (${e instanceof Error ? e.message : String(e)})` };
+  }
+  const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: { message?: string } } | null;
+  if (!res.ok || !body?.ok) {
+    return { ok: false, error: body?.error?.message || `Not submitted — the server answered ${res.status}` };
+  }
+  // The roster this tab holds (your record, with its documents) follows the server.
+  const { bridgeStaffAfterWrite } = await import("@/lib/data/client/staffBridge");
+  await bridgeStaffAfterWrite();
+  return { ok: true };
 }
 
-export function decideStaffDocVerification(input: {
+/**
+ * The office / principal verifies or rejects a member's document: one staff
+ * record write through the kernel (sis.staff, data-layer 2.2d) — only that
+ * document, laid on the record as stored now; refused (with the server's
+ * reason) without Staff · edit. Resolves only after the server answered.
+ */
+export async function decideStaffDocVerification(input: {
   staffId: string;
   docKey: StaffDocKey;
   approve: boolean;
   by: string;
   note?: string;
-}): { ok: true; staff: StaffRecord } | { ok: false; error: string } {
+}): Promise<{ ok: true; staff: StaffRecord } | { ok: false; error: string }> {
   if (!canDecideStaffDocs()) {
     return { ok: false, error: "Not allowed to verify staff documents" };
   }
@@ -246,13 +257,19 @@ export function decideStaffDocVerification(input: {
     reviewedAt: nowIso(),
     reviewNote: (input.note || "").trim(),
   };
-  const staffList = [...masters.staff];
-  staffList[si] = {
+  const nextStaff: StaffRecord = {
     ...staff,
     docs: { ...staff.docs, [input.docKey]: nextFile },
   };
-  saveMasters({ ...masters, staff: staffList });
-  return { ok: true, staff: staffList[si]! };
+  const { commitStaffBook } = await import("@/lib/data/client/staffBookWrites");
+  const { bridgeStaffAfterWrite } = await import("@/lib/data/client/staffBridge");
+  const r = await commitStaffBook(
+    { staff: masters.staff },
+    { staff: masters.staff.map((s) => (s.id === staff.id ? nextStaff : s)) },
+  );
+  await bridgeStaffAfterWrite();
+  if (!r.ok) return { ok: false, error: r.message };
+  return { ok: true, staff: nextStaff };
 }
 
 export function listPendingStudentDocs(opts?: {

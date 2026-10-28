@@ -24,21 +24,31 @@ import {
   downloadTransportRoutesTemplate,
   exportTransportRoutesCsv,
   importTransportRoutesCsv,
-  recordFuelPurchase,
-  recordFuelRefill,
   saveFeePolicy,
   setRouteRoundTrip,
   setRouteShifts,
   setRouteStops,
-  upsertFuelStockLocation,
   upsertTransportRoute,
-  vehicleTcoPaise,
+  completedJobsPaise,
+  chassisNoWarning,
+  normalizeChassisNo,
   type FleetVehicle,
   type TransportFeePolicy,
   type TransportFeeSlab,
   type TransportRoute,
   type TransportState,
 } from "@/lib/transport";
+import { expiryStatus } from "@/lib/transportFinance";
+import { quantityWithUnit } from "@/lib/transportFuelRegister";
+import {
+  recentFills,
+  tcoPartText,
+  tcoTotalText,
+  vehiclePapers,
+  vehicleTco,
+  type VehicleCosts,
+} from "@/lib/transportVehicleCosts";
+import { fetchVehicleCosts } from "@/lib/transportVehicleCostsClient";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { RowAction } from "@/components/ui/erp-grid";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
@@ -920,6 +930,7 @@ export function FleetPanel({
   upsertVehicle: typeof import("@/lib/transport").upsertFleetVehicle;
 }) {
   const [reg, setReg] = useState("");
+  const [chassis, setChassis] = useState("");
   const [vname, setVname] = useState("");
   const [fuelType, setFuelType] = useState<"diesel" | "cng" | "petrol">(
     "diesel",
@@ -936,11 +947,26 @@ export function FleetPanel({
 
   const crew = useMemo(() => listTransportCrew(masters), [masters]);
   const selected = state.vehicles.find((v) => v.id === selectedId) ?? null;
+  // Warn, never block: see chassisNoWarning. A chassis number already on
+  // another vehicle would make both of them claim the same tracker.
+  const chassisKey = normalizeChassisNo(chassis);
+  const chassisClash = chassisKey
+    ? state.vehicles.find(
+        (v) =>
+          v.id !== editId &&
+          (normalizeChassisNo(v.chassisNo) === chassisKey ||
+            normalizeChassisNo(v.registrationNo) === chassisKey),
+      )
+    : undefined;
+  const chassisWarn = chassisClash
+    ? `${chassisClash.name || chassisClash.registrationNo} already carries this number.`
+    : chassisNoWarning(chassis);
 
   function save() {
     const r = upsertVehicle({
       id: editId || undefined,
       registrationNo: reg,
+      chassisNo: normalizeChassisNo(chassis),
       name: vname || reg,
       fuelType,
       odometerKm: Number(odo) || 0,
@@ -957,6 +983,7 @@ export function FleetPanel({
     }
     setEditId(null);
     setReg("");
+    setChassis("");
     setVname("");
     setOdo("0");
     setSeats("");
@@ -970,6 +997,7 @@ export function FleetPanel({
   function beginEditVehicle(v: FleetVehicle) {
     setEditId(v.id);
     setReg(v.registrationNo);
+    setChassis(v.chassisNo || "");
     setVname(v.name);
     setFuelType(v.fuelType === "cng" || v.fuelType === "petrol" ? v.fuelType : "diesel");
     setOdo(String(v.odometerKm));
@@ -995,6 +1023,7 @@ export function FleetPanel({
       render: (v) => <span className="font-semibold text-[var(--brand-deep)]">{v.registrationNo}</span>,
     },
     { key: "name", header: "Name", value: (v) => v.name || "—", sortable: true },
+    { key: "chassis", header: "Chassis no.", value: (v) => v.chassisNo || "—", sortable: true },
     { key: "fuel", header: "Fuel", value: (v) => v.fuelType, sortable: true },
     { key: "status", header: "Status", value: (v) => v.status, sortable: true },
     {
@@ -1026,6 +1055,30 @@ export function FleetPanel({
               value={reg}
               onChange={(e) => setReg(e.target.value)}
             />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block text-[11px] text-[var(--muted)]">
+              Chassis no. (VIN)
+            </span>
+            <input
+              className="field !py-1.5 uppercase"
+              value={chassis}
+              maxLength={24}
+              placeholder="17 characters, from the RC"
+              autoCapitalize="characters"
+              spellCheck={false}
+              onChange={(e) => setChassis(e.target.value.toUpperCase())}
+            />
+            {chassisWarn ? (
+              <span className="mt-1 block text-[10px] text-[var(--warning)]">
+                {chassisWarn}
+              </span>
+            ) : (
+              <span className="mt-1 block text-[10px] text-[var(--muted)]">
+                Fleet Edge tracks vehicles by this number. Keep the number
+                plate in Registration.
+              </span>
+            )}
           </label>
           <label className="text-sm">
             <span className="mb-1 block text-[11px] text-[var(--muted)]">
@@ -1204,17 +1257,53 @@ function Vehicle360({
   vehicle: FleetVehicle;
   masters: MastersState | null;
 }) {
-  const tco = useMemo(
-    () => vehicleTcoPaise(vehicle.id, state),
-    [state, vehicle.id],
-  );
+  // Fuel, papers and loans live on the server (fuel register, vehicle
+  // documents, Ledger v2) — the desk's copies are retired or were never
+  // saved. A failed read says so; it is never shown as "none".
+  const [costs, setCosts] = useState<VehicleCosts | null>(null);
+  const [costsError, setCostsError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetchVehicleCosts()
+      .then((c) => {
+        if (live) {
+          setCosts(c);
+          setCostsError(null);
+        }
+      })
+      .catch((e: unknown) => {
+        if (live) setCostsError(e instanceof Error ? e.message : "could not be read");
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
 
-  const fuels = state.fuelRefillLogs
-    .filter((l) => l.vehicleId === vehicle.id)
-    .slice(0, 8);
+  const tco = useMemo(
+    () =>
+      costs
+        ? vehicleTco({
+            vehicleId: vehicle.id,
+            fills: costs.fills,
+            docs: costs.docs,
+            loans: costs.loans,
+            jobsPaise: completedJobsPaise(vehicle.id, state),
+          })
+        : null,
+    [costs, state, vehicle.id],
+  );
+  const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+  const papers = costs?.docs ? vehiclePapers(costs.docs, vehicle.id) : null;
+  const fuels = costs?.fills ? recentFills(costs.fills, vehicle.id, 8) : null;
   const jobs = state.serviceJobCards
     .filter((j) => j.vehicleId === vehicle.id)
     .slice(0, 6);
+  const loading = !costs && !costsError;
+  const unread = (what: string) => (
+    <p className="text-[11px] text-[var(--warning)]">
+      {loading ? "Loading…" : `${what} could not be read${costsError ? ` — ${costsError}` : ""}`}
+    </p>
+  );
 
   return (
     <div className="mt-2 space-y-3 text-sm">
@@ -1223,8 +1312,18 @@ function Vehicle360({
           {vehicle.registrationNo} · {vehicle.name}
         </div>
         <div className="text-[11px] text-[var(--muted)]">
-          TCO {formatInr(tco.total)} (fuel {formatInr(tco.fuel)} · EMI{" "}
-          {formatInr(tco.emi)} · jobs {formatInr(tco.jobs)})
+          {tco ? (
+            <>
+              TCO {tcoTotalText(tco, formatInr)} (fuel {tcoPartText(tco.fuel, formatInr)} · EMI{" "}
+              {tcoPartText(tco.emiPrincipal, formatInr)} · interest {tcoPartText(tco.interest, formatInr)} · insurance{" "}
+              {tcoPartText(tco.insurance, formatInr)} · papers {tcoPartText(tco.papers, formatInr)} · jobs {tcoPartText(tco.jobs, formatInr)})
+              {tco.emiPrincipal.note ? <span className="block">EMI: {tco.emiPrincipal.note}</span> : null}
+            </>
+          ) : loading ? (
+            "TCO loading…"
+          ) : (
+            `TCO unknown — ${costsError ?? "could not be read"}`
+          )}
         </div>
         {vehicle.driverName || vehicle.driverMobile ? (
           <div className="mt-1 text-[11px] text-[var(--muted)]">
@@ -1235,17 +1334,23 @@ function Vehicle360({
       </div>
       <div>
         <div className="text-[11px] font-bold uppercase text-[var(--muted)]">
-          Compliance
+          Papers
         </div>
-        {vehicle.compliance.length === 0 ? (
-          <p className="text-[11px] text-[var(--muted)]">None recorded</p>
+        {!papers ? (
+          unread("Vehicle papers")
+        ) : papers.length === 0 ? (
+          <p className="text-[11px] text-[var(--muted)]">None recorded (Compliance tab)</p>
         ) : (
           <ul className="text-[11px]">
-            {vehicle.compliance.map((c) => (
-              <li key={c.id}>
-                {c.certType} · exp {c.expiryDate}
-              </li>
-            ))}
+            {papers.map((p) => {
+              const s = expiryStatus(p.expiresOn, today);
+              return (
+                <li key={p.doc.id}>
+                  {p.label} · exp {p.expiresOn || "no date"}
+                  {s.status === "expired" ? " · expired" : s.status === "due" ? ` · due in ${s.daysLeft} d` : ""}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -1253,14 +1358,19 @@ function Vehicle360({
         <div className="text-[11px] font-bold uppercase text-[var(--muted)]">
           Recent fuel
         </div>
-        <ul className="text-[11px]">
-          {fuels.map((f) => (
-            <li key={f.id}>
-              {f.filledAt.slice(0, 10)} · {f.qty} · {formatInr(f.amountPaise)}
-              {f.anomaly ? " · anomaly" : ""}
-            </li>
-          ))}
-        </ul>
+        {!fuels ? (
+          unread("The fuel register")
+        ) : fuels.length === 0 ? (
+          <p className="text-[11px] text-[var(--muted)]">No fills in the fuel register</p>
+        ) : (
+          <ul className="text-[11px]">
+            {fuels.map((f) => (
+              <li key={f.id} className={f.voided ? "line-through opacity-60" : undefined}>
+                {f.fillDate} · {quantityWithUnit(f.quantity, f.unit)} · {formatInr(f.amountPaise)} · {f.status.label}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
       <div>
         <div className="text-[11px] font-bold uppercase text-[var(--muted)]">
@@ -1270,243 +1380,6 @@ function Vehicle360({
           {jobs.map((j) => (
             <li key={j.id}>
               {j.title} · {j.status} · {formatInr(j.laborPaise + j.partsPaise)}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
-}
-
-export function FuelPanel({
-  state,
-  onRefresh,
-  onFlash,
-  onError,
-}: {
-  state: TransportState;
-  onRefresh: () => void;
-  onFlash: (m: string) => void;
-  onError: (m: string) => void;
-}) {
-  const [vehicleId, setVehicleId] = useState("");
-  const [odo, setOdo] = useState("");
-  const [qty, setQty] = useState("");
-  const [amount, setAmount] = useState("");
-  const [dealerId, setDealerId] = useState("");
-  const [source, setSource] = useState<"dealer_pump" | "depot_stock">(
-    "dealer_pump",
-  );
-  const [locationId, setLocationId] = useState("");
-  const [purchaseQty, setPurchaseQty] = useState("");
-  const [purchaseRate, setPurchaseRate] = useState("");
-
-  return (
-    <div className="mt-4 grid gap-4 lg:grid-cols-2">
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-          Log refill
-        </h2>
-        <div className="mt-3 grid gap-2">
-          <select
-            className="field !py-1.5"
-            value={vehicleId}
-            onChange={(e) => setVehicleId(e.target.value)}
-          >
-            <option value="">Vehicle…</option>
-            {state.vehicles
-              .filter((v) => v.isActive)
-              .map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.registrationNo}
-                </option>
-              ))}
-          </select>
-          <select
-            className="field !py-1.5"
-            value={source}
-            onChange={(e) =>
-              setSource(e.target.value as "dealer_pump" | "depot_stock")
-            }
-          >
-            <option value="dealer_pump">Pump (Mode B)</option>
-            <option value="depot_stock">Depot stock (Mode A)</option>
-          </select>
-          {source === "depot_stock" ? (
-            <select
-              className="field !py-1.5"
-              value={locationId}
-              onChange={(e) => setLocationId(e.target.value)}
-            >
-              <option value="">Depot…</option>
-              {state.fuelStockLocations.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name} ({l.qtyOnHand})
-                </option>
-              ))}
-            </select>
-          ) : (
-            <select
-              className="field !py-1.5"
-              value={dealerId}
-              onChange={(e) => setDealerId(e.target.value)}
-            >
-              <option value="">Dealer…</option>
-              {state.dealers
-                .filter((d) => d.type === "fuel_dealer")
-                .map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
-                  </option>
-                ))}
-            </select>
-          )}
-          <input
-            className="field !py-1.5"
-            placeholder="Odometer km"
-            value={odo}
-            onChange={(e) => setOdo(e.target.value)}
-          />
-          <input
-            className="field !py-1.5"
-            placeholder="Qty"
-            value={qty}
-            onChange={(e) => setQty(e.target.value)}
-          />
-          <input
-            className="field !py-1.5"
-            placeholder="Amount ₹"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-          />
-          <button
-            type="button"
-            className="rounded-lg bg-[var(--primary)] px-3 py-2 text-sm font-bold text-[var(--primary-foreground)]"
-            onClick={() => {
-              const r = recordFuelRefill({
-                vehicleId,
-                filledAt: new Date().toISOString(),
-                odometerKm: Number(odo) || 0,
-                qty: Number(qty) || 0,
-                amountPaise: Math.round(Number(amount || "0") * 100),
-                source,
-                dealerId,
-                locationId,
-                paymentStatus:
-                  source === "depot_stock"
-                    ? "adjusted_from_stock"
-                    : "on_account",
-              });
-              if (!r.ok) {
-                onError(r.error);
-                return;
-              }
-              onRefresh();
-              onFlash(
-                r.log.anomaly
-                  ? "Refill logged (mileage anomaly)"
-                  : "Refill logged",
-              );
-            }}
-          >
-            Save refill
-          </button>
-        </div>
-        <ul className="mt-4 max-h-64 divide-y overflow-y-auto text-[11px]">
-          {state.fuelRefillLogs.slice(0, 20).map((l) => (
-            <li key={l.id} className="py-1.5">
-              {l.filledAt.slice(0, 16)} ·{" "}
-              {state.vehicles.find((v) => v.id === l.vehicleId)?.registrationNo}{" "}
-              · {l.qty} · {formatInr(l.amountPaise)}
-              {l.anomaly ? " · ANOMALY" : ""}
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
-        <h2 className="text-sm font-bold text-[var(--brand-deep)]">
-          Depot purchase (Mode A)
-        </h2>
-        <div className="mt-3 grid gap-2">
-          <select
-            className="field !py-1.5"
-            value={locationId}
-            onChange={(e) => setLocationId(e.target.value)}
-          >
-            <option value="">Location…</option>
-            {state.fuelStockLocations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="field !py-1.5"
-            value={dealerId}
-            onChange={(e) => setDealerId(e.target.value)}
-          >
-            <option value="">Dealer…</option>
-            {state.dealers.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-          <input
-            className="field !py-1.5"
-            placeholder="Qty"
-            value={purchaseQty}
-            onChange={(e) => setPurchaseQty(e.target.value)}
-          />
-          <input
-            className="field !py-1.5"
-            placeholder="Rate ₹/unit"
-            value={purchaseRate}
-            onChange={(e) => setPurchaseRate(e.target.value)}
-          />
-          <button
-            type="button"
-            className="rounded-lg border px-3 py-2 text-sm font-semibold"
-            onClick={() => {
-              let locId = locationId;
-              if (!locId && state.fuelStockLocations.length === 0) {
-                const loc = upsertFuelStockLocation({
-                  name: "Campus diesel depot",
-                  fuelType: "diesel",
-                  qtyOnHand: 0,
-                });
-                if (!loc.ok) {
-                  onError(loc.error);
-                  return;
-                }
-                locId = loc.location.id;
-                setLocationId(locId);
-              }
-              const r = recordFuelPurchase({
-                locationId: locId || state.fuelStockLocations[0]?.id || "",
-                dealerId,
-                purchasedOn: new Date().toISOString().slice(0, 10),
-                qty: Number(purchaseQty) || 0,
-                ratePaise: Math.round(Number(purchaseRate || "0") * 100),
-              });
-              if (!r.ok) {
-                onError(r.error);
-                return;
-              }
-              onRefresh();
-              onFlash("Fuel purchased into stock");
-            }}
-          >
-            Post purchase
-          </button>
-        </div>
-        <ul className="mt-4 text-sm">
-          {state.fuelStockLocations.map((l) => (
-            <li key={l.id} className="py-1">
-              {l.name}: <strong>{l.qtyOnHand}</strong> {l.fuelType}
-              {l.qtyOnHand <= l.minAlert ? (
-                <span className="ml-2 text-[var(--tone-coral)]">LOW</span>
-              ) : null}
             </li>
           ))}
         </ul>

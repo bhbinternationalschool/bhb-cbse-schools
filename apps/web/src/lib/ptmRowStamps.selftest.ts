@@ -149,6 +149,10 @@ void (async () => {
   const slotsRoute = read("../app/api/v1/staff/ptm/slots/route.ts");
   assert.ok(/only: \{ slots: created\.map\(\(x\) => x\.id\) \}/.test(slotsRoute));
   assert.ok(/deletes: \{ ptm_desk_slots: \[slotId\] \}/.test(slotsRoute), "a teacher's slot removal is a named delete");
+  assert.ok(
+    /\{ only: \{ events: \[event\.id\] \} \}/.test(read("../app/api/v1/staff/ptm/events/route.ts")),
+    "a PTM scheduled from the app writes only its own event row",
+  );
 
   console.log("ptmRowStamps.selftest: all assertions passed");
 })().catch((e) => {

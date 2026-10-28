@@ -2,6 +2,7 @@
  * Trust remote sync — jsonb blob on trust_state + normalized trust_desk_slices.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadTrust,
@@ -42,6 +43,8 @@ export function resetTrustPersistenceCache() {
 }
 
 export function scheduleTrustSync(state: TrustState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureTrustHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushTrustRemoteServer(state));
     return;

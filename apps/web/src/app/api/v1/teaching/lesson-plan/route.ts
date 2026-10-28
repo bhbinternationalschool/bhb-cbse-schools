@@ -8,17 +8,15 @@ import {
 import { assertClassSubjectScope } from "@/lib/api/v1/staffScope";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import {
-  ensureTeachingHydratedServer,
-  pushTeachingRemoteServer,
-} from "@/lib/teachingPersistence";
+  readTeachingStateServer,
+  saveTeachingStateServer,
+} from "@/lib/api/v1/teachingServer.server";
 import {
   addResourceLink,
-  loadTeaching,
   normalizeLessonPlanSource,
   removeLessonPlan,
   removeResourceLink,
   upsertLessonPlan,
-  writeTeachingLocalRaw,
   type LessonPlan,
   type ResourceKind,
   type TeachingState,
@@ -83,8 +81,7 @@ export async function POST(request: Request) {
     const staffId = ctx.session.staffId || "";
 
     await ensureSchoolMirrorHydrated();
-    await ensureTeachingHydratedServer();
-    const state = loadTeaching();
+    const state = await readTeachingStateServer();
 
     const planId = String(body.id || "");
     const existing: LessonPlan | null = planId
@@ -185,8 +182,7 @@ export async function POST(request: Request) {
       summary = `Removed a link from lesson plan "${title}"`;
     }
 
-    writeTeachingLocalRaw(next);
-    const push = await pushTeachingRemoteServer(next, { dropLessonPlanIds: drop });
+    const push = await saveTeachingStateServer(next, { dropLessonPlanIds: drop });
     if (!push.ok) {
       console.warn("[teaching-v1] lesson plan push failed", push.error);
       throw new ApiError(

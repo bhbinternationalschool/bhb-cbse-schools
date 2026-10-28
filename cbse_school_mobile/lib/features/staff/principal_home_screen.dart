@@ -4,36 +4,55 @@ import "../../core/popups/app_popups.dart";
 import "../../core/ui/running_strip.dart";
 import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
+import "../../core/ui/stale_banner.dart";
 import "../../core/theme/app_theme.dart";
 import "command_bar.dart";
 import "../modules/homework_screen.dart";
 import "../modules/module_shell.dart";
+import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "../modules/bus_routes_screen.dart";
 import "transport_requests_screen.dart";
+import "bus_register_screen.dart";
+import "vehicle_logbook_screen.dart";
 import "attendance_screen.dart";
 import "broadcast_screen.dart";
+import "class_gallery_screen.dart";
+import "class_message_screen.dart";
+import "ptm_teacher_screen.dart";
 import "admission_leads_screen.dart";
 import "documents_screen.dart";
 import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
 import "my_collections_screen.dart";
-import "survey_screen.dart";
+import "survey_day_screen.dart";
 import "visitor_gate_screen.dart";
+import "home_groups.dart";
 import "leave_approvals_screen.dart";
+import "my_attendance_calendar_screen.dart";
+import "my_advances_screen.dart";
+import "my_profile_screen.dart";
+import "my_class_screen.dart";
+import "month_register_screen.dart";
+import "payslips_screen.dart";
+import "staff_pay_overview_screens.dart";
 import "marks_screen.dart";
+import "teacher_ai_tools_screen.dart";
 import "staff_complaints_screen.dart";
 import "staff_leave_screen.dart";
 import "staff_roster_screen.dart";
+import "staff_activity_screen.dart";
 import "student_leave_queue_screen.dart";
 import "timetable_screen.dart";
 import "waiting_card.dart";
 import "../modules/chat_inbox_screen.dart";
+import "../modules/school_chat_screen.dart";
 import "principal_lists.dart";
 import "section_picker.dart";
 import "self_attendance_screen.dart";
 import "students_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/push/notification_bell.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -72,9 +91,38 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
   bool _deepLinkDone = false;
   StaffFeatureSet _features = const StaffFeatureSet.empty();
 
+  /// data-layer 4.4: set when the server could not be reached and the home
+  /// shows the copy saved at this time; the banner says so.
+  DateTime? _staleSince;
+  final _clock = RefreshClock();
+  late final _resume = ResumeWatcher(_onResume);
+  bool _featuresFresh = false;
+  bool _staffFresh = false;
+
   Future<void> _push(Widget screen) async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
-    if (mounted) setState(() => _refresh += 1);
+    final changed = await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => screen));
+    // The waiting counts are re-read only when that screen decided something.
+    if (mounted && changed == true) setState(() => _refresh += 1);
+  }
+
+  /// Back in front after 2 minutes or more: re-read the snapshot, tiles and
+  /// class list, so a Masters change shows without a restart.
+  void _onResume() {
+    if (mounted && _clock.isStale) _load();
+  }
+
+  /// Pull-to-refresh also re-reads the waiting counts.
+  Future<void> _pullRefresh() async {
+    setState(() => _refresh += 1);
+    await _load();
+  }
+
+  @override
+  void dispose() {
+    _resume.detach();
+    super.dispose();
   }
 
   void _openWaiting(String kind) {
@@ -94,7 +142,14 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
     final raw = widget.openRoute;
     if (raw == null || _deepLinkDone) return;
     _deepLinkDone = true;
+    _openRoute(raw);
+  }
+
+  /// A deep link: a tapped push, or an item of the notifications list.
+  void _openRoute(String raw) {
     switch (Uri.tryParse(raw)?.path ?? raw) {
+      case "/notifications":
+        openNotifications(context, widget.api, _openRoute);
       case "/leave-approvals":
         _push(LeaveApprovalsScreen(api: widget.api));
       case "/student-leave":
@@ -107,12 +162,26 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
         _push(StaffLeaveScreen(api: widget.api));
       case "/chat":
         _push(ChatInboxScreen(api: widget.api));
+      case "/school-chat":
+        _push(staffSchoolChat(widget.api));
       case "/notices":
-        _push(NoticesScreen(api: widget.api));
+        // A tapped broadcast opens in full; otherwise the notices list.
+        _push(noticesScreenForRoute(widget.api, Uri.tryParse(raw)));
       case "/attendance":
         _markAttendance();
       case "/homework":
         _postHomework();
+      case "/profile":
+        _openProfile();
+      case "/payslips":
+        _push(PayslipsScreen(api: widget.api));
+      case "/my-attendance":
+        _push(
+          MyAttendanceCalendarScreen(
+            api: widget.api,
+            initialMonth: Uri.tryParse(raw)?.queryParameters["month"],
+          ),
+        );
     }
   }
 
@@ -200,35 +269,78 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) AppPopups.maybeShow(context, widget.api);
     });
-    _load();
+    _resume.attach();
+    _load(first: true);
   }
 
-  Future<void> _load() async {
+  /// [first]: the app just opened this home — paint the saved copy at once.
+  Future<void> _load({bool first = false}) async {
     setState(() => _error = null);
+    final name = await widget.api.guardianName();
+    if (mounted && _name == null) setState(() => _name = name);
+    if (first) {
+      // Last session's tiles and header with last session's snapshot —
+      // never over a fresh answer.
+      widget.api.cachedStaffFeatures().then((c) {
+        if (c != null && mounted && !_featuresFresh) {
+          setState(() => _features = c.value);
+        }
+      });
+      widget.api.cachedStaffSummary().then((c) {
+        if (c != null && mounted && !_staffFresh) {
+          setState(() => _staff = c.value);
+        }
+      });
+    }
+    var ok = false;
+    await loadCachedThenFresh<PrincipalSnapshot>(
+      peek: first ? widget.api.cachedPrincipalSnapshot : () async => null,
+      fetch: widget.api.fetchPrincipalSnapshot,
+      onCached: (c) {
+        if (mounted) setState(() => _snap = c.value);
+      },
+      onFresh: (snap) {
+        ok = true;
+        _clock.markFresh();
+        if (mounted) {
+          setState(() {
+            _snap = snap;
+            _staleSince = null;
+          });
+        }
+      },
+      onError: (e, since) {
+        if (!mounted) return;
+        setState(() {
+          if (_snap != null) {
+            _staleSince = since ?? _clock.lastFresh ?? DateTime.now();
+          } else {
+            _error = e is ApiException
+                ? e.message
+                : "Could not reach the school server.";
+          }
+        });
+      },
+    );
+    if (!mounted || _snap == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _consumeDeepLink();
+    });
+    if (!ok) return;
     try {
-      final name = await widget.api.guardianName();
-      final snap = await widget.api.fetchPrincipalSnapshot();
-      if (!mounted) return;
-      setState(() {
-        _snap = snap;
-        _name = name;
-        _refresh += 1;
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _consumeDeepLink();
-      });
-      try {
-        final f = await widget.api.fetchStaffFeatures();
-        if (mounted) setState(() => _features = f);
-      } catch (_) {
-        /* keep whatever we had */
-      }
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      final f = await widget.api.fetchStaffFeatures();
+      _featuresFresh = true;
+      if (mounted) setState(() => _features = f);
     } catch (_) {
-      if (mounted) {
-        setState(() => _error = "Could not reach the school server.");
-      }
+      /* keep whatever we had */
+    }
+    // The header photo (and the class list the pickers need).
+    try {
+      final staff = await widget.api.fetchStaffSummary();
+      _staffFresh = true;
+      if (mounted) setState(() => _staff = staff);
+    } catch (_) {
+      /* initials, and the pickers fetch it themselves */
     }
   }
 
@@ -236,6 +348,414 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
     await widget.api.signOut();
     if (mounted) widget.onLogout();
   }
+
+  Future<void> _openProfile() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MyProfileScreen(api: widget.api, onSignOut: _signOut),
+      ),
+    );
+    // A new photo shows in the header straight away.
+    try {
+      final staff = await widget.api.fetchStaffSummary();
+      if (mounted) setState(() => _staff = staff);
+    } catch (_) {
+      /* keep the old one */
+    }
+  }
+
+  /// Every action tile with the feature whose heading it sits under. The
+  /// gating is unchanged: only the tiles that were feature-gated before are
+  /// gated now (plus Message my classes and PTM, 13 Oct 2026); the others
+  /// were always shown.
+  List<(String, Widget)> _actionTiles() => [
+    (
+      "transport_requests",
+      _Action(
+        icon: Icons.directions_bus_outlined,
+        label: "Transport requests",
+        tone: ModuleTone.pink,
+        onTap: () => _push(TransportRequestsScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "broadcast",
+      _Action(
+        icon: Icons.campaign_outlined,
+        label: "Broadcast",
+        tone: ModuleTone.coral,
+        onTap: () => _push(BroadcastScreen(api: widget.api)),
+      ),
+    ),
+    if (_features.has("class_broadcast"))
+      (
+        "class_broadcast",
+        _Action(
+          icon: Icons.forum_outlined,
+          label: "Message my classes",
+          tone: ModuleTone.coral,
+          onTap: () => _push(ClassMessageScreen(api: widget.api)),
+        ),
+      ),
+    // The school's photos: post to the whole school or any class, and
+    // decide on what the AI check held (15 Oct 2026 — the principal had no
+    // way in on the phone).
+    if (_features.has("class_gallery"))
+      (
+        "class_gallery",
+        _Action(
+          icon: Icons.photo_library_outlined,
+          label: "Gallery",
+          tone: ModuleTone.pink,
+          onTap: () => _push(ClassGalleryScreen(api: widget.api)),
+        ),
+      ),
+    if (_features.has("ptm_meet"))
+      (
+        "ptm_meet",
+        _Action(
+          icon: Icons.groups_outlined,
+          label: "PTM",
+          tone: ModuleTone.purple,
+          onTap: () => _push(PtmTeacherScreen(api: widget.api)),
+        ),
+      ),
+    (
+      "staff_leave_approve",
+      _Action(
+        icon: Icons.event_busy_outlined,
+        label: "Staff leave",
+        tone: ModuleTone.amber,
+        onTap: () => _push(LeaveApprovalsScreen(api: widget.api)),
+      ),
+    ),
+    (
+      kStaffPayslipsAllFeature,
+      _Action(
+        icon: Icons.receipt_long_outlined,
+        label: context.l10n.pmStaffPayslipsTitle,
+        tone: ModuleTone.gray,
+        onTap: () => _push(StaffPayrollOverviewScreen(api: widget.api)),
+      ),
+    ),
+    (
+      kStaffAdvancesAllFeature,
+      _Action(
+        icon: Icons.account_balance_wallet_outlined,
+        label: context.l10n.pmStaffAdvancesTitle,
+        tone: ModuleTone.amber,
+        onTap: () => _push(StaffAdvancesOverviewScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "student_leave_decide",
+      _Action(
+        icon: Icons.event_outlined,
+        label: "Leave requests",
+        tone: ModuleTone.blue,
+        onTap: () => _push(StudentLeaveQueueScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "complaints_handle",
+      _Action(
+        icon: Icons.report_problem_outlined,
+        label: "Complaints",
+        tone: ModuleTone.coral,
+        onTap: () => _push(StaffComplaintsScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "documents_verify",
+      _Action(
+        icon: Icons.folder_open_outlined,
+        label: "Documents",
+        tone: ModuleTone.purple,
+        onTap: () => _push(DocumentsScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "marks_entry",
+      _Action(
+        icon: Icons.grading_outlined,
+        label: "Marks",
+        tone: ModuleTone.amber,
+        onTap: () async {
+          var staff = _staff;
+          staff ??= await widget.api.fetchStaffSummary();
+          if (!mounted) return;
+          _push(
+            MarksScreen(
+              api: widget.api,
+              classes: staff.classes,
+              canScan: _features.has("teacher_ai_tools"),
+            ),
+          );
+        },
+      ),
+    ),
+    if (_features.has("teacher_ai_tools"))
+      (
+        "teacher_ai_tools",
+        _Action(
+          icon: Icons.auto_awesome_outlined,
+          label: "AI tools",
+          tone: ModuleTone.amber,
+          onTap: () => _push(
+            TeacherAiToolsScreen(
+              api: widget.api,
+              features: _features,
+              classes: _staff?.classes,
+            ),
+          ),
+        ),
+      ),
+    (
+      "timetable_view",
+      _Action(
+        icon: Icons.calendar_view_week_outlined,
+        label: "Timetable",
+        tone: ModuleTone.blue,
+        onTap: () => _push(TimetableScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "messages",
+      _Action(
+        icon: Icons.chat_bubble_outline,
+        label: "Messages",
+        tone: ModuleTone.teal,
+        onTap: () => _push(staffSchoolChat(widget.api)),
+      ),
+    ),
+    if (_features.has("fee_take"))
+      (
+        "fee_take",
+        _Action(
+          icon: Icons.point_of_sale_outlined,
+          label: "Collect fees",
+          tone: ModuleTone.green,
+          onTap: () => _push(FeeCounterScreen(api: widget.api)),
+        ),
+      ),
+    if (_features.has("fee_collections"))
+      (
+        "fee_collections",
+        _Action(
+          icon: Icons.account_balance_wallet_outlined,
+          label: "My collections",
+          tone: ModuleTone.teal,
+          onTap: () => _push(MyCollectionsScreen(api: widget.api)),
+        ),
+      ),
+    if (_features.has("admission_leads"))
+      (
+        "admission_leads",
+        _Action(
+          icon: Icons.how_to_reg_outlined,
+          label: "Admission leads",
+          tone: ModuleTone.blue,
+          onTap: () => _push(AdmissionLeadsScreen(api: widget.api)),
+        ),
+      ),
+    if (_features.has("field_survey"))
+      (
+        "field_survey",
+        _Action(
+          icon: Icons.map_outlined,
+          label: "Field survey",
+          tone: ModuleTone.amber,
+          onTap: () => _push(SurveyDayScreen(api: widget.api)),
+        ),
+      ),
+    if (_features.has("visitor_gate"))
+      (
+        "visitor_gate",
+        _Action(
+          icon: Icons.meeting_room_outlined,
+          label: "Visitor gate",
+          tone: ModuleTone.purple,
+          onTap: () => _push(VisitorGateScreen(api: widget.api)),
+        ),
+      ),
+    (
+      "staff_roster",
+      _Action(
+        icon: Icons.contact_phone_outlined,
+        label: "Staff contacts",
+        tone: ModuleTone.green,
+        onTap: () => _push(StaffRosterScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "my_leave",
+      _Action(
+        icon: Icons.beach_access_outlined,
+        label: "My leave",
+        tone: ModuleTone.gray,
+        onTap: () => _push(StaffLeaveScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "attendance_mark",
+      _Action(
+        icon: Icons.fact_check_outlined,
+        label: "Mark attendance",
+        tone: ModuleTone.teal,
+        onTap: _markAttendance,
+      ),
+    ),
+    (
+      "homework_post",
+      _Action(
+        icon: Icons.menu_book_outlined,
+        label: "Post homework",
+        tone: ModuleTone.blue,
+        onTap: _postHomework,
+      ),
+    ),
+    (
+      "students_view",
+      _Action(
+        icon: Icons.groups_outlined,
+        label: "Students",
+        tone: ModuleTone.blue,
+        onTap: _openStudents,
+      ),
+    ),
+    (
+      "students_view",
+      _Action(
+        icon: Icons.diversity_3_outlined,
+        label: "Class records",
+        tone: ModuleTone.purple,
+        onTap: () => _push(MyClassScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "attendance_mark",
+      _Action(
+        icon: Icons.calendar_view_month_outlined,
+        label: "Month register",
+        tone: ModuleTone.teal,
+        onTap: () => _push(MonthRegisterScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "fee_defaulters",
+      _Action(
+        icon: Icons.currency_rupee,
+        label: "Fee defaulters",
+        tone: ModuleTone.coral,
+        onTap: () => _push(
+          FeeDefaultersScreen(
+            api: widget.api,
+            canCollect: _features.has("fee_take"),
+          ),
+        ),
+      ),
+    ),
+    (
+      "school_snapshot",
+      _Action(
+        icon: Icons.badge_outlined,
+        label: "Staff today",
+        tone: ModuleTone.teal,
+        // What staff did today; attendance is one tap further in.
+        onTap: () => _push(StaffActivityTodayScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "admission_leads",
+      _Action(
+        icon: Icons.person_add_alt_outlined,
+        label: "Admissions",
+        tone: ModuleTone.blue,
+        onTap: () => _push(FollowUpsScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "notices",
+      _Action(
+        icon: Icons.newspaper_outlined,
+        label: "Notices",
+        tone: ModuleTone.coral,
+        onTap: () => _push(NoticesScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "route_manifest",
+      _Action(
+        icon: Icons.directions_bus_outlined,
+        label: "Transport",
+        tone: ModuleTone.blue,
+        onTap: () => _push(BusRoutesScreen(api: widget.api, live: true)),
+      ),
+    ),
+    (
+      "route_manifest",
+      _Action(
+        icon: Icons.fact_check_outlined,
+        label: "Bus register",
+        tone: ModuleTone.blue,
+        onTap: () => _push(BusRegisterScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "route_manifest",
+      _Action(
+        icon: Icons.local_gas_station_outlined,
+        label: "Log book",
+        tone: ModuleTone.amber,
+        onTap: () => _push(VehicleLogbookScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "gps_punch",
+      _Action(
+        icon: Icons.where_to_vote_outlined,
+        label: "My GPS punch",
+        tone: ModuleTone.teal,
+        onTap: () => _push(SelfAttendanceScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "my_payslips",
+      _Action(
+        icon: Icons.receipt_long_outlined,
+        label: "Payslips · वेतन पर्ची",
+        tone: ModuleTone.gray,
+        onTap: () => _push(PayslipsScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "my_advances",
+      _Action(
+        icon: Icons.account_balance_wallet_outlined,
+        label: "My advances",
+        tone: ModuleTone.amber,
+        onTap: () => _push(MyAdvancesScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "my_attendance",
+      _Action(
+        icon: Icons.calendar_month_outlined,
+        label: "My attendance",
+        tone: ModuleTone.teal,
+        onTap: () => _push(MyAttendanceCalendarScreen(api: widget.api)),
+      ),
+    ),
+    (
+      "my_profile",
+      _Action(
+        icon: Icons.badge_outlined,
+        label: "My profile",
+        tone: ModuleTone.teal,
+        onTap: _openProfile,
+      ),
+    ),
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -272,7 +792,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
 
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: _pullRefresh,
         color: AppColors.primary,
         child: ListView(
           padding: EdgeInsets.zero,
@@ -293,6 +813,14 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
               ),
               child: Row(
                 children: [
+                  StaffAvatar(
+                    key: ValueKey(_staff?.photoUrl ?? ""),
+                    api: widget.api,
+                    name: _name ?? _staff?.fullName ?? "",
+                    photoUrl: _staff?.photoUrl ?? "",
+                    onTap: _openProfile,
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -319,6 +847,10 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                       ],
                     ),
                   ),
+                  NotificationBellButton(
+                    api: widget.api,
+                    onOpenRoute: _openRoute,
+                  ),
                   const ScreenGuideButton(
                     guideId: "principal-home",
                     screenLabel: "Home",
@@ -332,6 +864,7 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
               ),
             ),
             // Notices and news scrolling across, as on the web ERP.
+            StaleBanner(since: _staleSince, onRetry: _load),
             RunningStrip(
               api: widget.api,
               onOpen: () => _push(NoticesScreen(api: widget.api)),
@@ -358,6 +891,17 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         label: "Collected today",
                         value: formatInrPaise(snap.todayCollectionPaise),
                         color: AppColors.success,
+                        // Today's receipts, every cashier, this session —
+                        // the same receipts the figure adds up.
+                        onTap: _features.has("fee_collections")
+                            ? () => _push(
+                                MyCollectionsScreen(
+                                  api: widget.api,
+                                  schoolWide: true,
+                                  academicYearCode: snap.academicYearCode,
+                                ),
+                              )
+                            : null,
                       ),
                       const SizedBox(width: 8),
                       _Stat(
@@ -526,27 +1070,54 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         label: "Active staff",
                         value: "${snap.staffActive}",
                         color: AppColors.primary,
-                        onTap: () =>
-                            _push(StaffAttendanceTodayScreen(api: widget.api)),
+                        // The Staff list, a name → their profile.
+                        onTap: _features.has("staff_roster")
+                            ? () => _push(
+                                StaffRosterScreen(
+                                  api: widget.api,
+                                  title: context.l10n.hcStaffList,
+                                ),
+                              )
+                            : null,
                       ),
                       const SizedBox(width: 8),
                       _Stat(
                         label: "Present today",
-                        value: "${snap.staffPresent}",
+                        value: snap.staffCountsKnown
+                            ? "${snap.staffPresent}"
+                            : "—",
                         color: AppColors.success,
-                        onTap: () =>
-                            _push(StaffAttendanceTodayScreen(api: widget.api)),
+                        onTap: () => _push(
+                          StaffAttendanceTodayScreen(
+                            api: widget.api,
+                            filter: StaffTodayFilter.present,
+                          ),
+                        ),
                       ),
                       const SizedBox(width: 8),
                       _Stat(
                         label: "Absent",
-                        value: "${snap.staffAbsent}",
+                        value: snap.staffCountsKnown
+                            ? "${snap.staffAbsent}"
+                            : "—",
                         color: AppColors.danger,
-                        onTap: () =>
-                            _push(StaffAttendanceTodayScreen(api: widget.api)),
+                        onTap: () => _push(
+                          StaffAttendanceTodayScreen(
+                            api: widget.api,
+                            filter: StaffTodayFilter.absent,
+                          ),
+                        ),
                       ),
                     ],
                   ),
+                  if (!snap.staffCountsKnown)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        context.l10n.hcStaffCountsNotLoaded,
+                        style: AppText.labelMediumMuted,
+                      ),
+                    ),
                   const SizedBox(height: 18),
                   const _SectionTitle("Admissions"),
                   Row(
@@ -587,197 +1158,23 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                       ),
                   ],
                   const SizedBox(height: 18),
-                  const _SectionTitle("Actions"),
-                  const SizedBox(height: 6),
-                  GridView.count(
-                    crossAxisCount: 3,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: 1.05,
-                    children: [
-                      _Action(
-                        icon: Icons.directions_bus_outlined,
-                        label: "Transport requests",
-                        tone: ModuleTone.pink,
-                        onTap: () =>
-                            _push(TransportRequestsScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.campaign_outlined,
-                        label: "Broadcast",
-                        tone: ModuleTone.coral,
-                        onTap: () => _push(BroadcastScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.event_busy_outlined,
-                        label: "Staff leave",
-                        tone: ModuleTone.amber,
-                        onTap: () =>
-                            _push(LeaveApprovalsScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.event_outlined,
-                        label: "Leave requests",
-                        tone: ModuleTone.blue,
-                        onTap: () =>
-                            _push(StudentLeaveQueueScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.report_problem_outlined,
-                        label: "Complaints",
-                        tone: ModuleTone.coral,
-                        onTap: () =>
-                            _push(StaffComplaintsScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.folder_open_outlined,
-                        label: "Documents",
-                        tone: ModuleTone.purple,
-                        onTap: () => _push(DocumentsScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.grading_outlined,
-                        label: "Marks",
-                        tone: ModuleTone.amber,
-                        onTap: () async {
-                          var staff = _staff;
-                          staff ??= await widget.api.fetchStaffSummary();
-                          if (!mounted) return;
-                          _push(
-                            MarksScreen(
-                              api: widget.api,
-                              classes: staff.classes,
-                            ),
-                          );
-                        },
-                      ),
-                      _Action(
-                        icon: Icons.calendar_view_week_outlined,
-                        label: "Timetable",
-                        tone: ModuleTone.blue,
-                        onTap: () => _push(TimetableScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.chat_bubble_outline,
-                        label: "Messages",
-                        tone: ModuleTone.teal,
-                        onTap: () => _push(ChatInboxScreen(api: widget.api)),
-                      ),
-                      if (_features.has("fee_take"))
-                        _Action(
-                          icon: Icons.point_of_sale_outlined,
-                          label: "Collect fees",
-                          tone: ModuleTone.green,
-                          onTap: () => _push(FeeCounterScreen(api: widget.api)),
-                        ),
-                      if (_features.has("fee_collections"))
-                        _Action(
-                          icon: Icons.account_balance_wallet_outlined,
-                          label: "My collections",
-                          tone: ModuleTone.teal,
-                          onTap: () =>
-                              _push(MyCollectionsScreen(api: widget.api)),
-                        ),
-                      if (_features.has("admission_leads"))
-                        _Action(
-                          icon: Icons.how_to_reg_outlined,
-                          label: "Admission leads",
-                          tone: ModuleTone.blue,
-                          onTap: () =>
-                              _push(AdmissionLeadsScreen(api: widget.api)),
-                        ),
-                      if (_features.has("field_survey"))
-                        _Action(
-                          icon: Icons.map_outlined,
-                          label: "Field survey",
-                          tone: ModuleTone.amber,
-                          onTap: () => _push(SurveyScreen(api: widget.api)),
-                        ),
-                      if (_features.has("visitor_gate"))
-                        _Action(
-                          icon: Icons.meeting_room_outlined,
-                          label: "Visitor gate",
-                          tone: ModuleTone.purple,
-                          onTap: () =>
-                              _push(VisitorGateScreen(api: widget.api)),
-                        ),
-                      _Action(
-                        icon: Icons.contact_phone_outlined,
-                        label: "Staff contacts",
-                        tone: ModuleTone.green,
-                        onTap: () => _push(StaffRosterScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.beach_access_outlined,
-                        label: "My leave",
-                        tone: ModuleTone.gray,
-                        onTap: () => _push(StaffLeaveScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.fact_check_outlined,
-                        label: "Mark attendance",
-                        tone: ModuleTone.teal,
-                        onTap: _markAttendance,
-                      ),
-                      _Action(
-                        icon: Icons.menu_book_outlined,
-                        label: "Post homework",
-                        tone: ModuleTone.blue,
-                        onTap: _postHomework,
-                      ),
-                      _Action(
-                        icon: Icons.groups_outlined,
-                        label: "Students",
-                        tone: ModuleTone.blue,
-                        onTap: _openStudents,
-                      ),
-                      _Action(
-                        icon: Icons.currency_rupee,
-                        label: "Fee defaulters",
-                        tone: ModuleTone.coral,
-                        onTap: () => _push(
-                          FeeDefaultersScreen(
-                            api: widget.api,
-                            canCollect: _features.has("fee_take"),
-                          ),
-                        ),
-                      ),
-                      _Action(
-                        icon: Icons.badge_outlined,
-                        label: "Staff today",
-                        tone: ModuleTone.teal,
-                        onTap: () =>
-                            _push(StaffAttendanceTodayScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.person_add_alt_outlined,
-                        label: "Admissions",
-                        tone: ModuleTone.blue,
-                        onTap: () => _push(FollowUpsScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.newspaper_outlined,
-                        label: "Notices",
-                        tone: ModuleTone.coral,
-                        onTap: () => _push(NoticesScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.directions_bus_outlined,
-                        label: "Transport",
-                        tone: ModuleTone.blue,
-                        onTap: () => _push(BusRoutesScreen(api: widget.api)),
-                      ),
-                      _Action(
-                        icon: Icons.where_to_vote_outlined,
-                        label: "My GPS punch",
-                        tone: ModuleTone.teal,
-                        onTap: () =>
-                            _push(SelfAttendanceScreen(api: widget.api)),
-                      ),
-                    ],
-                  ),
+                  // Actions under their headings, in the ERP's order.
+                  for (final (group, tiles) in groupStaffTiles(
+                    _actionTiles(),
+                    (t) => staffGroupOf(_features, t.$1),
+                    order: _features.groupOrder,
+                  )) ...[
+                    StaffGroupHeading(group),
+                    GridView.count(
+                      crossAxisCount: 3,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      mainAxisSpacing: 8,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 1.05,
+                      children: [for (final t in tiles) t.$2],
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Text(
                     context.l10n.figuresUpdateLiveFromTheSchool,

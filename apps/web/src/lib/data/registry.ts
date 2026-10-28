@@ -14,15 +14,52 @@
  *
  * Adding an entry here grants access through the generic API. Review it as a
  * permission change. A row must ALSO be added to `desk_writable_tables`
- * (migration 20260810010000) before writes reach the database — two
- * deliberate steps, in two systems, so neither can be done absent-mindedly.
+ * (migration 20260810010000; since data-layer 1.5 with the `sync_meta_table`
+ * it bumps) before writes reach the database — two deliberate steps, in two
+ * systems, so neither can be done absent-mindedly. A `slice` / `object`
+ * collection is limited instead by the RPCs' own list of the 16
+ * `*_desk_slices` tables (migration 20261014220000).
  */
 
 import type { RbacModule } from "@/lib/rbac";
 import type { ApprovalRule } from "@/lib/data/approvalGate";
+import { STAFF_ANSWER_REDACTED_PROFILE_KEYS } from "@/lib/staffProtectedKeys";
 
 /** Scope filters the repo will refuse to build a query without. */
 export type ScopeKey = "tenant_id" | "academic_year_code";
+
+/**
+ * Where a collection's records live (data-layer 1.5, rule R4).
+ *
+ *  - `rows` (the default): one table, one record per row; writes go through
+ *    `desk_write_guarded` (base = the row's `updated_at`).
+ *  - `slice`: the elements of one jsonb list in a `*_desk_slices` table;
+ *    each write is ONE element through `desk_slice_row_write`. `base` says
+ *    what a write's base is: `"slice"` — the slice's `updated_at`, shared by
+ *    every element (Masters, timetable); `"rev"` — the element's own `_rev`
+ *    (transport, trust, the desk-slice modules). `keyField` is the element's
+ *    key (`id` unless lib/deskSliceRegistry says otherwise).
+ *  - `object`: one object slice (Masters' schoolProfile, …), written whole
+ *    through `desk_slice_object_write`, base = the slice's `updated_at`.
+ */
+export type SliceSource = {
+  readonly table: string;
+  readonly key: string;
+  readonly keyField?: string;
+  readonly base: "slice" | "rev";
+};
+
+/**
+ * How a staff session that is NOT school-wide (a teacher: no leadership or
+ * owner/principal/admin/office role, and no `edit` on the collection's
+ * module) reads the collection. Unset = no restriction beyond `rbac.view`.
+ *  - `section`: only rows whose (class_id, section_id) is in the session's
+ *    staffSectionScope (lib/api/v1/staffScope.ts);
+ *  - `household`: only the households of those students;
+ *  - `deny`: 403 — the collection cannot be scoped to a teacher.
+ * An unknown scope is a 503 (R6), never the whole school.
+ */
+export type TeacherScope = "section" | "household" | "deny";
 
 export type CollectionDef = {
   /** Stable id used in the URL: /api/data/<id> */
@@ -57,6 +94,40 @@ export type CollectionDef = {
    * The table needs a `deleted_at` column for this to take effect.
    */
   readonly softDelete: boolean;
+  /** Where the records live; `rows` when absent. See SliceSource. */
+  readonly kind?: "rows" | "slice" | "object";
+  /** For `slice` and `object` collections: which slice. */
+  readonly slice?: SliceSource;
+  /** See TeacherScope. */
+  readonly teacherScope?: TeacherScope;
+  /**
+   * After a write that changed something, these server caches are dropped so
+   * the next read cannot serve the pre-write body: probe-gated response
+   * caches by key (lib/deskProbeCache.server.ts) and reference caches
+   * (lib/api/v1/auth.ts).
+   */
+  readonly invalidates?: {
+    readonly probeCaches?: readonly string[];
+    readonly reference?: readonly ("masters" | "rbac")[];
+  };
+  /**
+   * What a CONFLICT answer may not carry of the stored row (data-layer 2.2b):
+   * `desk_write_guarded` hands back the whole stored row with a refusal, and
+   * the route forwards it to whoever's write was refused. Listed keys are
+   * removed first — `columns` from the row, `jsonb` from inside a jsonb
+   * column. Applied in the repo, so no route can forget it.
+   */
+  readonly answerRedaction?: {
+    readonly columns?: readonly string[];
+    readonly jsonb?: Readonly<Record<string, readonly string[]>>;
+  };
+  /**
+   * Staff records (sis.staff): the route applies the staff rules — list rows
+   * redacted to a directory for non-editors, protected profile fields
+   * (lib/staffProtectedFields) never changed through this collection, a
+   * removal recorded with the session as `by`.
+   */
+  readonly staffRecords?: boolean;
   readonly list: {
     /** Column for keyset pagination. Must be unique with `id`. */
     readonly sortColumn: string;
@@ -110,8 +181,20 @@ export const COLLECTIONS: readonly CollectionDef[] = [
     // roster query is tenant-wide and callers filter by class or status.
     scope: ["tenant_id"],
     // Hard delete: removing a student is deliberate and rare, and the audit
-    // entry is the surviving record (see StudentsWorkspace.onRemove).
+    // entry is the surviving record (see StudentsWorkspace.onRemove). It
+    // cascades (transport point, fee-hold items and decisions — production
+    // FKs, 14 Oct 2026), so it is a decision: `approve` on top of `edit`
+    // (data-layer 1.5). sis_students has no deleted_at to soft-delete into.
     softDelete: false,
+    approval: {
+      module: "students",
+      onDelete: true,
+      message:
+        "Removing a student needs the students Approve permission. Ask the principal to remove the record.",
+    },
+    // A teacher reads only the children of the sections they teach (1.7).
+    teacherScope: "section",
+    invalidates: { probeCaches: ["sis-roster"] },
     list: { sortColumn: "admission_no", defaultLimit: 100, maxLimit: 500 },
   },
   {
@@ -123,66 +206,162 @@ export const COLLECTIONS: readonly CollectionDef[] = [
     // years — so they are tenant-scoped only.
     scope: ["tenant_id"],
     softDelete: false,
+    // Removing a family cascades too (village, transport pin request): a
+    // decision, as for students.
+    approval: {
+      module: "students",
+      onDelete: true,
+      message:
+        "Removing a family needs the students Approve permission. Ask the principal to remove the record.",
+    },
+    teacherScope: "household",
+    invalidates: { probeCaches: ["sis-roster"] },
     list: { sortColumn: "code", defaultLimit: 100, maxLimit: 500 },
   },
 
-  // ── Masters (Stage 2) ──────────────────────────────────────────────────
-  // Copied out of masters_desk_slices into masters_desk_* tables, ids
-  // byte-identical (migration 20260810040000). The slices remain the source
-  // of truth until the app is pointed here.
+  // ── Masters ────────────────────────────────────────────────────────────
+  // The truth is masters_desk_slices: masters_sync_rows_from_slices rewrites
+  // the masters_desk_* row tables from it on every save and deletes any row
+  // the slice lacks. So since data-layer 1.5 these collections ARE the
+  // slices: a read returns the slice's elements (camelCase, as the app holds
+  // them) with the slice stamp as `revision`, and a write changes ONE element
+  // through desk_slice_row_write — which re-syncs the row tables and bumps
+  // masters_desk_sync_meta in the same transaction. Writing the row tables
+  // directly was possible until 1.5 and was silently undone by the next save;
+  // the migration took them off desk_writable_tables.
   //
-  // Scope note: these are tenant-scoped only, NOT academic_year_code, even
-  // though several carry that column. Masters is deliberately read whole —
-  // the session selector lists every academic year, fee structures are
-  // compared across years, and a class outlives any one session. Making the
-  // year mandatory here would break those reads to enforce a rule that does
-  // not apply. Callers filter by year where they mean to; sis.students above
-  // is the opposite case, where an unscoped read genuinely is a bug.
+  // Scope: tenant only. Masters is read whole — the session selector lists
+  // every academic year, fee structures are compared across years, and a
+  // class outlives any one session.
   //
-  // The whole of masters is 594 records, so the default page comfortably
-  // holds any one collection. The ceiling is still real: it stops a future
-  // caller assuming "small forever".
+  // Staff-owned lists (staff, departments, designations) and the students
+  // projection are not here: the RPC refuses them. Staff records are the
+  // sis.* row collections below (2.2b).
   ...(
     [
-      ["classes", "masters_desk_classes", "sort_order"],
-      ["sections", "masters_desk_sections", "name"],
-      ["campuses", "masters_desk_campuses", "code"],
-      ["academic-years", "masters_desk_academic_years", "code"],
-      ["academic-terms", "masters_desk_academic_terms", "sort_order"],
-      ["subjects", "masters_desk_subjects", "sort_order"],
-      ["class-subjects", "masters_desk_class_subjects", "id"],
-      ["fee-head-categories", "masters_desk_fee_head_categories", "sort_order"],
-      ["fee-heads", "masters_desk_fee_heads", "sort_order"],
-      ["installments", "masters_desk_installments", "sort_order"],
-      ["fee-groups", "masters_desk_fee_groups", "code"],
-      ["fee-structure-lines", "masters_desk_fee_structure_lines", "id"],
-      ["late-fee-rules", "masters_desk_late_fee_rules", "id"],
-      ["special-fees", "masters_desk_special_fees", "code"],
-      ["special-fee-assignments", "masters_desk_special_fee_assignments", "id"],
-      ["concession-kinds", "masters_desk_concession_kinds", "code"],
-      ["concessions", "masters_desk_concessions", "code"],
-      ["concession-grants", "masters_desk_concession_grants", "id"],
-      ["senior-streams", "masters_desk_senior_streams", "sort_order"],
-      ["number-series", "masters_desk_number_series", "code"],
-      ["holidays", "masters_desk_holidays", "starts_on"],
-      ["settings", "masters_desk_settings", "id"],
+      ["classes", "masters_desk_classes", "classes"],
+      ["sections", "masters_desk_sections", "sections"],
+      ["campuses", "masters_desk_campuses", "campuses"],
+      ["academic-years", "masters_desk_academic_years", "academicYears"],
+      ["academic-terms", "masters_desk_academic_terms", "academicTerms"],
+      ["subjects", "masters_desk_subjects", "subjects"],
+      ["class-subjects", "masters_desk_class_subjects", "classSubjects"],
+      ["fee-head-categories", "masters_desk_fee_head_categories", "feeHeadCategories"],
+      ["fee-heads", "masters_desk_fee_heads", "feeHeads"],
+      ["installments", "masters_desk_installments", "installments"],
+      ["fee-groups", "masters_desk_fee_groups", "feeGroups"],
+      ["fee-structure-lines", "masters_desk_fee_structure_lines", "feeStructureLines"],
+      ["late-fee-rules", "masters_desk_late_fee_rules", "lateFeeRules"],
+      ["special-fees", "masters_desk_special_fees", "specialFees"],
+      ["special-fee-assignments", "masters_desk_special_fee_assignments", "specialFeeAssignments"],
+      ["concession-kinds", "masters_desk_concession_kinds", "concessionKinds"],
+      ["concessions", "masters_desk_concessions", "concessions"],
+      ["concession-grants", "masters_desk_concession_grants", "concessionGrants"],
+      ["senior-streams", "masters_desk_senior_streams", "seniorStreams"],
+      ["number-series", "masters_desk_number_series", "numberSeries"],
+      ["holidays", "masters_desk_holidays", "holidays"],
     ] as const
   ).map(
-    ([name, table, sortColumn]): CollectionDef => ({
+    ([name, table, sliceKey]): CollectionDef => ({
       id: `masters.${name}`,
       module: "masters",
+      // The derived row table, kept for reference (and for its name in logs);
+      // reads and writes go to the slice.
       table,
+      kind: "slice",
+      // Since data-layer 2.2b the base is the ELEMENT's own `_rev` (2.2a's
+      // migration gave every Masters element one): two people editing
+      // different subjects both land; only the same element at once
+      // conflicts (director, 20 Oct 2026). The database still accepts the old
+      // slice stamp from a copy that holds one, but a read no longer hands
+      // one out for these lists.
+      slice: { table: "masters_desk_slices", key: sliceKey, base: "rev" },
       rbac: { view: "masters", edit: "masters" },
       scope: ["tenant_id"],
-      // Masters rows are referenced by student, lead and fee records by id.
-      // A soft delete would leave those references resolving to a row the
-      // UI has hidden, which is a subtler version of the orphaning this
-      // whole migration exists to prevent. Deletion stays explicit and hard,
-      // and the write guard refuses a delete on a stale revision.
+      // Masters elements are referenced by student, lead and fee records by
+      // id; a delete removes the element (the write needs its `_rev`).
       softDelete: false,
-      list: { sortColumn, defaultLimit: 500, maxLimit: 1000 },
+      invalidates: { probeCaches: ["masters-desk-rows"], reference: ["masters"] },
+      list: { sortColumn: "id", defaultLimit: 500, maxLimit: 1000 },
     }),
   ),
+  ...(
+    [
+      ["school-profile", "schoolProfile"],
+      ["school-timing", "schoolTiming"],
+      ["mid-year-fee-policy", "midYearFeePolicy"],
+      ["statutory-config", "statutoryConfig"],
+    ] as const
+  ).map(
+    ([name, sliceKey]): CollectionDef => ({
+      id: `masters.${name}`,
+      module: "masters",
+      table: "masters_desk_settings",
+      kind: "object",
+      slice: { table: "masters_desk_slices", key: sliceKey, base: "slice" },
+      rbac: { view: "masters", edit: "masters" },
+      scope: ["tenant_id"],
+      softDelete: false,
+      invalidates: { probeCaches: ["masters-desk-rows"], reference: ["masters"] },
+      list: { sortColumn: "id", defaultLimit: 1, maxLimit: 1 },
+    }),
+  ),
+  // ── Staff (data-layer 2.2b) ─────────────────────────────────────────────
+  // sis_staff / sis_departments / sis_designations are in desk_writable_tables
+  // since 2.2a (no sync_meta: erp_versions reads each table directly). These
+  // entries are the kernel path for them; the Staff screens move onto it in
+  // 2.2d — until then the old staff-roster route writes them too (with the
+  // same protected-field rule, lib/staffProtectedFields).
+  {
+    id: "sis.staff",
+    module: "staff",
+    table: "sis_staff",
+    rbac: { view: "staff", edit: "staff" },
+    // Remove is SOFT (director, 20 Oct 2026): deleted_at + deleted_by — the
+    // session, filled by the route, never the body — hidden everywhere,
+    // restorable by an upsert clearing deleted_at at the removed row's
+    // revision. A removal is a decision: staff · delete, as the old route's
+    // DELETE asked.
+    softDelete: true,
+    approval: {
+      module: "staff",
+      action: "delete",
+      onDelete: true,
+      message: "Removing a member of staff needs the Staff delete permission. Ask the principal to remove the record.",
+    },
+    scope: ["tenant_id"],
+    staffRecords: true,
+    // Bank, UPI, Aadhaar, PAN, pay, the login: never in a conflict answer.
+    answerRedaction: { jsonb: { profile: STAFF_ANSWER_REDACTED_PROFILE_KEYS } },
+    invalidates: { probeCaches: ["staff-roster"], reference: ["masters"] },
+    list: { sortColumn: "emp_code", defaultLimit: 200, maxLimit: 500 },
+  },
+  ...(
+    [
+      ["sis.departments", "sis_departments", "Removing a department"],
+      ["sis.designations", "sis_designations", "Removing a designation"],
+    ] as const
+  ).map(
+    ([id, table, what]): CollectionDef => ({
+      id,
+      module: "staff",
+      table,
+      rbac: { view: "staff", edit: "staff" },
+      // Hard delete (they have is_active to retire one); a delete orphans the
+      // staff records that point at it, so it is a decision, as for staff.
+      softDelete: false,
+      approval: {
+        module: "staff",
+        action: "delete",
+        onDelete: true,
+        message: `${what} needs the Staff delete permission. Retire it (inactive) instead, or ask the principal.`,
+      },
+      scope: ["tenant_id"],
+      invalidates: { probeCaches: ["staff-roster"], reference: ["masters"] },
+      list: { sortColumn: "code", defaultLimit: 200, maxLimit: 500 },
+    }),
+  ),
+
   // ── Website (Phase 1) ──────────────────────────────────────────────────
   // Server-authoritative from the first commit, unlike most desks here. A
   // parent, a search engine and an admissions enquiry all read the public
@@ -203,6 +382,8 @@ export const COLLECTIONS: readonly CollectionDef[] = [
     table: "udise_upload_sheets",
     rbac: { view: "students", edit: "students" },
     scope: ["tenant_id"],
+    // The whole school's UDISE+ export: not scopable to a teacher's sections.
+    teacherScope: "deny",
     // "Start a fresh sheet" must be undoable — a day's reconciliation is not
     // something to lose to a misclick.
     softDelete: true,
@@ -214,6 +395,7 @@ export const COLLECTIONS: readonly CollectionDef[] = [
     table: "udise_upload_rows",
     rbac: { view: "students", edit: "students" },
     scope: ["tenant_id"],
+    teacherScope: "deny",
     softDelete: true,
     // A UDISE+ export runs to the whole school. The ceiling is the registry's
     // own maximum, and the reader pages to it rather than asking for
@@ -336,9 +518,40 @@ export const COLLECTIONS: readonly CollectionDef[] = [
       ],
     },
   },
+  {
+    // Field survey team (15 Oct 2026, migration 20261015120000). Written by
+    // lib/surveyTeam.server.ts (office screen + team leader's phone), which
+    // checks who may change what; through this generic route only an
+    // Admissions editor can write, as for any other collection.
+    id: "admissions.survey-members",
+    module: "admissions",
+    table: "admission_survey_members",
+    rbac: { view: "admissions", edit: "admissions" },
+    scope: ["tenant_id"],
+    // A member removed from the team carries no record of their own (their
+    // survey days and captures live in survey_days / survey_captures).
+    softDelete: false,
+    list: { sortColumn: "id", defaultLimit: 200, maxLimit: 500 },
+  },
+  {
+    // Field survey beats. Retired with is_active, never deleted in the UI:
+    // leads point at their beat by id.
+    id: "admissions.survey-beats",
+    module: "admissions",
+    table: "admission_survey_beats",
+    rbac: { view: "admissions", edit: "admissions" },
+    scope: ["tenant_id"],
+    softDelete: false,
+    list: { sortColumn: "id", defaultLimit: 200, maxLimit: 500 },
+  },
 ] as const;
 
 const BY_ID = new Map(COLLECTIONS.map((c) => [c.id, c]));
+
+/** `rows` unless the entry says otherwise. */
+export function collectionKind(def: CollectionDef): "rows" | "slice" | "object" {
+  return def.kind ?? "rows";
+}
 
 /**
  * Look up a collection. Returns undefined for an unknown id — callers must

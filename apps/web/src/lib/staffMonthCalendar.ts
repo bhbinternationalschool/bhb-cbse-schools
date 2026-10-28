@@ -57,6 +57,13 @@ export function staffMonthCalendar(opts: {
   approvedLeaveOn: (date: string) => boolean;
   surveyOn?: (date: string) => boolean;
   exempt: boolean;
+  /**
+   * Visiting staff (paid per period / hour / day from their work sheet): a
+   * day with nothing on it was not a working day for them — never absent,
+   * never LWP. Shown blank ("future" keeps the staff app's day kinds as
+   * they are).
+   */
+  visiting?: boolean;
   wayLabel?: (way: string) => string;
 }): { days: CalendarDay[]; counts: CalendarCounts } {
   const counts: CalendarCounts = {
@@ -64,6 +71,10 @@ export function staffMonthCalendar(opts: {
   };
   const days: CalendarDay[] = [];
   for (const date of daysOfMonth(opts.month)) {
+    if (opts.visiting && !opts.markOn(date) && !opts.surveyOn?.(date)) {
+      days.push({ date, kind: "future", label: date > opts.today ? "" : "No work recorded" });
+      continue;
+    }
     const hol = opts.holidayOn(date);
     if (hol.status === "holiday") {
       if (hol.paidForStaff) {

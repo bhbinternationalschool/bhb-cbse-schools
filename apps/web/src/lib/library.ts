@@ -12,6 +12,10 @@ import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { recordLibraryDeletion } from "@/lib/libraryNormalizedClient";
+import { fineToDate, libraryToday } from "@/lib/libraryCounter";
+import type { LibraryFineStatus } from "@/lib/libraryFine";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type LibraryCopyStatus =
   | "available"
@@ -68,6 +72,15 @@ export type LibraryCopy = {
   accessionNo: string;
   barcode: string;
   status: LibraryCopyStatus;
+  /**
+   * Where this copy sits (rack / shelf). Set on the server only — copies are
+   * added and moved through /api/library/counter, never by the desk save.
+   */
+  location?: string;
+  /** purchase | donation | in_house */
+  source?: string;
+  acquiredOn?: string;
+  procurementDocId?: string;
 };
 
 export type LibraryIssue = {
@@ -87,6 +100,11 @@ export type LibraryIssue = {
   returnCondition?: LibraryItemCondition;
   damageNoteOnIssue: string;
   damageNoteOnReturn: string;
+  /** Server-owned (loans are issued/returned and fines settled only via /api/library/*). */
+  fineStatus?: LibraryFineStatus;
+  fineVoucherNo?: string;
+  fineWaiveReason?: string;
+  returnedBy?: string;
 };
 
 export type LibraryProcurementDoc = {
@@ -146,6 +164,10 @@ export type LibraryState = {
     maxBooksPerStaff: number;
     loanDays: number;
     finePaisePerDay: number;
+    /** Late days forgiven before the fine starts (server-set; Library → Rules). */
+    graceDays?: number;
+    /** Most one loan can owe; 0 = no cap. */
+    capPaise?: number;
   };
 };
 
@@ -163,7 +185,8 @@ export type LibraryReportId =
   | "procurement_register"
   | "copy_register"
   | "returns_in_period"
-  | "never_returned_lost";
+  | "never_returned_lost"
+  | "book_circulation";
 
 export type LibraryReportFormat = "excel" | "pdf";
 
@@ -196,11 +219,17 @@ export const LIBRARY_REPORT_GROUPS: {
     category: "Circulation",
     reports: [
       { id: "open_loans", label: "Open loans", hint: "Currently issued items" },
-      { id: "overdue", label: "Overdue", hint: "Past due date, not returned" },
+      { id: "overdue", label: "Overdue", hint: "Past due date, not returned, with fine to date" },
       {
         id: "transaction_history",
         label: "Issue / return history",
         hint: "All transactions in range",
+        dateRange: true,
+      },
+      {
+        id: "book_circulation",
+        label: "Book-wise circulation",
+        hint: "Times each title was issued in range",
         dateRange: true,
       },
       {
@@ -249,7 +278,7 @@ export const LIBRARY_REPORT_GROUPS: {
       {
         id: "fines_summary",
         label: "Fines summary",
-        hint: "Fines collected in date range",
+        hint: "Fines in date range — owed, collected, waived",
         dateRange: true,
       },
     ],
@@ -340,6 +369,10 @@ function normalizeIssue(row: Partial<LibraryIssue> & { id: string; copyId: strin
       : undefined,
     damageNoteOnIssue: row.damageNoteOnIssue || "",
     damageNoteOnReturn: row.damageNoteOnReturn || "",
+    fineStatus: row.fineStatus,
+    fineVoucherNo: row.fineVoucherNo,
+    fineWaiveReason: row.fineWaiveReason,
+    returnedBy: row.returnedBy,
   };
 }
 
@@ -402,6 +435,38 @@ export const EBOOK_SHELF_SEED: string[] = [
   "https://fliphtml5.com/bookcase/gqxrr/",
 ];
 
+const C1_5 = ["Class 1", "Class 2", "Class 3", "Class 4", "Class 5"];
+const C1_8 = [...C1_5, "Class 6", "Class 7", "Class 8"];
+
+/**
+ * What each Propel shelf is — read from each bookcase's own page title on
+ * 12 Oct 2026 (all 20 open; the shelves themselves stay behind their
+ * passwords). Fills a shelf's title, subject and classes only where the
+ * office has not set them.
+ */
+export const EBOOK_SHELF_CATALOGUE: Record<string, { title: string; subject: string; classLabels: string[] }> = {
+  acdlv: { title: "Propel Edition A — Nursery", subject: "All subjects", classLabels: ["Nursery"] },
+  hpgcz: { title: "Propel Edition A — LKG", subject: "All subjects", classLabels: ["LKG"] },
+  oixkm: { title: "Propel Edition A — UKG", subject: "All subjects", classLabels: ["UKG"] },
+  jsmnm: { title: "Propel LKG", subject: "All subjects", classLabels: ["LKG"] },
+  fltsh: { title: "Propel UKG", subject: "All subjects", classLabels: ["UKG"] },
+  luqrl: { title: "Pearson Tip-Tap-Toe — Nursery", subject: "Rhymes and stories", classLabels: ["Nursery"] },
+  bilbd: { title: "Pearson Tip-Tap-Toe — LKG", subject: "Rhymes and stories", classLabels: ["LKG"] },
+  cbgnn: { title: "Pearson Tip-Tap-Toe — UKG", subject: "Rhymes and stories", classLabels: ["UKG"] },
+  pdelb: { title: "Propel Edition A — Class 1", subject: "All subjects", classLabels: ["Class 1"] },
+  fjhwd: { title: "Propel Edition A — Class 2", subject: "All subjects", classLabels: ["Class 2"] },
+  hvtxz: { title: "Propel Edition A — Class 3", subject: "All subjects", classLabels: ["Class 3"] },
+  pocjg: { title: "Propel Edition A — Class 4", subject: "All subjects", classLabels: ["Class 4"] },
+  fmgmo: { title: "Propel Edition A — Class 5", subject: "All subjects", classLabels: ["Class 5"] },
+  ooiny: { title: "Propel New Prime — Class 6", subject: "All subjects", classLabels: ["Class 6"] },
+  npwtl: { title: "Propel New Prime — Class 7", subject: "All subjects", classLabels: ["Class 7"] },
+  qtffd: { title: "Propel New Prime — Class 8", subject: "All subjects", classLabels: ["Class 8"] },
+  vrsvv: { title: "Propel Hindi Navdhara", subject: "Hindi", classLabels: C1_5 },
+  feocx: { title: "Lead Know & Grow", subject: "General knowledge", classLabels: C1_8 },
+  fxwtz: { title: "New Longman Vistas", subject: "Social science", classLabels: C1_5 },
+  gqxrr: { title: "Pearson Click Code Connect", subject: "Computer", classLabels: C1_8 },
+};
+
 /** The bookcase code from a FlipHTML5 shelf URL — the stable identity behind
  *  an opaque link, used so re-importing does not duplicate a shelf. */
 export function bookcaseCode(url: string): string {
@@ -425,10 +490,13 @@ export function mergeEbookShelfSeed(
     const code = bookcaseCode(url);
     if (!code || have.has(code)) continue;
     have.add(code);
+    const known = EBOOK_SHELF_CATALOGUE[code];
     additions.push(
       normalizeEbook({
         id: `eb_${code}`,
-        title: "",
+        title: known?.title ?? "",
+        subject: known?.subject ?? "",
+        classLabels: known?.classLabels ?? [],
         url,
         keyKind: "shelf",
         addedOn,
@@ -436,7 +504,18 @@ export function mergeEbookShelfSeed(
       }),
     );
   }
-  return { ebooks: [...existing, ...additions], added: additions.length };
+  // Shelves already catalogued keep what the office set; only blanks are filled.
+  const filled = existing.map((e) => {
+    const known = EBOOK_SHELF_CATALOGUE[bookcaseCode(e.url)];
+    if (!known) return e;
+    return normalizeEbook({
+      ...e,
+      title: e.title || known.title,
+      subject: e.subject || known.subject,
+      classLabels: e.classLabels.length ? e.classLabels : known.classLabels,
+    });
+  });
+  return { ebooks: [...filled, ...additions], added: additions.length };
 }
 
 export function normalizeEbook(e: Partial<LibraryEbook>): LibraryEbook {
@@ -488,6 +567,10 @@ function migrateLibraryState(raw: unknown): LibraryState {
             c.status === "reserved"
               ? c.status
               : "available",
+          location: c.location ? String(c.location) : undefined,
+          source: c.source ? String(c.source) : undefined,
+          acquiredOn: c.acquiredOn ? String(c.acquiredOn) : undefined,
+          procurementDocId: c.procurementDocId ? String(c.procurementDocId) : undefined,
         }))
       : [],
     issues: Array.isArray(parsed.issues)
@@ -503,6 +586,8 @@ function migrateLibraryState(raw: unknown): LibraryState {
       maxBooksPerStaff: settings.maxBooksPerStaff ?? 3,
       loanDays: settings.loanDays ?? 14,
       finePaisePerDay: settings.finePaisePerDay ?? 500,
+      graceDays: settings.graceDays ?? 0,
+      capPaise: settings.capPaise ?? 0,
     },
   };
 }
@@ -644,171 +729,48 @@ export function overdueIssues(state = loadLibrary(), asOf = new Date().toISOStri
     .sort((a, b) => (a.dueOn || "").localeCompare(b.dueOn || ""));
 }
 
-function nextAccessionNo(state: LibraryState, titleId: string): string {
-  const title = state.titles.find((t) => t.id === titleId);
-  const prefix = (title?.isbn || title?.title || "LIB")
-    .replace(/[^a-zA-Z0-9]/g, "")
-    .slice(0, 6)
-    .toUpperCase();
-  const existing = new Set(state.copies.map((c) => c.accessionNo));
-  let n = state.copies.length + 1;
-  while (existing.has(`${prefix}-${String(n).padStart(4, "0")}`)) n += 1;
-  return `${prefix}-${String(n).padStart(4, "0")}`;
+/** Copies a title has, counted from the copies themselves (copiesTotal is a cache). */
+export function copyCountForTitle(titleId: string, state = loadLibrary()): number {
+  return copiesForTitle(titleId, state).length;
 }
 
-function syncCopiesForTitle(state: LibraryState, titleId: string, target: number) {
-  const copies = copiesForTitle(titleId, state);
-  const openCopyIds = new Set(
-    state.issues.filter((i) => !i.returnedOn).map((i) => i.copyId),
-  );
-  const current = copies.length;
-
-  if (target > current) {
-    for (let i = 0; i < target - current; i += 1) {
-      const accessionNo = nextAccessionNo(state, titleId);
-      state.copies.push({
-        id: id("libc"),
-        titleId,
-        accessionNo,
-        barcode: accessionNo,
-        status: "available",
-      });
-    }
-  } else if (target < current) {
-    const removable = copies
-      .filter((c) => c.status === "available" && !openCopyIds.has(c.id))
-      .slice(0, current - target);
-    const removeIds = new Set(removable.map((c) => c.id));
-    if (removeIds.size && typeof window !== "undefined") {
-      recordLibraryDeletion("library_desk_copies", [...removeIds]);
-    }
-    state.copies = state.copies.filter((c) => !removeIds.has(c.id));
-  }
-
-  const title = state.titles.find((t) => t.id === titleId);
-  if (title) title.copiesTotal = copiesForTitle(titleId, state).length;
+/** Where a copy sits: its own location, else its title's rack. */
+export function copyLocation(copy: LibraryCopy, state = loadLibrary()): string {
+  if (copy.location?.trim()) return copy.location.trim();
+  return state.titles.find((t) => t.id === copy.titleId)?.shelf?.trim() || "";
 }
 
-export function issueBook(input: {
-  copyId?: string;
-  titleId?: string;
-  accessionOrBarcode?: string;
-  borrowerType: LibraryBorrowerType;
-  studentId?: string;
-  staffId?: string;
-  academicYearCode: string;
-  issuedBy: string;
-  issuedOn?: string;
-  dueOn?: string;
-  note?: string;
-  issueCondition?: LibraryItemCondition;
-  damageNoteOnIssue?: string;
-}):
-  | { ok: true; issue: LibraryIssue }
-  | { ok: false; reason: string } {
-  assertModulePermission("store", "create");
-  const state = loadLibrary();
-
-  let copy: LibraryCopy | undefined;
-  if (input.copyId) {
-    copy = state.copies.find((c) => c.id === input.copyId);
-  } else if (input.accessionOrBarcode?.trim()) {
-    const key = input.accessionOrBarcode.trim();
-    copy = state.copies.find((c) => c.accessionNo === key || c.barcode === key);
-  } else if (input.titleId) {
-    copy = availableCopiesForTitle(input.titleId, state)[0];
-  }
-  if (!copy) return { ok: false, reason: "Copy not found or not available" };
-  if (copy.status !== "available") return { ok: false, reason: "Copy not available" };
-
-  if (input.borrowerType === "student") {
-    if (!input.studentId) return { ok: false, reason: "Select a student" };
-    const open = openIssuesForBorrower("student", input.studentId, state);
-    if (open.length >= state.settings.maxBooksPerStudent) {
-      return {
-        ok: false,
-        reason: `Student already has ${state.settings.maxBooksPerStudent} books issued`,
-      };
-    }
-  } else {
-    if (!input.staffId) return { ok: false, reason: "Select a staff member" };
-    const open = openIssuesForBorrower("staff", input.staffId, state);
-    if (open.length >= state.settings.maxBooksPerStaff) {
-      return {
-        ok: false,
-        reason: `Staff member already has ${state.settings.maxBooksPerStaff} books issued`,
-      };
-    }
-  }
-
-  const issuedOn = input.issuedOn || new Date().toISOString().slice(0, 10);
-  const due = new Date(issuedOn);
-  due.setDate(due.getDate() + state.settings.loanDays);
-  const dueOn = input.dueOn || due.toISOString().slice(0, 10);
-
-  const issue: LibraryIssue = {
-    id: id("libi"),
-    copyId: copy.id,
-    borrowerType: input.borrowerType,
-    studentId: input.borrowerType === "student" ? input.studentId || "" : "",
-    staffId: input.borrowerType === "staff" ? input.staffId || "" : "",
-    academicYearCode: input.academicYearCode,
-    issuedOn,
-    dueOn,
-    finePaise: 0,
-    issuedBy: input.issuedBy,
-    note: input.note || "",
-    issueCondition: input.issueCondition || "good",
-    damageNoteOnIssue: input.damageNoteOnIssue || "",
-    damageNoteOnReturn: "",
-  };
-
-  copy.status = "issued";
-  if (issue.issueCondition === "damaged" || issue.issueCondition === "torn") {
-    copy.status = "damaged";
-  }
-  state.issues.push(issue);
-  saveLibrary(state);
-  return { ok: true, issue };
-}
-
-export function returnBook(input: {
-  issueId: string;
-  returnedOn?: string;
-  finePaise?: number;
-  returnCondition?: LibraryItemCondition;
-  damageNoteOnReturn?: string;
-}): { ok: true; issue: LibraryIssue } | { ok: false; reason: string } {
-  assertModulePermission("store", "edit");
-  const state = loadLibrary();
-  const issue = state.issues.find((i) => i.id === input.issueId);
-  if (!issue) return { ok: false, reason: "Issue record not found" };
-  if (issue.returnedOn) return { ok: false, reason: "Already returned" };
-
-  const returnedOn = input.returnedOn || new Date().toISOString().slice(0, 10);
-  let finePaise = input.finePaise ?? 0;
-  if (finePaise === 0 && returnedOn > issue.dueOn) {
-    const days = Math.ceil(
-      (new Date(returnedOn).getTime() - new Date(issue.dueOn).getTime()) /
-        86_400_000,
+/**
+ * Search copies the way the counter asks: title, author, accession number,
+ * barcode or location, any word.
+ */
+export function searchCopies(state: LibraryState, query: string, location = ""): LibraryCopy[] {
+  const q = query.trim().toLowerCase();
+  const loc = location.trim().toLowerCase();
+  const titleById = new Map(state.titles.map((t) => [t.id, t]));
+  return state.copies.filter((c) => {
+    const where = copyLocation(c, state).toLowerCase();
+    if (loc && where !== loc) return false;
+    if (!q) return true;
+    const t = titleById.get(c.titleId);
+    return (
+      c.accessionNo.toLowerCase().includes(q) ||
+      c.barcode.toLowerCase().includes(q) ||
+      where.includes(q) ||
+      (t?.title || "").toLowerCase().includes(q) ||
+      (t?.author || "").toLowerCase().includes(q) ||
+      (t?.isbn || "").toLowerCase().includes(q)
     );
-    finePaise = days * state.settings.finePaisePerDay;
-  }
+  });
+}
 
-  issue.returnedOn = returnedOn;
-  issue.finePaise = finePaise;
-  issue.returnCondition = input.returnCondition || "good";
-  issue.damageNoteOnReturn = input.damageNoteOnReturn || "";
-
-  const copy = state.copies.find((c) => c.id === issue.copyId);
-  if (copy) {
-    const cond = issue.returnCondition;
-    copy.status =
-      cond === "damaged" || cond === "torn" ? "damaged" : "available";
-  }
-
-  saveLibrary(state);
-  return { ok: true, issue };
+/** The fine rule as the desk last loaded it. */
+export function fineRuleOf(state: LibraryState) {
+  return {
+    finePaisePerDay: state.settings.finePaisePerDay,
+    graceDays: state.settings.graceDays ?? 0,
+    capPaise: state.settings.capPaise ?? 0,
+  };
 }
 
 export function upsertTitle(
@@ -831,13 +793,13 @@ export function upsertTitle(
     isActive: input.isActive !== false,
   });
 
+  // Copies are not made here: each needs a server-issued accession number,
+  // so they are added through /api/library/counter (add_copies) after the
+  // title has saved. copiesTotal is only a cache of the count.
+  row.copiesTotal = copiesForTitle(row.id, state).length;
   const idx = state.titles.findIndex((t) => t.id === row.id);
   if (idx >= 0) state.titles[idx] = row;
   else state.titles.push(row);
-
-  const targetCopies = Math.max(1, row.copiesTotal);
-  syncCopiesForTitle(state, row.id, targetCopies);
-  row.copiesTotal = copiesForTitle(row.id, state).length;
 
   saveLibrary(state);
   return row;
@@ -849,12 +811,15 @@ export function deleteTitle(titleId: string): { ok: true } | { ok: false; reason
   const title = state.titles.find((t) => t.id === titleId);
   if (!title) return { ok: false, reason: "Title not found" };
 
-  const open = state.issues.some((i) => {
-    if (i.returnedOn) return false;
-    const copy = state.copies.find((c) => c.id === i.copyId);
-    return copy?.titleId === titleId;
-  });
-  if (open) return { ok: false, reason: "Cannot delete — copies are currently issued" };
+  // Deleting a title deletes its copies, and the database deletes their
+  // loans with them — the circulation history and any fine still owed. So a
+  // title that has ever been lent is kept; mark it inactive instead.
+  const copyIds = new Set(state.copies.filter((c) => c.titleId === titleId).map((c) => c.id));
+  const lent = state.issues.filter((i) => copyIds.has(i.copyId));
+  if (lent.some((i) => !i.returnedOn)) return { ok: false, reason: "Cannot delete — copies are currently issued" };
+  if (lent.length) {
+    return { ok: false, reason: "Cannot delete — this title has loan history. Untick Active to retire it instead." };
+  }
 
   if (typeof window !== "undefined") {
     recordLibraryDeletion("library_desk_titles", [titleId]);
@@ -867,27 +832,6 @@ export function deleteTitle(titleId: string): { ok: true } | { ok: false; reason
   state.copies = state.copies.filter((c) => c.titleId !== titleId);
   saveLibrary(state);
   return { ok: true };
-}
-
-export function addCopy(input: {
-  titleId: string;
-  accessionNo: string;
-  barcode?: string;
-}): LibraryCopy {
-  assertModulePermission("store", "create");
-  const state = loadLibrary();
-  const copy: LibraryCopy = {
-    id: id("libc"),
-    titleId: input.titleId,
-    accessionNo: input.accessionNo,
-    barcode: input.barcode || input.accessionNo,
-    status: "available",
-  };
-  state.copies.push(copy);
-  const title = state.titles.find((t) => t.id === input.titleId);
-  if (title) title.copiesTotal = copiesForTitle(input.titleId, state).length;
-  saveLibrary(state);
-  return copy;
 }
 
 export function upsertProcurementDoc(
@@ -931,6 +875,43 @@ export function deleteProcurementDoc(docId: string): { ok: true } | { ok: false;
   return { ok: true };
 }
 
+export type BookCirculationRow = {
+  titleId: string;
+  title: string;
+  author: string;
+  copies: number;
+  issues: number;
+  out: number;
+  lastIssued: string;
+};
+
+/** Per title: how often it went out in the range, and how many copies are out now. */
+export function bookCirculation(state: LibraryState, from: string, to: string): BookCirculationRow[] {
+  const titleOfCopy = new Map(state.copies.map((c) => [c.id, c.titleId]));
+  const rows = new Map<string, BookCirculationRow>();
+  for (const t of state.titles) {
+    rows.set(t.id, {
+      titleId: t.id,
+      title: t.title,
+      author: t.author,
+      copies: copiesForTitle(t.id, state).length,
+      issues: 0,
+      out: 0,
+      lastIssued: "",
+    });
+  }
+  for (const i of state.issues) {
+    const r = rows.get(titleOfCopy.get(i.copyId) || "");
+    if (!r) continue;
+    if (!i.returnedOn) r.out += 1;
+    if (i.issuedOn >= from && i.issuedOn <= to) {
+      r.issues += 1;
+      if (i.issuedOn > r.lastIssued) r.lastIssued = i.issuedOn;
+    }
+  }
+  return [...rows.values()].sort((a, b) => b.issues - a.issues || a.title.localeCompare(b.title));
+}
+
 export function libraryStats(state = loadLibrary()) {
   const titles = state.titles.filter((t) => t.isActive).length;
   const copies = state.copies.length;
@@ -965,10 +946,13 @@ export function runLibraryReport(input: {
   students?: { id: string; fullName: string; admissionNo: string }[];
   staff?: { id: string; fullName: string; empCode?: string }[];
 }): { ok: true } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("library", input.reportId));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const state = input.state ?? loadLibrary();
   const from = input.fromDate || "2000-01-01";
-  const to = input.toDate || new Date().toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+  const to = input.toDate || new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
+  const today = libraryToday();
   const titles = listActiveTitles(state);
   const titleById = new Map(titles.map((t) => [t.id, t]));
   const labelOpts = { students: input.students, staff: input.staff };
@@ -1023,7 +1007,7 @@ export function runLibraryReport(input: {
       { key: "barcode", header: "Barcode" },
       { key: "title", header: "Title" },
       { key: "category", header: "Category" },
-      { key: "shelf", header: "Rack" },
+      { key: "shelf", header: "Location" },
       { key: "status", header: "Status" },
     ];
     rows = state.copies.map((c) => {
@@ -1033,7 +1017,7 @@ export function runLibraryReport(input: {
         barcode: c.barcode,
         title: t?.title || "—",
         category: t ? categoryLabel(t.category) : "—",
-        shelf: t?.shelf || "—",
+        shelf: copyLocation(c, state) || "—",
         status: c.status,
       };
     });
@@ -1064,8 +1048,7 @@ export function runLibraryReport(input: {
       { copies: number; available: number; issued: number; damaged: number }
     >();
     for (const c of state.copies) {
-      const t = titleById.get(c.titleId);
-      const shelf = t?.shelf?.trim() || "(unassigned)";
+      const shelf = copyLocation(c, state) || "(unassigned)";
       const cur = shelfMap.get(shelf) || {
         copies: 0,
         available: 0,
@@ -1140,9 +1123,12 @@ export function runLibraryReport(input: {
       { key: "issuedOn", header: "Issued" },
       { key: "dueOn", header: "Due" },
       { key: "condition", header: "Issue condition" },
+      { key: "fineToDate", header: "Fine to date (₹)" },
     ];
+    const rule = fineRuleOf(state);
     rows = pool.map((i) => {
       const base = issueRowBase(i);
+      const owed = fineToDate(rule, i, today);
       return {
         title: base.title,
         accession: base.accession,
@@ -1151,6 +1137,8 @@ export function runLibraryReport(input: {
         issuedOn: base.issuedOn,
         dueOn: base.dueOn,
         condition: base.issueCondition,
+        // "?" when the dates cannot be read — never a made-up ₹0.
+        fineToDate: owed == null ? "?" : (owed / 100).toFixed(2),
       };
     });
   } else if (input.reportId === "transaction_history") {
@@ -1300,6 +1288,8 @@ export function runLibraryReport(input: {
       { key: "title", header: "Title" },
       { key: "returnedOn", header: "Returned" },
       { key: "fine", header: "Fine (₹)" },
+      { key: "status", header: "Status" },
+      { key: "receipt", header: "Receipt / reason" },
     ];
     const withFine = state.issues.filter(
       (i) =>
@@ -1315,17 +1305,39 @@ export function runLibraryReport(input: {
         title: base.title,
         returnedOn: base.returnedOn,
         fine: base.fine,
+        status: i.fineStatus === "collected" ? "Collected" : i.fineStatus === "waived" ? "Waived" : "Owed",
+        receipt: i.fineStatus === "collected" ? i.fineVoucherNo || "" : i.fineStatus === "waived" ? i.fineWaiveReason || "" : "",
       };
     });
+    const sum = (pred: (i: LibraryIssue) => boolean) =>
+      (withFine.filter(pred).reduce((s, i) => s + i.finePaise, 0) / 100).toFixed(2);
     if (withFine.length > 0) {
-      const totalPaise = withFine.reduce((s, i) => s + i.finePaise, 0);
-      rows.push({
-        borrower: "TOTAL",
-        title: "",
-        returnedOn: "",
-        fine: (totalPaise / 100).toFixed(2),
-      });
+      for (const [label, pred] of [
+        ["TOTAL OWED", (i: LibraryIssue) => i.fineStatus !== "collected" && i.fineStatus !== "waived"],
+        ["TOTAL COLLECTED", (i: LibraryIssue) => i.fineStatus === "collected"],
+        ["TOTAL WAIVED", (i: LibraryIssue) => i.fineStatus === "waived"],
+      ] as const) {
+        rows.push({ borrower: label, title: "", returnedOn: "", fine: sum(pred), status: "", receipt: "" });
+      }
     }
+  } else if (input.reportId === "book_circulation") {
+    title = "Book-wise circulation";
+    columns = [
+      { key: "title", header: "Title" },
+      { key: "author", header: "Author" },
+      { key: "copies", header: "Copies" },
+      { key: "issues", header: "Times issued" },
+      { key: "out", header: "Out now" },
+      { key: "lastIssued", header: "Last issued" },
+    ];
+    rows = bookCirculation(state, from, to).map((r) => ({
+      title: r.title,
+      author: r.author,
+      copies: r.copies,
+      issues: r.issues,
+      out: r.out,
+      lastIssued: r.lastIssued || "—",
+    }));
   } else if (input.reportId === "procurement_register") {
     title = "Procurement register";
     columns = [
@@ -1419,4 +1431,27 @@ export function parseIssueNote(raw: string): Partial<LibraryIssue> {
     /* legacy plain note */
   }
   return { note: raw };
+}
+
+/** The shelf class label for an ERP class name ("" when no shelf is for it). */
+export function shelfLabelForClass(className: string): string {
+  const n = String(className || "").trim().toUpperCase().replace(/\s+/g, " ");
+  if (/^(NUR|NURSERY|PG|PLAY ?GROUP)$/.test(n)) return "Nursery";
+  if (/^(LKG|JKG|KG ?1)$/.test(n)) return "LKG";
+  if (/^(UKG|SKG|KG ?2)$/.test(n)) return "UKG";
+  const roman: Record<string, string> = { I: "1", II: "2", III: "3", IV: "4", V: "5", VI: "6", VII: "7", VIII: "8", IX: "9", X: "10", XI: "11", XII: "12" };
+  const m = n.match(/^(?:CLASS|STD|GRADE)?\s*([IVX]+|\d{1,2})$/);
+  if (!m) return "";
+  return `Class ${roman[m[1]] ?? Number(m[1])}`;
+}
+
+/**
+ * The shelves a family sees (director, 12 Oct 2026): those tagged for one of
+ * its children's classes, plus any shelf with no class tag. `labels` null =
+ * the children's classes are unknown (read failed, staff, no family) — then
+ * every shelf shows; an unknown class must never empty the shelf.
+ */
+export function shelvesForClasses<T extends { classLabels: string[] }>(books: T[], labels: Set<string> | null): T[] {
+  if (!labels || labels.size === 0) return books;
+  return books.filter((b) => b.classLabels.length === 0 || b.classLabels.some((c) => labels.has(c)));
 }

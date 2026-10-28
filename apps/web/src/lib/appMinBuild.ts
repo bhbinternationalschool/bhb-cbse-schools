@@ -21,8 +21,12 @@
 export type AppFlavor = "staff" | "parent";
 
 export const APP_MIN_BUILD: Record<AppFlavor, number> = {
-  // 14 (1.0.13) is the first build that signs QR punches (#380).
-  staff: 14,
+  // 32 (1.0.31): director, 13 Oct 2026 — every staff phone on the current
+  // Play build. Only 11 of 34 were (4 still on 1.0.24, 3 on 1.0.30), and the
+  // in-app "restart to update" bar was being ignored. 1.0.31 is fully rolled
+  // out on Play (approved 12 Oct), so the update is there to give them.
+  // (Was 14 — 1.0.13, the first build that signs QR punches, #380.)
+  staff: 32,
   // 26 (1.0.25): director, 9 Oct 2026 — every parent on the build with the
   // pick-up pin, running strip, pop-ups and guides. Takes effect at deploy,
   // so deploy only once 1.0.25 is live on Play (else no update to give them).

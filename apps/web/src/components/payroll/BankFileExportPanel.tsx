@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   currentMonthIso,
   formatInr,
@@ -13,7 +14,7 @@ import {
   BANK_FILE_FORMATS,
   buildBankExportPreview,
   downloadBankExceptionReport,
-  downloadBankFile,
+  downloadBankFileChecked,
   type BankFileFormat,
 } from "@/lib/bankFileExport";
 import { monthLabel } from "@/components/payroll/PrintPayslipsPanel";
@@ -30,17 +31,14 @@ export function BankFileExportPanel({
 }: {
   academicYearCode: string;
 }) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [month, setMonth] = useState(currentMonthIso);
-  const [format, setFormat] = useState<BankFileFormat>("ubi_neft");
+  const [format, setFormat] = useState<BankFileFormat>("ubi_salary_upload");
+  const [fileSequence, setFileSequence] = useState("");
   const [includeUpi, setIncludeUpi] = useState(false);
   const [tick, setTick] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setMasters(loadMasters());
-  }, [tick]);
 
   const monthsAvailable = useMemo(() => {
     const set = new Set<string>();
@@ -96,15 +94,18 @@ export function BankFileExportPanel({
       setNotice(msg);
       setError(null);
     }
+    // Long enough to read who was left out of a Union Bank file.
     window.setTimeout(() => {
       setNotice(null);
       setError(null);
-    }, 4000);
+    }, 12000);
   }
 
-  function onDownload() {
+  async function onDownload() {
     if (!preview) return;
-    const r = downloadBankFile(preview, format);
+    // Checked against the server's payroll first: a run marked paid on
+    // another device must not be paid again from this screen's copy.
+    const r = await downloadBankFileChecked(preview, format, { fileSequence });
     if (!r.ok) flash(r.error, true);
     else flash(r.message);
   }
@@ -114,6 +115,12 @@ export function BankFileExportPanel({
     const r = downloadBankExceptionReport(preview);
     if (!r.ok) flash(r.error, true);
     else flash(r.message);
+  }
+
+  // A failed Masters read is a failure on screen (R6) — the bank details are
+  // the roster's; never a file built without them.
+  if (mastersError) {
+    return <QueryError what="the staff roster and bank details" error={mastersError} retry={retryMasters} />;
   }
 
   return (
@@ -195,6 +202,20 @@ export function BankFileExportPanel({
             </select>
           </label>
 
+          {format === "ubi_salary_upload" ? (
+            <label className="text-xs font-semibold text-[var(--muted)]">
+              File no. (optional)
+              <input
+                className="field mt-1 block !py-2"
+                inputMode="numeric"
+                maxLength={6}
+                value={fileSequence}
+                placeholder="e.g. 1"
+                onChange={(e) => setFileSequence(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              />
+            </label>
+          ) : null}
+
           <label className="flex items-center gap-2 self-end pb-2 text-xs font-medium text-[var(--brand-deep)]">
             <input
               type="checkbox"
@@ -244,7 +265,7 @@ export function BankFileExportPanel({
           ) : (
             <>
               <p className="text-sm text-[var(--brand-deep)]">
-                Run{" "}
+                {preview.runs.length > 1 ? `${preview.runs.length} runs` : "Run"}{" "}
                 <strong>{payrollStatusLabel(preview.run.status)}</strong> ·{" "}
                 {preview.readyCount} ready · {preview.blockedCount} blocked ·
                 Total credit{" "}
@@ -290,6 +311,9 @@ export function BankFileExportPanel({
                               {r.issues.join(" · ")}
                             </span>
                           )}
+                          {r.warnings?.length ? (
+                            <div className="text-[11px] text-[var(--warning)]">{r.warnings.join(" · ")}</div>
+                          ) : null}
                         </td>
                         <td className="px-2 py-1.5 text-right">
                           <RowActionMenu row={r} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />

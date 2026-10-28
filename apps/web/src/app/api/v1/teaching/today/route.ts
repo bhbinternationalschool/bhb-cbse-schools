@@ -1,16 +1,19 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
-import { ensureTeachingHydratedServer } from "@/lib/teachingPersistence";
-import { loadTimetable } from "@/lib/timetable";
+import {
+  readTeachingStateServer,
+  readTimetableStateServer,
+} from "@/lib/api/v1/teachingServer.server";
 import {
   computeDelivery,
   istDateOf,
-  loadTeaching,
   resolveExpectedPeriods,
   resourcesForUnits,
 } from "@/lib/teaching";
+import { chapterPositionOf } from "@/lib/chapterStandards";
+import type { ChapterAssets } from "@/lib/pinnacleAssets";
+import { publisherAssetsFor, readPinnacleAssets } from "@/lib/pinnacleAssets.server";
 
 export const runtime = "nodejs";
 
@@ -45,14 +48,16 @@ export async function GET(request: Request) {
     const date = url.searchParams.get("date")?.trim() || istDateOf();
 
     await ensureSchoolMirrorHydrated();
-    await Promise.all([
-      ensureTimetableHydratedServer(),
-      ensureTeachingHydratedServer(),
+    // Server truth, both read up front: a plan or timetable that cannot be
+    // read is a 503, never "no classes" / "no chapters".
+    const [timetable, teaching] = await Promise.all([
+      readTimetableStateServer(),
+      readTeachingStateServer(),
     ]);
 
     const ay = ctx.session.academicYearCode;
     const expected = resolveExpectedPeriods({
-      timetable: loadTimetable(),
+      timetable,
       masters: ctx.masters,
       academicYearCode: ay,
       date,
@@ -70,7 +75,6 @@ export async function GET(request: Request) {
       });
     }
 
-    const teaching = loadTeaching();
     const rows = computeDelivery({
       expected: expected.periods,
       logs: teaching.logs,
@@ -84,6 +88,24 @@ export async function GET(request: Request) {
       ctx.masters.sections.find((s) => s.id === id)?.name || "";
     const subjectNameOf = (id: string) =>
       ctx.masters.subjects.find((s) => s.id === id)?.nameEn || "";
+
+    // The publisher's assets per chapter (Smart Teach, indexed by the Office
+    // Robot), looked up once per class + subject on today's timetable. A
+    // failed read just leaves them out — the period card works without them.
+    const assetIndex = (await readPinnacleAssets().catch(() => null))?.books ?? [];
+    const assetsBy = new Map<string, Map<number, ChapterAssets>>();
+    if (assetIndex.length) {
+      for (const r of rows) {
+        const k = `${r.expected.classId}|${r.expected.subjectId}`;
+        if (assetsBy.has(k)) continue;
+        assetsBy.set(
+          k,
+          await publisherAssetsFor(classNameOf(r.expected.classId), subjectNameOf(r.expected.subjectId), "all", assetIndex).catch(
+            () => new Map<number, ChapterAssets>(),
+          ),
+        );
+      }
+    }
 
     /** Chapter → topic tree for one class + subject, with content links. */
     const chaptersFor = (classId: string, subjectId: string) => {
@@ -102,6 +124,11 @@ export async function GET(request: Request) {
           code: c.code,
           title: c.title,
           resources: c.resources,
+          publisherAssets: (() => {
+            const p = chapterPositionOf(c.code);
+            const a = p === null ? undefined : assetsBy.get(`${classId}|${subjectId}`)?.get(p);
+            return a ? { url: a.url, items: a.assets } : null;
+          })(),
           topics: mine
             .filter((t) => t.parentId === c.id)
             .sort((a, b) => a.sortOrder - b.sortOrder)

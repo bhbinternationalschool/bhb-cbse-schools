@@ -5,6 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { childrenOnRoll } from "@/lib/appPopups";
 import { loadMasters } from "@/lib/masters";
+import { fetchMastersDeskFromDb } from "@/lib/mastersNormalized.server";
 import { readModuleLocalState, writeModuleLocalState } from "@/lib/moduleLocalState.server";
 import {
   emptyParentLinkState,
@@ -79,7 +80,10 @@ export type LinkStart =
 async function onRollChildren(): Promise<{ onRoll: SisStudent[]; classNameOf: (id: string) => string }> {
   await ensureSisHydratedServer();
   const ay = (await resolveLoginAcademicYearCode(undefined).catch(() => null)) || "";
-  const classes = new Map((loadMasters().classes ?? []).map((c) => [c.id, c.name]));
+  // Classes from the database: loadMasters() is browser state and empty on the server.
+  const db = await fetchMastersDeskFromDb();
+  const list = (!db.readFailed && db.bundle?.classes?.length ? db.bundle.classes : loadMasters().classes ?? []) as { id: string; name: string }[];
+  const classes = new Map(list.map((c) => [c.id, c.name]));
   return { onRoll: childrenOnRoll(loadSis().students, ay), classNameOf: (id) => classes.get(id) ?? "" };
 }
 

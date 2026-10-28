@@ -6,20 +6,70 @@
 const hydrated = new Map<string, number>();
 const DESK_HYDRATE_TTL_MS = 15_000;
 
+/**
+ * Desks this page has loaded from the server at least once since the last
+ * reset (12 Oct 2026). Unlike `isDeskHydrated` — a 15 s "loaded recently"
+ * cache that decides when to re-read — this never expires on its own, so it
+ * answers "is this page holding the real copy?" for the save guards
+ * (lib/deskLoadGuard). A reset (conflict reload, merge, logout) clears it
+ * until the next load lands.
+ */
+const loadedOnce = new Set<string>();
+
+export function hasDeskLoaded(module: string): boolean {
+  return loadedOnce.has(module);
+}
+
 export function isDeskHydrated(module: string): boolean {
   const last = hydrated.get(module);
   if (!last) return false;
   return Date.now() - last < DESK_HYDRATE_TTL_MS;
 }
 
+/**
+ * Desks this page has loaded from the server at least once. Unlike
+ * isDeskHydrated (a 15 s freshness window) this never lapses, so it answers
+ * "do we know this yet?" — what a permission check must ask before it says
+ * no (components/shell/useAccessData.ts).
+ */
+const everHydrated = new Set<string>();
+
+export function deskEverHydrated(module: string): boolean {
+  return everHydrated.has(module);
+}
+
 export function markDeskHydrated(module: string): void {
   hydrated.set(module, Date.now());
+  loadedOnce.add(module);
+  if (everHydrated.has(module)) return;
+  everHydrated.add(module);
+  // Once per desk per page. Callers mark AFTER writing what they read (the
+  // event is also deferred a tick), so a listener finds the data in place.
+  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+    setTimeout(() => {
+      window.dispatchEvent(
+        new CustomEvent("bhb-desk-first-hydrated", { detail: { id: module } }),
+      );
+    }, 0);
+  }
 }
 
 export function resetDeskHydrated(module?: string): void {
-  if (module) hydrated.delete(module);
-  else hydrated.clear();
-  inFlight.clear();
+  // loadedOnce clears (the save guards need a fresh load before saving);
+  // everHydrated survives: a reset asks for a fresh read, it does not make
+  // what was read unknown to permission checks (no "Checking access…" flash).
+  // Only this module's in-flight read is forgotten (data-layer 0.5a): the
+  // others are still current, and dropping their entries let a second copy of
+  // each start alongside the first.
+  if (module) {
+    hydrated.delete(module);
+    loadedOnce.delete(module);
+    inFlight.delete(module);
+  } else {
+    hydrated.clear();
+    loadedOnce.clear();
+    inFlight.clear();
+  }
 }
 
 /**

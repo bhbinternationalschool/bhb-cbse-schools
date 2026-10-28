@@ -17,7 +17,7 @@
 import assert from "node:assert/strict";
 
 import { ebookAccess, keyForBook } from "./ebookAccess.server";
-import {
+import { EBOOK_SHELF_CATALOGUE,
   bookcaseCode,
   EBOOK_SHELF_SEED,
   mergeEbookShelfSeed,
@@ -74,7 +74,7 @@ withEnv(
     const a = ebookAccess();
     assert.equal(a.configured, false);
     assert.equal(a.shelfKey, "", "no key is invented");
-    assert.deepEqual(a.missing, ["EBOOK_SHELF_URL", "EBOOK_SHELF_KEY"]);
+    assert.deepEqual(a.missing, ["EBOOK_SHELF_KEY"]);
     // The reader is sent to the office, not to a password box with a blank.
     const k = keyForBook("shelf", a);
     assert.equal(k.key, "");
@@ -111,6 +111,18 @@ withEnv(
     const a = ebookAccess();
     assert.equal(a.configured, false, "a link nobody can open is not configured");
     assert.deepEqual(a.missing, ["EBOOK_SHELF_KEY"]);
+  },
+);
+
+/* ── a key with no whole-shelf URL still opens the class shelves ── */
+
+withEnv(
+  { EBOOK_SHELF_URL: undefined, EBOOK_SHELF_KEY: "shelfpass", EBOOK_BOOK_KEY: "bookpass" },
+  () => {
+    const a = ebookAccess();
+    assert.equal(a.configured, true, "each shelf carries its own link");
+    assert.deepEqual(a.missing, []);
+    assert.equal(a.bookKey, "bookpass");
   },
 );
 
@@ -166,8 +178,12 @@ assert.equal(bookcaseCode("not a url"), "", "junk yields no code, not a guess");
 const first = mergeEbookShelfSeed([]);
 assert.equal(first.added, 20);
 assert.equal(first.ebooks.length, 20);
-// Seeded shelves carry NO title — the office names them; nothing is invented.
-assert.ok(first.ebooks.every((e) => e.title === ""), "no title is fabricated");
+// A seeded shelf's title is only ever its verified catalogue entry — read
+// from that bookcase's own page title (12 Oct 2026) — never anything invented.
+assert.ok(
+  first.ebooks.every((e) => e.title === (EBOOK_SHELF_CATALOGUE[bookcaseCode(e.url)]?.title ?? "")),
+  "no title is fabricated",
+);
 assert.ok(first.ebooks.every((e) => e.keyKind === "shelf"));
 assert.ok(first.ebooks.every((e) => e.isActive));
 

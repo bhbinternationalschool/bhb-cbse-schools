@@ -4,17 +4,31 @@ import "../../core/popups/app_popups.dart";
 import "../../core/ui/running_strip.dart";
 import "../../core/guide/screen_guides.dart";
 import "../../core/api/api_client.dart";
+import "../../core/ui/stale_banner.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/chat_inbox_screen.dart";
+import "../modules/school_chat_screen.dart";
+import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "admission_leads_screen.dart";
+import "class_gallery_screen.dart";
+import "class_message_screen.dart";
+import "ptm_teacher_screen.dart";
+import "bus_register_screen.dart";
 import "documents_screen.dart";
 import "fee_counter_screen.dart";
 import "fee_defaulters_screen.dart";
 import "visitor_gate_screen.dart";
 import "my_collections_screen.dart";
-import "survey_screen.dart";
+import "survey_day_screen.dart";
+import "home_groups.dart";
+import "staff_pay_overview_screens.dart";
 import "leave_approvals_screen.dart";
+import "my_attendance_calendar_screen.dart";
+import "my_advances_screen.dart";
+import "my_profile_screen.dart";
+import "my_class_screen.dart";
+import "month_register_screen.dart";
 import "payslips_screen.dart";
 import "self_attendance_screen.dart";
 import "staff_complaints_screen.dart";
@@ -22,8 +36,10 @@ import "staff_leave_screen.dart";
 import "staff_roster_screen.dart";
 import "student_leave_queue_screen.dart";
 import "transport_requests_screen.dart";
+import "vehicle_logbook_screen.dart";
 import "waiting_card.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/push/notification_bell.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -77,9 +93,17 @@ class DeskHomeScreen extends StatefulWidget {
 
 class _DeskHomeScreenState extends State<DeskHomeScreen> {
   String _name = "";
+  String _photoUrl = "";
   String _kind = "support";
   int _refresh = 0;
   StaffFeatureSet _features = const StaffFeatureSet.empty();
+
+  /// data-layer 4.4: set when the server could not be reached and the home
+  /// shows the copy saved at this time; the banner says so.
+  DateTime? _staleSince;
+  final _clock = RefreshClock();
+  late final _resume = ResumeWatcher(_onResume);
+  bool _featuresFresh = false;
 
   static final _common = <_Tile>[
     _Tile(
@@ -117,6 +141,16 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
   ];
 
   static final _work = <_Tile>[
+    // The office posts the school's photos (whole school or any class) and
+    // decides on what the AI check held (15 Oct 2026).
+    _Tile(
+      "Gallery",
+      "गैलरी",
+      Icons.photo_library_outlined,
+      ModuleTone.pink,
+      "class_gallery",
+      (api) => ClassGalleryScreen(api: api),
+    ),
     _Tile(
       "Collect fees",
       "फ़ीस लें",
@@ -155,7 +189,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       Icons.map_outlined,
       ModuleTone.amber,
       "field_survey",
-      (api) => SurveyScreen(api: api),
+      (api) => SurveyDayScreen(api: api),
     ),
     _Tile(
       "Visitor gate",
@@ -197,13 +231,85 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       "transport_requests",
       (api) => TransportRequestsScreen(api: api),
     ),
+    // Management, read only (20 Oct 2026): everyone's pay and advances.
+    _Tile(
+      "Staff payslips",
+      "स्टाफ वेतन पर्ची",
+      Icons.receipt_long_outlined,
+      ModuleTone.gray,
+      kStaffPayslipsAllFeature,
+      (api) => StaffPayrollOverviewScreen(api: api),
+    ),
+    _Tile(
+      "Staff advances",
+      "स्टाफ एडवांस",
+      Icons.account_balance_wallet_outlined,
+      ModuleTone.amber,
+      kStaffAdvancesAllFeature,
+      (api) => StaffAdvancesOverviewScreen(api: api),
+    ),
+    // A desk person given the class grants (an office in-charge who keeps a
+    // class): the class records and the month register. The server still
+    // decides whose children each one shows.
+    _Tile(
+      "My class",
+      "मेरी कक्षा",
+      Icons.diversity_3_outlined,
+      ModuleTone.purple,
+      "students_view",
+      (api) => MyClassScreen(api: api),
+    ),
+    _Tile(
+      "Month register",
+      "मासिक रजिस्टर",
+      Icons.calendar_view_month_outlined,
+      ModuleTone.teal,
+      "attendance_mark",
+      (api) => MonthRegisterScreen(api: api),
+    ),
+    // The transport in-charge works from this home: the bus register and
+    // log book, every bus when the server grants the whole fleet.
+    _Tile(
+      "Bus register",
+      "बस रजिस्टर",
+      Icons.fact_check_outlined,
+      ModuleTone.blue,
+      "route_manifest",
+      (api) => BusRegisterScreen(api: api),
+    ),
+    _Tile(
+      "Log book",
+      "लॉग बुक",
+      Icons.local_gas_station_outlined,
+      ModuleTone.amber,
+      "route_manifest",
+      (api) => VehicleLogbookScreen(api: api),
+    ),
     _Tile(
       "Messages",
       "संदेश",
       Icons.chat_bubble_outline,
       ModuleTone.teal,
       "messages",
-      (api) => ChatInboxScreen(api: api),
+      (api) => staffSchoolChat(api),
+    ),
+    // An office-like member of staff may teach a section too; both tiles
+    // show only when the ERP grants them.
+    _Tile(
+      "Message my classes",
+      "कक्षा को संदेश",
+      Icons.forum_outlined,
+      ModuleTone.coral,
+      "class_broadcast",
+      (api) => ClassMessageScreen(api: api),
+    ),
+    _Tile(
+      "PTM",
+      "पीटीएम",
+      Icons.groups_outlined,
+      ModuleTone.purple,
+      "ptm_meet",
+      (api) => PtmTeacherScreen(api: api),
     ),
     _Tile(
       "Staff contacts",
@@ -215,6 +321,36 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     ),
   ];
 
+  /// Everyone's own record (the desk home has no bottom bar to carry it).
+  static final _profileTile = _Tile(
+    "My profile",
+    "मेरी प्रोफ़ाइल",
+    Icons.badge_outlined,
+    ModuleTone.teal,
+    "my_profile",
+    (api) => MyProfileScreen(api: api),
+  );
+
+  /// My salary advances — the person's own record, always shown.
+  static final _advancesTile = _Tile(
+    "My advances",
+    "मेरा एडवांस",
+    Icons.account_balance_wallet_outlined,
+    ModuleTone.amber,
+    "my_advances",
+    (api) => MyAdvancesScreen(api: api),
+  );
+
+  /// My month of attendance — the person's own record, always shown.
+  static final _attendanceTile = _Tile(
+    "My attendance",
+    "मेरी हाज़िरी",
+    Icons.calendar_month_outlined,
+    ModuleTone.teal,
+    "my_attendance",
+    (api) => MyAttendanceCalendarScreen(api: api),
+  );
+
   @override
   void initState() {
     super.initState();
@@ -222,34 +358,84 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) AppPopups.maybeShow(context, widget.api);
     });
-    _load();
+    _resume.attach();
+    _load(first: true);
   }
 
-  Future<void> _load() async {
+  @override
+  void dispose() {
+    _resume.detach();
+    super.dispose();
+  }
+
+  /// Back in front after 2 minutes or more: re-read the summary and tiles,
+  /// so a Masters change shows without a restart.
+  void _onResume() {
+    if (mounted && _clock.isStale) _load();
+  }
+
+  /// Pull-to-refresh also re-reads the waiting counts.
+  Future<void> _pullRefresh() async {
+    setState(() => _refresh += 1);
+    await _load();
+  }
+
+  void _showSummary(StaffSummary s, String? kind) {
+    setState(() {
+      _name = s.fullName;
+      _photoUrl = s.photoUrl;
+      _kind = s.homeKind.isEmpty ? (kind ?? "support") : s.homeKind;
+    });
+  }
+
+  /// [first]: the app just opened this home — paint the saved copy at once.
+  Future<void> _load({bool first = false}) async {
     final name = await widget.api.guardianName();
     final kind = await widget.api.homeKind();
-    try {
-      final s = await widget.api.fetchStaffSummary();
-      if (mounted) {
-        setState(() {
-          _name = s.fullName;
-          _kind = s.homeKind.isEmpty ? (kind ?? "support") : s.homeKind;
-          _refresh += 1;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _name = name ?? "";
-          _kind = kind ?? "support";
-        });
-      }
+    if (first) {
+      widget.api.cachedStaffFeatures().then((c) {
+        if (c != null && mounted && !_featuresFresh) {
+          setState(() => _features = c.value);
+        }
+      });
     }
-    try {
-      final f = await widget.api.fetchStaffFeatures();
-      if (mounted) setState(() => _features = f);
-    } catch (_) {
-      /* keep whatever we had */
+    var ok = false;
+    var painted = false;
+    await loadCachedThenFresh<StaffSummary>(
+      peek: first ? widget.api.cachedStaffSummary : () async => null,
+      fetch: widget.api.fetchStaffSummary,
+      onCached: (c) {
+        painted = true;
+        if (mounted) _showSummary(c.value, kind);
+      },
+      onFresh: (s) {
+        ok = true;
+        _clock.markFresh();
+        if (mounted) {
+          _showSummary(s, kind);
+          setState(() => _staleSince = null);
+        }
+      },
+      onError: (_, since) {
+        if (!mounted) return;
+        setState(() {
+          if (painted || _clock.lastFresh != null) {
+            _staleSince = since ?? _clock.lastFresh ?? DateTime.now();
+          } else {
+            _name = name ?? "";
+            _kind = kind ?? "support";
+          }
+        });
+      },
+    );
+    if (ok) {
+      try {
+        final f = await widget.api.fetchStaffFeatures();
+        _featuresFresh = true;
+        if (mounted) setState(() => _features = f);
+      } catch (_) {
+        /* keep whatever we had */
+      }
     }
     if (widget.openRoute != null && mounted) {
       WidgetsBinding.instance.addPostFrameCallback(
@@ -258,12 +444,19 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     }
   }
 
-  void _push(Widget w) =>
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => w));
+  Future<void> _push(Widget w) async {
+    final changed = await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => w));
+    // The waiting counts are re-read only when that screen decided something.
+    if (mounted && changed == true) setState(() => _refresh += 1);
+  }
 
   void _openDeepLink(String raw) {
     final path = Uri.tryParse(raw)?.path ?? raw;
     switch (path) {
+      case "/notifications":
+        openNotifications(context, widget.api, _openDeepLink);
       case "/leave":
         _push(StaffLeaveScreen(api: widget.api));
       case "/leave-approvals":
@@ -276,8 +469,22 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
         _push(DocumentsScreen(api: widget.api));
       case "/chat":
         _push(ChatInboxScreen(api: widget.api));
+      case "/school-chat":
+        _push(staffSchoolChat(widget.api));
       case "/notices":
-        _push(NoticesScreen(api: widget.api));
+        // A tapped broadcast opens in full; otherwise the notices list.
+        _push(noticesScreenForRoute(widget.api, Uri.tryParse(raw)));
+      case "/profile":
+        _openProfile();
+      case "/my-attendance":
+        _push(
+          MyAttendanceCalendarScreen(
+            api: widget.api,
+            initialMonth: Uri.tryParse(raw)?.queryParameters["month"],
+          ),
+        );
+      case "/payslips":
+        _push(PayslipsScreen(api: widget.api));
     }
   }
 
@@ -299,6 +506,16 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
     if (mounted) widget.onLogout();
   }
 
+  Future<void> _openProfile() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MyProfileScreen(api: widget.api, onSignOut: _signOut),
+      ),
+    );
+    // A new photo shows in the header straight away.
+    if (mounted) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     // What appears is the ERP's answer, not a guess from the role name: an
@@ -308,9 +525,15 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
       ..._common,
       ..._work,
     ].where((t) => _features.has(t.feature)).toList();
+    // My profile is everyone's own record, not a grant — always shown.
+    final groups = groupStaffTiles(
+      [...tiles, _advancesTile, _attendanceTile, _profileTile],
+      (t) => staffGroupOf(_features, t.feature),
+      order: _features.groupOrder,
+    );
     return Scaffold(
       body: RefreshIndicator(
-        onRefresh: _load,
+        onRefresh: _pullRefresh,
         color: AppColors.primary,
         child: ListView(
           padding: EdgeInsets.zero,
@@ -331,6 +554,14 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
               ),
               child: Row(
                 children: [
+                  StaffAvatar(
+                    key: ValueKey(_photoUrl),
+                    api: widget.api,
+                    name: _name,
+                    photoUrl: _photoUrl,
+                    onTap: _openProfile,
+                  ),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -357,6 +588,10 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                       ],
                     ),
                   ),
+                  NotificationBellButton(
+                    api: widget.api,
+                    onOpenRoute: _openDeepLink,
+                  ),
                   const ScreenGuideButton(
                     guideId: "desk-home",
                     screenLabel: "Home",
@@ -369,6 +604,7 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                 ],
               ),
             ),
+            StaleBanner(since: _staleSince, onRetry: _load),
             // Notices and news scrolling across, as on the web ERP.
             RunningStrip(
               api: widget.api,
@@ -418,52 +654,59 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                       onTap: () => _push(SelfAttendanceScreen(api: widget.api)),
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  GridView.count(
-                    crossAxisCount: 3,
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: 0.95,
-                    children: [
-                      for (final t in tiles)
-                        InkWell(
-                          borderRadius: BorderRadius.circular(16),
-                          onTap: () => _push(t.open(widget.api)),
-                          child: Column(
-                            children: [
-                              Container(
-                                width: 52,
-                                height: 52,
-                                decoration: BoxDecoration(
-                                  color: t.tone.background,
-                                  borderRadius: BorderRadius.circular(16),
+                  const SizedBox(height: 2),
+                  // Tiles under their headings, in the ERP's order — both
+                  // languages, as the tiles themselves carry.
+                  for (final (group, list) in groups) ...[
+                    StaffGroupHeading(group, bilingual: true),
+                    GridView.count(
+                      crossAxisCount: 3,
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 0.95,
+                      children: [
+                        for (final t in list)
+                          InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: identical(t, _profileTile)
+                                ? _openProfile
+                                : () => _push(t.open(widget.api)),
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 52,
+                                  height: 52,
+                                  decoration: BoxDecoration(
+                                    color: t.tone.background,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Icon(
+                                    t.icon,
+                                    color: t.tone.foreground,
+                                    size: 26,
+                                  ),
                                 ),
-                                child: Icon(
-                                  t.icon,
-                                  color: t.tone.foreground,
-                                  size: 26,
+                                const SizedBox(height: 5),
+                                Text(
+                                  t.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppText.labelMediumInk,
                                 ),
-                              ),
-                              const SizedBox(height: 5),
-                              Text(
-                                t.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppText.labelMediumInk,
-                              ),
-                              Text(
-                                t.hindi,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: AppText.labelSmallMuted,
-                              ),
-                            ],
+                                Text(
+                                  t.hindi,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: AppText.labelSmallMuted,
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),

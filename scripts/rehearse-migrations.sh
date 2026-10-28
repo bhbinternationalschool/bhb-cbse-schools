@@ -7,11 +7,24 @@
 # since-edited migration happened to leave behind. Prod has that state; a
 # fresh database does not.
 #
+# This replays supabase/migrations/*.sql ONLY, and lists every failure rather
+# than stopping at the first. As of 13 Oct 2026 two fail — a real gap, which
+# is what this check is for: 20260910090000 and 20261002130000 alter tables
+# that only the hand-applied supabase/migrations/adhoc-export files create.
+# scripts/e2e-stack.sh replays the history production actually ran (both
+# directories, in version order) and must apply clean.
+#
 # Usage:  bash scripts/rehearse-migrations.sh
 # Leaves the cluster running for inspection; prints how to stop it.
 set -euo pipefail
 
-PGBIN="${PGBIN:-/opt/homebrew/opt/postgresql@17/bin}"
+# Homebrew on macOS, the PGDG package on Linux; PGBIN overrides both.
+if [ -z "${PGBIN:-}" ]; then
+  for d in /opt/homebrew/opt/postgresql@17/bin /usr/local/opt/postgresql@17/bin /usr/lib/postgresql/17/bin; do
+    [ -x "$d/pg_ctl" ] && { PGBIN="$d"; break; }
+  done
+fi
+[ -n "${PGBIN:-}" ] || { echo "Postgres 17 not found — set PGBIN"; exit 1; }
 PORT="${PORT:-55437}"
 
 # Walk to a free port rather than failing on a cluster someone left running
@@ -40,56 +53,9 @@ trap 'echo; echo "cluster still running on port '"$PORT"' — stop it with:"; ec
 psql() { "$PGBIN/psql" -h 127.0.0.1 -p "$PORT" -U postgres "$@"; }
 
 # ── The shim ──────────────────────────────────────────────────────────────
-# Just enough of hosted Supabase for these migrations to apply. Kept minimal
-# on purpose: every object here is one the migrations genuinely reference,
-# so the list doubles as an inventory of what we depend on the platform for.
-psql -q -v ON_ERROR_STOP=1 <<'SQL'
-create extension if not exists pgcrypto;
-create extension if not exists "uuid-ossp";
-
-do $$ begin
-  if not exists (select 1 from pg_roles where rolname='anon')
-    then create role anon nologin noinherit; end if;
-  if not exists (select 1 from pg_roles where rolname='authenticated')
-    then create role authenticated nologin noinherit; end if;
-  if not exists (select 1 from pg_roles where rolname='service_role')
-    then create role service_role nologin noinherit bypassrls; end if;
-end $$;
-
-create schema if not exists auth;
-create schema if not exists storage;
-create schema if not exists extensions;
-
--- auth.uid() is the pivot of nearly every RLS policy in this project.
-create or replace function auth.uid() returns uuid language sql stable as
-  $fn$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $fn$;
-create or replace function auth.role() returns text language sql stable as
-  $fn$ select nullif(current_setting('request.jwt.claim.role', true), '') $fn$;
-create or replace function auth.jwt() returns jsonb language sql stable as
-  $fn$ select coalesce(nullif(current_setting('request.jwt.claims', true), '')::jsonb, '{}'::jsonb) $fn$;
-
-create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid(),
-  email text, raw_user_meta_data jsonb default '{}'::jsonb,
-  created_at timestamptz default now()
-);
-create table if not exists storage.buckets (
-  id text primary key, name text not null, public boolean default false,
-  file_size_limit bigint, allowed_mime_types text[],
-  created_at timestamptz default now()
-);
-create table if not exists storage.objects (
-  id uuid primary key default gen_random_uuid(),
-  bucket_id text references storage.buckets(id),
-  name text, owner uuid, metadata jsonb,
-  created_at timestamptz default now(), updated_at timestamptz default now()
-);
-create or replace function storage.foldername(name text) returns text[]
-  language sql immutable as $fn$ select string_to_array(name, '/') $fn$;
-
-grant usage on schema public, auth, storage, extensions
-  to anon, authenticated, service_role;
-SQL
+# Just enough of hosted Supabase for these migrations to apply — shared with
+# scripts/e2e-stack.sh, which also serves the result through PostgREST.
+psql -q -v ON_ERROR_STOP=1 -f "$ROOT/scripts/supabase-shim.sql" >/dev/null
 
 # ── The replay ────────────────────────────────────────────────────────────
 ok=0; fail=0; failed=()

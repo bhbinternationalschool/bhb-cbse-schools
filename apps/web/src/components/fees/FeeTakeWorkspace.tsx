@@ -1,13 +1,12 @@
 "use client";
 
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
-import { startTransition, useEffect, useMemo, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { IndianRupee } from "lucide-react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
 import type { AccountsState } from "@/lib/accountsTypes";
 import {
-  canApproveConcession,
   canBackdateReceipt,
   canSeeModuleTab,
   hasPermission,
@@ -17,6 +16,7 @@ import {
   earliestCollectionDate,
   feeBackdateVerdict,
 } from "@/lib/feeBackdate";
+import { istTodayIso } from "@/lib/monthRange";
 import {
   decodeTenderChannel,
   encodeTenderChannel,
@@ -100,11 +100,13 @@ import {
   listFutureConcessionCandidates,
   type FutureConcessionCandidate,
 } from "@/lib/counterConcession";
+import { issueSeriesNumber } from "@/lib/numberSeries";
 import { lazyNamedTabPanel } from "@/components/ui/lazyTabPanel";
 import {
   useDemoSession,
   useSessionReadOnly,
 } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import {
   buildEnrichedPaymentSharePayload,
   buildPaymentShareUrl,
@@ -124,6 +126,7 @@ import { ModuleTabButton } from "@/components/ui/ModuleTabs";
 import { MODULE_TAB_CONTAINER_CLASS } from "@/components/ui/modern-tab-bar";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ErpPanel, ErpTableShell } from "@/components/ui/erp-roster";
+import { MonthGroupedList, useMonthGroups } from "@/components/ui/month-grouped-rows";
 
 import { ChequesPanel } from "@/components/fees/ChequesPanel";
 import { ManualBookPanel } from "@/components/fees/ManualBookPanel";
@@ -139,6 +142,12 @@ import { ReceiptWaStatus } from "@/components/fees/ReceiptWaStatus";
 import { ReceiptDeliveryPanel } from "@/components/fees/ReceiptDeliveryPanel";
 import { ReceiptRepairDialog } from "@/components/fees/ReceiptRepairDialog";
 import { CashgramRefundPanel } from "@/components/fees/CashgramRefundPanel";
+import {
+  findRefUses,
+  splitRefs,
+  tenderRefWarnings,
+  type RefUse,
+} from "@/lib/feeTenderRefCheck";
 
 /**
  * The search box owns its keystrokes. Typing re-renders ONLY this input;
@@ -259,8 +268,14 @@ type TenderComposer = {
   amount: string;
 };
 
+/**
+ * Today in India. The receipt's back-dating rule (lib/fees collectPayment,
+ * feeBackdateVerdict) judges the collection date against India's today; the
+ * UTC date is a day behind from 00:00 to 05:30 IST, and a clerk who may not
+ * back-date was then refused on every Collect.
+ */
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return istTodayIso();
 }
 
 function emptyComposer(channel = ""): TenderComposer {
@@ -285,8 +300,14 @@ export function FeeTakeWorkspace() {
   // Someone holding only some Fees functions (reports, receipt delivery, …)
   // sees only their tabs. Collecting, voiding and adjustments write the fee
   // desk, which stays with the Fees grant — no function opens those tabs.
-  const feesWhole = hasPermission(session, null, "fees", "view");
-  const showTab = (id: string) => feesWhole || canSeeModuleTab(session, null, "fees", id);
+  // Decided from the loaded roles + roster (assignments count); no tab is
+  // shown — and none redirected away from — until both are known.
+  const access = useAccessData();
+  const accessRbac = access.rbac ?? undefined;
+  const feesWhole = access.ready && hasPermission(session, access.masters, "fees", "view", accessRbac);
+  const showTab = (id: string) =>
+    feesWhole ||
+    (access.ready && canSeeModuleTab(session, access.masters, "fees", id, accessRbac));
   const FEE_TAB_ORDER: Tab[] = [
     "dashboard",
     "collect",
@@ -307,6 +328,14 @@ export function FeeTakeWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feesWhole, firstShownTab, tab]);
   const showDefaulters = feesWhole || ["list", "policy", "autopay"].some((t) => showTab(t));
+  // Bulk & PDC (/fees/tools) has functions of its own (post-dated cheques,
+  // bulk payment, concession templates).
+  const showTools = feesWhole || ["pdc", "bulk", "templates"].some((t) => showTab(t));
+  // Someone holding only Bulk & PDC functions has no tab here — send them
+  // to the page they do hold rather than an empty fee counter.
+  useEffect(() => {
+    if (!feesWhole && !firstShownTab && showTools) window.location.replace("/fees/tools");
+  }, [feesWhole, firstShownTab, showTools]);
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [sis, setSis] = useState<SisState | null>(null);
   // The search box owns its keystrokes (FeeSearchInput above) — only the
@@ -322,10 +351,7 @@ export function FeeTakeWorkspace() {
    * to future months" — the grant is simply recorded pending, and shows on
    * the parent's next bill only once it has been approved.
    */
-  const mayApproveConcession = useMemo(
-    () => (session ? canApproveConcession(session, masters) : false),
-    [session, masters],
-  );
+  // (Decided by the server since data-layer 2.2e — POST /api/fees/counter-grants.)
   /**
    * Same authority as approving a concession: owner, admin, principal. It
    * lets them date a receipt earlier than today even when the school has
@@ -529,7 +555,6 @@ export function FeeTakeWorkspace() {
       scheduleClientSchoolMirrorSync({
         sis: s,
         fees: f,
-        masters: m,
         payments: loadPayments(),
       });
     });
@@ -557,14 +582,6 @@ export function FeeTakeWorkspace() {
       if (wipe.wiped) {
         flash(
           `Cleared ${wipe.removedVouchers} local receipt(s) — ready for re-import`,
-        );
-      }
-      const { applyFeeDiscountSeedNow } =
-        await import("@/lib/feeDiscountImportHydrate");
-      const discount = applyFeeDiscountSeedNow();
-      if (discount.applied > 0) {
-        flash(
-          `Applied ${discount.applied} student discount grant${discount.applied === 1 ? "" : "s"}`,
         );
       }
       refresh();
@@ -1124,7 +1141,7 @@ export function FeeTakeWorkspace() {
    * scrolled to April must not reprice April: that month is billed, often
    * collected, and its receipt would stop matching the money taken.
    */
-  function changeHeadDiscount(due: FeeDueLine, rupees: string) {
+  async function changeHeadDiscount(due: FeeDueLine, rupees: string) {
     if (!masters || !sis) return;
     const student = sis.students.find((st) => st.id === due.studentId);
     if (!student || !due.feeHeadId) return;
@@ -1145,7 +1162,7 @@ export function FeeTakeWorkspace() {
     const paise = Math.round(
       (Number(rupees.replace(/[^\d.]/g, "")) || 0) * 100,
     );
-    const res = changeStandingDiscount({
+    const res = await changeStandingDiscount({
       studentId: due.studentId,
       studentName: student.fullName,
       feeHeadId: due.feeHeadId,
@@ -1420,6 +1437,77 @@ export function FeeTakeWorkspace() {
     );
   }
 
+  const refCheckBusy = useRef(false);
+  const collectBusy = useRef(false);
+
+  // Counter discounts (or their end on a void) the server could not record
+  // yet are kept in this browser and tried again whenever Fee Take opens
+  // (data-layer 2.2e) — never dropped silently.
+  useEffect(() => {
+    void import("@/lib/counterGrantsClient").then(({ retryQueuedCounterGrants }) => retryQueuedCounterGrants());
+  }, []);
+
+  /**
+   * Look at the typed payment references before anything is saved: a date
+   * or a phone number where a UTR belongs, or a reference already on another
+   * live receipt. Asks; never blocks. Two receipts on one reference is right
+   * when one transfer pays for two children.
+   */
+  async function onCollectChecked() {
+    if (!selectedStudent || refCheckBusy.current) return;
+    const tenders = tenderLines.map((t) => ({ mode: t.mode, ref: t.ref ?? "" }));
+    const refs = [...new Set(tenders.flatMap((t) => splitRefs(t.ref)))];
+    if (refs.length === 0) {
+      onCollect();
+      return;
+    }
+    refCheckBusy.current = true;
+    let uses: RefUse[] = findRefUses(receipts, refs);
+    let serverChecked = false;
+    try {
+      const res = await fetch(
+        `/api/fees/tender-ref-uses?refs=${encodeURIComponent(refs.join(","))}`,
+      );
+      const body = (await res.json().catch(() => null)) as
+        | { ok?: boolean; uses?: RefUse[] }
+        | null;
+      if (res.ok && body?.ok) {
+        uses = [...uses, ...(body.uses ?? [])];
+        serverChecked = true;
+      }
+    } catch {
+      /* said below */
+    } finally {
+      refCheckBusy.current = false;
+    }
+    const familyName = (householdId: string) => {
+      const kids = (sis?.students ?? [])
+        .filter((s) => s.householdId === householdId)
+        .map((s) => s.fullName);
+      return kids.length > 0 ? `family of ${kids.slice(0, 2).join(", ")}` : "another family";
+    };
+    const warnings = tenderRefWarnings({
+      tenders,
+      householdId: selectedStudent.householdId,
+      collectionDate,
+      uses,
+      familyName,
+    });
+    const hasBankRef = tenders.some((t) => t.mode !== "cash" && t.ref.trim());
+    if (!serverChecked && hasBankRef) {
+      warnings.push(
+        "Could not check other computers' receipts for this reference (no reply from the server) — only this browser's receipts were checked.",
+      );
+    }
+    if (warnings.length > 0) {
+      const ok = window.confirm(
+        `Check the payment reference before saving:\n\n• ${warnings.join("\n\n• ")}\n\nSave this receipt anyway?`,
+      );
+      if (!ok) return;
+    }
+    onCollect();
+  }
+
   function onCollect() {
     if (!selectedStudent || !sis || !masters) return;
     setCollectError(null);
@@ -1469,15 +1557,30 @@ export function FeeTakeWorkspace() {
         return;
       }
       if (chosen.length > 0) {
-        executeCollect(new Set(chosen.map((c) => c.key)));
+        void executeCollect(new Set(chosen.map((c) => c.key)));
         return;
       }
     }
 
-    executeCollect(futureConcessionPrompt?.selected ?? new Set());
+    void executeCollect(futureConcessionPrompt?.selected ?? new Set());
   }
 
-  function executeCollect(applyFutureKeys: Set<string>) {
+  /**
+   * One collection at a time (data-layer 2.2e): the receipt number is asked
+   * of the server first and the grants are written after the receipt — a
+   * second click meanwhile must not start another collection.
+   */
+  async function executeCollect(applyFutureKeys: Set<string>) {
+    if (collectBusy.current) return;
+    collectBusy.current = true;
+    try {
+      await executeCollectOnce(applyFutureKeys);
+    } finally {
+      collectBusy.current = false;
+    }
+  }
+
+  async function executeCollectOnce(applyFutureKeys: Set<string>) {
     if (!selectedStudent || !sis) return;
     setFutureConcessionPrompt(null);
 
@@ -1500,6 +1603,20 @@ export function FeeTakeWorkspace() {
         failCollect(check.error);
         return;
       }
+    }
+    // The receipt number comes from the SERVER (data-layer 2.2e): max(the
+    // RECEIPT counter, the highest receipt on record + 1) — never this tab's
+    // copy of the counter, which lagged the records (production 27 Oct: the
+    // counter at 701, receipts on record to RCV-00710). Asked BEFORE anything
+    // is saved, so an unanswered request leaves nothing half done.
+    let issuedReceiptNo: string | undefined;
+    if (collectTarget > 0) {
+      const issued = await issueSeriesNumber("RECEIPT", ay);
+      if (!issued.ok && issued.kind === "failed") {
+        failCollect(`Not saved — the server did not give the next receipt number (${issued.message}). Try again.`);
+        return;
+      }
+      if (issued.ok) issuedReceiptNo = issued.formatted;
     }
     const undoWaivers = () => {
       for (const id of waiverAdjustmentIds) voidFeeAdjustment(id, session.fullName);
@@ -1531,7 +1648,7 @@ export function FeeTakeWorkspace() {
     // Future-month grants apply AFTER the receipt exists (paid path), so
     // each grant carries its source receipt and dies with it on void. The
     // discount-only path has no receipt — grants apply immediately there.
-    const applyFutureGrants = (voucher?: { id: string; receiptNo: string }) => {
+    const applyFutureGrants = async (voucher?: { id: string; receiptNo: string }) => {
       if (applyFutureKeys.size === 0 || !masters || counterDiscountPaise <= 0) {
         return;
       }
@@ -1542,7 +1659,7 @@ export function FeeTakeWorkspace() {
         householdBundle.map((r) => r.student),
         ay,
       );
-      const futureResult = applyFutureConcessionsFromCounter({
+      const futureResult = await applyFutureConcessionsFromCounter({
         candidates,
         applyKeys: applyFutureKeys,
         reason: counterDiscountReason.trim() || "Counter concession",
@@ -1550,9 +1667,8 @@ export function FeeTakeWorkspace() {
         academicYearCode: ay,
         sourceVoucherId: voucher?.id,
         sourceReceiptNo: voucher?.receiptNo,
-        // Same rule as Masters: a clerk who cannot approve a grant there
-        // must not be able to approve one by ticking a box here.
-        canApprove: mayApproveConcession,
+        // Approval is the server's (from the session): a clerk who cannot
+        // approve a grant in Masters cannot approve one by ticking a box here.
       });
       if (!futureResult.ok) {
         futureConcessionMsg = ` · future grants failed: ${futureResult.error}`;
@@ -1584,7 +1700,7 @@ export function FeeTakeWorkspace() {
     if (collectTarget <= 0) {
       if (counterDiscountPaise > 0) {
         if (storeSlices.length > 0) void discountStoreLines(`DISC-${Date.now()}`, storeSlices);
-        applyFutureGrants();
+        await applyFutureGrants();
         setSelectedKeys(new Set());
         setCollectAmountRupees("");
         setLineDiscountRupees({});
@@ -1617,10 +1733,11 @@ export function FeeTakeWorkspace() {
       realisation: t.mode === "cheque" ? "subject_to_clearance" : "cleared",
     }));
 
-    const primaryTxn =
-      voucherTenders.find((t) => t.ref)?.ref ??
-      voucherTenders.find((t) => t.instrumentDate)?.instrumentDate ??
-      "";
+    // A receipt with no reference typed has no transaction id. It used to
+    // fall back to the instrument date, and by Oct 2026 hundreds of receipts
+    // carried a bare date as their "transaction id" — many families sharing
+    // one, none of them matchable to a bank credit.
+    const primaryTxn = voucherTenders.find((t) => t.ref.trim())?.ref.trim() ?? "";
     const primaryTxnDate =
       voucherTenders.find((t) => t.instrumentDate)?.instrumentDate ||
       collectionDate;
@@ -1648,6 +1765,7 @@ export function FeeTakeWorkspace() {
       note: [note.trim(), discountNote, chequeNote].filter(Boolean).join(" · "),
       backdatePolicy: masters?.feeBackdatePolicy,
       mayBackdate,
+      issuedReceiptNo,
     });
     if (!result.ok) {
       undoWaivers();
@@ -1666,7 +1784,7 @@ export function FeeTakeWorkspace() {
     // Bind this receipt's counter waivers to it, so voiding takes them back.
     linkAdjustmentsToVoucher(waiverAdjustmentIds, result.voucher.id);
 
-    applyFutureGrants({
+    await applyFutureGrants({
       id: result.voucher.id,
       receiptNo: result.voucher.receiptNo,
     });
@@ -1983,6 +2101,14 @@ export function FeeTakeWorkspace() {
               className="inline-flex items-center rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-bold text-[var(--danger)] transition hover:brightness-95"
             >
               Defaulters
+            </Link>
+          ) : null}
+          {showTools ? (
+            <Link
+              href="/fees/tools"
+              className="inline-flex items-center rounded-lg border border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--brand-deep)] transition hover:bg-[var(--surface-sunken)]"
+            >
+              Bulk &amp; PDC
             </Link>
           ) : null}
         </div>
@@ -2366,7 +2492,7 @@ export function FeeTakeWorkspace() {
               lineDiscountRupees={lineDiscountRupees}
               recurringEligible={recurringEligible}
               recurringChosen={recurringDueKeys}
-              onChangeHeadDiscount={changeHeadDiscount}
+              onChangeHeadDiscount={(d, r) => void changeHeadDiscount(d, r)}
               onToggleRecurring={(dueKey, on) => {
                 setRecurringDueKeys((prev) => {
                   const next = new Set(prev);
@@ -2433,7 +2559,7 @@ export function FeeTakeWorkspace() {
               onCollectionDate={setCollectionDate}
               onSchoolReceiptNo={setSchoolReceiptNo}
               onNote={setNote}
-              onCollect={onCollect}
+              onCollect={() => void onCollectChecked()}
               collectError={collectError}
               onSendUpiLink={() => void onSendUpiLink()}
               masters={masters}
@@ -2578,10 +2704,10 @@ export function FeeTakeWorkspace() {
           }}
           onCancel={() => {
             setFutureConcessionPrompt(null);
-            executeCollect(new Set());
+            void executeCollect(new Set());
           }}
           onConfirm={() => {
-            executeCollect(futureConcessionPrompt.selected);
+            void executeCollect(futureConcessionPrompt.selected);
           }}
         />
       ) : null}
@@ -4635,6 +4761,16 @@ function ReceiptsPanel({
     leafFrom ||
     leafTo;
 
+  // Folded by the IST month of the collection date, newest open. Any filter
+  // opens every month that still has a match.
+  const receiptMonths = useMonthGroups({
+    rows: filtered,
+    dateOf: (v) => v.collectionDate,
+    filterActive: !!hasFilters,
+    filterKey: [dateFrom, dateTo, studentQ, parentQ, classId, sectionId, modeFilter, concessionFilter, collectorQ, refQ, paperOnly, leafFrom, leafTo].join("|"),
+    storageKey: "fees.receipts",
+  });
+
   if (receipts.length === 0) {
     return (
       <p className="mt-8 text-sm text-[var(--muted)]">
@@ -4868,110 +5004,115 @@ function ReceiptsPanel({
       </ErpPanel>
 
       <ErpTableShell>
-        {filtered.length === 0 ? (
-          <p className="px-4 py-10 text-center text-sm text-[var(--muted)]">
-            No receipts match these filters.
-          </p>
-        ) : (
-          <ul className="divide-y divide-[var(--border)]">
-            {filtered.map((v) => {
-              const voided = !!v.voidedAt;
-              const students = Array.from(
-                new Set(v.lines.map((l) => l.studentName)),
-              );
-              const modes = [
-                ...new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
-              ];
-              return (
-                <li key={v.id}>
-                  <button
-                    type="button"
-                    onClick={() => onPreview(v.id)}
-                    className={`flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-[rgba(197,160,40,0.08)] ${
-                      voided ? "opacity-60" : ""
-                    }`}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-bold text-[var(--brand-deep)]">
-                          {v.receiptNo}
+        <MonthGroupedList
+          month={receiptMonths}
+          rowKey={(v) => v.id}
+          countLabel={(n) => `${n} ${n === 1 ? "receipt" : "receipts"}`}
+          summary={(vs) =>
+            `${formatInr(vs.reduce((n, v) => n + (v.voidedAt ? 0 : v.totalPaise), 0))} collected`
+          }
+          empty={
+            <p className="px-4 py-10 text-center text-sm text-[var(--muted)]">
+              No receipts match these filters.
+            </p>
+          }
+          renderItem={(v) => {
+            const voided = !!v.voidedAt;
+            const students = Array.from(
+              new Set(v.lines.map((l) => l.studentName)),
+            );
+            const modes = [
+              ...new Set(v.tenders.map((t) => tenderModeLabel(t.mode))),
+            ];
+            return (
+              <li key={v.id}>
+                <button
+                  type="button"
+                  onClick={() => onPreview(v.id)}
+                  className={`flex w-full flex-wrap items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-[rgba(197,160,40,0.08)] ${
+                    voided ? "opacity-60" : ""
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold text-[var(--brand-deep)]">
+                        {v.receiptNo}
+                      </span>
+                      {voided ? (
+                        <span className="rounded bg-[rgba(180,60,60,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--danger)]">
+                          Void
                         </span>
-                        {voided ? (
-                          <span className="rounded bg-[rgba(180,60,60,0.12)] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[var(--danger)]">
-                            Void
-                          </span>
-                        ) : null}
-                        {v.schoolReceiptNo ? (
-                          <span className="text-[11px] text-[var(--muted)]">
-                            Book {v.schoolReceiptNo}
-                          </span>
-                        ) : null}
-                        {modes.length ? (
-                          <span className="text-[11px] text-[var(--muted)]">
-                            {modes.join(" · ")}
-                          </span>
-                        ) : null}
-                        {v.whatsappSentAt && !voided ? (
-                          <span className="rounded bg-[#128C7E]/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#128C7E]">
-                            WA
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
-                        {v.collectionDate} · {students.join(", ")}
-                        {guardianOf(v.householdId)
-                          ? ` · ${guardianOf(v.householdId)}`
-                          : ""}{" "}
-                        · by {v.cashierName}
-                      </p>
-                    </div>
-                    <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
-                      {formatInr(v.totalPaise)}
-                    </div>
-                  </button>
-                  {!voided ? (
-                    <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border)] px-4 py-2">
-                      {/* Only where the receipt cannot say what it settled:
-                          no lines at all, or lines that do not add up to the
-                          money collected. Everywhere else this button would
-                          be an invitation to rewrite a correct receipt. */}
-                      {needsRepair(v) ? (
-                        <>
-                          <span className="mr-auto text-[11px] font-semibold text-[var(--warning)]">
-                            {v.lines.length === 0
-                              ? "No months attached — this receipt clears nothing"
-                              : `Lines add to ${formatInr(v.lines.reduce((n, l) => n + l.amountPaise, 0))}, not ${formatInr(v.totalPaise)}`}
-                          </span>
-                          <button
-                            type="button"
-                            className="rounded-lg border border-[var(--warning)] px-3 py-1.5 text-xs font-semibold text-[var(--warning)]"
-                            onClick={() => setRepairing(v.id)}
-                          >
-                            Re-attach
-                          </button>
-                        </>
                       ) : null}
-                      <button
-                        type="button"
-                        className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
-                        onClick={() => onPreview(v.id)}
-                      >
-                        Open
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--danger)]"
-                        onClick={() => onVoid(v.id)}
-                      >
-                        Void
-                      </button>
+                      {v.schoolReceiptNo ? (
+                        <span className="text-[11px] text-[var(--muted)]">
+                          Book {v.schoolReceiptNo}
+                        </span>
+                      ) : null}
+                      {modes.length ? (
+                        <span className="text-[11px] text-[var(--muted)]">
+                          {modes.join(" · ")}
+                        </span>
+                      ) : null}
+                      {v.whatsappSentAt && !voided ? (
+                        <span className="rounded bg-[#128C7E]/12 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#128C7E]">
+                          WA
+                        </span>
+                      ) : null}
                     </div>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        )}
+                    <p className="mt-0.5 truncate text-xs text-[var(--muted)]">
+                      {v.collectionDate} · {students.join(", ")}
+                      {guardianOf(v.householdId)
+                        ? ` · ${guardianOf(v.householdId)}`
+                        : ""}{" "}
+                      · by {v.cashierName}
+                    </p>
+                  </div>
+                  <div className="text-sm font-bold tabular-nums text-[var(--brand-deep)]">
+                    {formatInr(v.totalPaise)}
+                  </div>
+                </button>
+                {!voided ? (
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border)] px-4 py-2">
+                    {/* Only where the receipt cannot say what it settled:
+                        no lines at all, or lines that do not add up to the
+                        money collected. Everywhere else this button would
+                        be an invitation to rewrite a correct receipt. */}
+                    {needsRepair(v) ? (
+                      <>
+                        <span className="mr-auto text-[11px] font-semibold text-[var(--warning)]">
+                          {v.lines.length === 0
+                            ? "No months attached — this receipt clears nothing"
+                            : `Lines add to ${formatInr(v.lines.reduce((n, l) => n + l.amountPaise, 0))}, not ${formatInr(v.totalPaise)}`}
+                        </span>
+                        <button
+                          type="button"
+                          className="rounded-lg border border-[var(--warning)] px-3 py-1.5 text-xs font-semibold text-[var(--warning)]"
+                          onClick={() => setRepairing(v.id)}
+                        >
+                          Re-attach
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="rounded-lg bg-[var(--brand-deep)] px-3 py-1.5 text-xs font-semibold text-white"
+                      onClick={() => onPreview(v.id)}
+                    >
+                      Open
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--danger)]"
+                      onClick={() => onVoid(v.id)}
+                    >
+                      Void
+                    </button>
+                  </div>
+                ) : null}
+              </li>
+            );
+          }}
+        />
       </ErpTableShell>
 
       {repairing

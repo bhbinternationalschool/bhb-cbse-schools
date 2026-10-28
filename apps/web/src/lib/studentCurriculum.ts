@@ -85,18 +85,6 @@ export type OfferingRow = {
   optional: boolean;
 };
 
-/** Codes treated as optional electives by stage when linked to the class. */
-const OPTIONAL_CODES: Record<ClassGroupCode, string[]> = {
-  PRE_PRIMARY: [],
-  PRIMARY: [],
-  // R3 is compulsory but WHICH R3 is the family's choice, so the candidate
-  // third languages stay options; Skill Education (VOC) and CT & AI (ICT)
-  // are compulsory in VI–VIII (CBSE 2025-26 / 2026-27) and are not.
-  MIDDLE: ["SKT", "URDU", "MUS", "WE"],
-  SECONDARY: [],
-  SENIOR: [],
-};
-
 export type CurriculumChoiceMode =
   | "none"
   | "middle_options"
@@ -161,18 +149,20 @@ export function normalizeCurriculumRequest(
   };
 }
 
-function optionalCodeSet(group: ClassGroupCode): Set<string> {
-  return new Set(OPTIONAL_CODES[group].map((c) => c.toUpperCase()));
-}
-
+/**
+ * Optional exactly when Masters says so — the class link's Optional tick or
+ * the subject's elective flag, the same test the Masters subject screen shows
+ * as "Optional" / "Compulsory". A hard-coded list of middle-stage options
+ * (SKT, URDU, MUS, WE) used to override it: on 28 Oct 2026 Sanskrit was
+ * linked COMPULSORY to VI–VIII in Masters, yet marks entry treated it as an
+ * option no child had chosen and never showed it. Which third language a
+ * class offers as an option is the school's choice, set per class in Masters.
+ */
 export function isOfferingOptional(
   subject: Subject,
   link: ClassSubjectLink,
-  group: ClassGroupCode,
 ): boolean {
-  if (link.isOptional) return true;
-  if (subject.isElective) return true;
-  return optionalCodeSet(group).has(subject.code.toUpperCase());
+  return !!link.isOptional || !!subject.isElective;
 }
 
 /** Active class–subject offerings with optional flags. */
@@ -181,9 +171,6 @@ export function offeringForClass(
   classId: string,
 ): OfferingRow[] {
   if (!classId) return [];
-  const cls = masters.classes.find((c) => c.id === classId);
-  const group: ClassGroupCode =
-    cls?.groupCode ?? (cls ? classGroupCodeForName(cls.name) : "PRIMARY");
   const byId = new Map(masters.subjects.map((s) => [s.id, s]));
   const rows: OfferingRow[] = [];
   for (const link of masters.classSubjects ?? []) {
@@ -193,7 +180,7 @@ export function offeringForClass(
     rows.push({
       link,
       subject,
-      optional: isOfferingOptional(subject, link, group),
+      optional: isOfferingOptional(subject, link),
     });
   }
   return rows.sort(

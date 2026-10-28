@@ -20,13 +20,14 @@ import {
   UserRoundSearch,
   X,
 } from "lucide-react";
-import { formatInr, loadMasters } from "@/lib/masters";
-import { canAccessHref, loadRbac } from "@/lib/rbac";
+import { formatInr } from "@/lib/masters";
+import { canAccessHref } from "@/lib/rbac";
 import { loadSis } from "@/lib/sis";
 import { loadFees } from "@/lib/fees";
 import { loadTransport } from "@/lib/transport";
 import { loadAdmissions } from "@/lib/admissions";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 
 type SearchHit = {
   id: string;
@@ -49,6 +50,7 @@ const MODULE_CATALOG: { href: string; label: string; keywords: string }[] = [
   { href: "/trust", label: "Trust", keywords: "projects works capital" },
   { href: "/fees", label: "Fee Take", keywords: "collect receipt dues payment" },
   { href: "/fees/defaulters", label: "Defaulters", keywords: "overdue recovery" },
+  { href: "/fees/tools", label: "Bulk & PDC", keywords: "post dated cheque pdc bulk payment sponsor siblings staff ward concession template" },
   { href: "/fees/defaulters?tab=policy", label: "Withhold policy & approvals", keywords: "defaulter policy hold withhold block allow disallow bus transport admit card round bulk" },
   { href: "/attendance", label: "Attendance", keywords: "register present leave" },
   { href: "/homework", label: "Homework", keywords: "diary assignment" },
@@ -92,18 +94,22 @@ export function UniversalSearchBar() {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [ready, setReady] = useState(false);
+  // Which modules may be offered, and the staff roster, come from the copies
+  // the sidebar and the module gate decide with (data-layer 2.1f). Until they
+  // have loaded the list is empty and says so — never a guess.
+  const access = useAccessData();
+  const masters = access.masters;
+  const rbac = access.rbac;
 
   useEffect(() => {
     setReady(true);
   }, []);
 
   const hits = useMemo(() => {
-    if (!ready) return [] as SearchHit[];
+    if (!ready || !masters || !rbac) return [] as SearchHit[];
     const q = query.trim();
     if (q.length < 1) {
       // Show quick module shortcuts when focused with empty query
-      const masters = loadMasters();
-      const rbac = loadRbac();
       return MODULE_CATALOG.filter((m) =>
         canAccessHref(session, masters, m.href, rbac),
       )
@@ -117,8 +123,6 @@ export function UniversalSearchBar() {
         }));
     }
 
-    const masters = loadMasters();
-    const rbac = loadRbac();
     const out: (SearchHit & { score: number })[] = [];
 
     for (const m of MODULE_CATALOG) {
@@ -239,7 +243,7 @@ export function UniversalSearchBar() {
       .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
       .slice(0, 12)
       .map(({ score: _s, ...hit }) => hit);
-  }, [query, ready, session]);
+  }, [query, ready, session, masters, rbac]);
 
   useEffect(() => {
     setActive(0);
@@ -366,7 +370,11 @@ export function UniversalSearchBar() {
         >
           {hits.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-[var(--muted)]">
-              No matches for “{query}”
+              {!access.ready
+                ? access.status === "failed"
+                  ? "Search is unavailable: your roles or the staff list did not load."
+                  : "Loading…"
+                : `No matches for “${query}”`}
             </p>
           ) : (
             hits.map((hit, i) => {

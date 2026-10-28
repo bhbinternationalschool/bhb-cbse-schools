@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   CUSTOM_DOWNLOAD_COLUMNS,
@@ -14,6 +15,8 @@ import {
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { hasPermission } from "@/lib/rbac";
+import { MonthRangeFilter, useMonthRange } from "@/components/ui/month-range-filter";
+import { reportPeriodPayload } from "@/lib/monthRange";
 
 export function SisReportsPanel({
   tick = 0,
@@ -24,14 +27,15 @@ export function SisReportsPanel({
 }) {
   const session = useDemoSession();
   const ay = session.academicYearCode;
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [status, setStatus] = useState<"all" | "active" | "inactive">("active");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [month, setMonth] = useState("");
+  // One admission period: Month and From/To can never disagree
+  // (lib/monthRange.ts). Blank = every admission date, as before. Not bound
+  // to the session — the roster holds children admitted in earlier years.
+  const period = useMonthRange({ initial: "all", allowOpen: true, storageKey: "students.sisReports" });
   const [customCols, setCustomCols] = useState<string[]>([
     "admissionNo",
     "fullName",
@@ -51,7 +55,6 @@ export function SisReportsPanel({
   const [running, setRunning] = useState<string | null>(null);
 
   useEffect(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
   }, [tick, ay]);
 
@@ -118,9 +121,7 @@ export function SisReportsPanel({
       classId: classId || undefined,
       sectionId: sectionId || undefined,
       status,
-      fromDate: fromDate || undefined,
-      toDate: toDate || undefined,
-      month: month || undefined,
+      ...reportPeriodPayload("range", period.range, period.session),
       customColumns: id === "custom_download" ? customCols : undefined,
       masters: masters ?? undefined,
       sis: sis ?? undefined,
@@ -140,6 +141,9 @@ export function SisReportsPanel({
     );
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !sis) {
     return (
       <p className="mt-4 text-sm text-[var(--muted)]">Loading reports…</p>
@@ -223,40 +227,7 @@ export function SisReportsPanel({
               <option value="all">All</option>
             </select>
           </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              From
-            </span>
-            <input
-              type="date"
-              className="field !py-1.5"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-            />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              To
-            </span>
-            <input
-              type="date"
-              className="field !py-1.5"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-            />
-          </label>
-          <label className="text-sm">
-            <span className="mb-1 block text-[11px] text-[var(--muted)]">
-              Month
-            </span>
-            <input
-              type="month"
-              className="field !py-1.5"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              title="Used by monthly admission report"
-            />
-          </label>
+          <MonthRangeFilter period={period} />
         </div>
       </div>
 
@@ -318,7 +289,7 @@ export function SisReportsPanel({
             <ul className="divide-y divide-[rgba(32,48,80,0.06)]">
               {(byCat[cat.id] ?? []).map((r) => (
                 <li
-                  key={r.id}
+                  key={r.id} data-report-id={r.id}
                   className="flex items-start justify-between gap-2 bg-white px-3 py-2.5"
                 >
                   <div className="min-w-0">

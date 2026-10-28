@@ -187,7 +187,9 @@ export async function POST(req: Request) {
       title: `${auth.ctx.session.fullName} · BHB International School`,
       body: pushText.length > 200 ? `${pushText.slice(0, 197)}…` : pushText,
       url: "/notices",
-      data: { kind: "broadcast" },
+      // The whole message rides along so the app opens it in full (the
+      // notification line stops at 200 characters; broadcasts are not notices).
+      data: { kind: "broadcast", fullText: pushText.slice(0, 3000), sender: auth.ctx.session.fullName || "" },
     }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
   }
 

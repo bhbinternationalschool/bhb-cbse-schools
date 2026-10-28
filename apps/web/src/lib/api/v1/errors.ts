@@ -9,6 +9,8 @@ export type ApiErrorCode =
   | "upgrade_required"
   /** Every child of this parent's family is inactive — the app is closed to them. */
   | "family_inactive"
+  /** 429: too many requests from this caller (e.g. school chat's per-sender limit). */
+  | "rate_limited"
   | "server_error";
 
 export class ApiError extends Error {
@@ -21,6 +23,15 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
+}
+
+/**
+ * The status a caller that turns an auth failure into a response should
+ * use: a server-side read failure (503) stays a 503 — answering it as 401
+ * would sign the person out because the database was slow (data-layer 0.5c).
+ */
+export function authFailureStatus(error: unknown): number {
+  return error instanceof ApiError && error.status >= 500 ? error.status : 401;
 }
 
 export function apiOk<T>(data: T, init?: ResponseInit) {

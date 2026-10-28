@@ -1,5 +1,10 @@
 # Deploy on merge to main — Cloud Build trigger
 
+> **Superseded, never created (13 Oct 2026).** The design in use is
+> `docs/DEPLOY_ON_MERGE.md` (`cloudbuild.deploy-on-merge.yaml`, set up by
+> `scripts/setup-deploy-on-merge.sh`), and it is not set up yet either. This
+> file is kept for its history only; no `deploy-main` trigger exists.
+
 The goal: merging to `main` deploys itself, in GCP, with no local `gcloud` and
 no expiring login. This replaces having to run `scripts/deploy-online.sh` from
 a laptop whose session keeps timing out (and it needs no service-account key,

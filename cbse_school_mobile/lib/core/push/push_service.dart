@@ -10,15 +10,7 @@ import "package:package_info_plus/package_info_plus.dart";
 
 import "../api/api_client.dart";
 import "../i18n/locale_controller.dart";
-
-/// Runs in a separate isolate when a message arrives while the app is
-/// terminated/backgrounded. FCM already displays `notification` messages
-/// itself in that state, so there is nothing to render here — the handler
-/// only exists so the plugin has one registered.
-@pragma("vm:entry-point")
-Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-}
+import "broadcast_inbox.dart";
 
 /// FCM push for the app. One instance per app; `init()` once at startup,
 /// `registerWithServer()` after every sign-in / session resume, and
@@ -46,18 +38,47 @@ class PushService {
     "message": ("Messages", "संदेश"),
     "leave": ("Leave", "छुट्टी"),
     "notice": ("Notices", "सूचनाएँ"),
+    // 20 Oct 2026 — the ERP's notification service (apps/web lib/notify).
+    "approval": ("Approvals", "मंज़ूरी"),
+    "document": ("Documents", "दस्तावेज़"),
   };
 
+  /// Kinds whose channel id carries `_v2` (21 Oct 2026). Build 1.0.33+34
+  /// shipped placeholder clips for these, and Android keeps the sound a
+  /// channel was created with — the real clips need channel ids those
+  /// phones never had. The clip files keep their names (res/raw). Must
+  /// match PUSH_VOICE_V2_KINDS in apps/web/src/lib/pushVoice.ts.
+  static const voiceV2Kinds = {"approval", "document"};
+
+  /// The channel id for a kind's clip in one language.
+  static String voiceChannelId(String kind, String lang) =>
+      voiceV2Kinds.contains(kind)
+      ? "bhb_voice_${kind}_${lang}_v2"
+      : "bhb_voice_${kind}_$lang";
+
+  /// The res/raw clip a voice channel plays (drops any `_v2`).
+  static String voiceSoundOf(String channelId) =>
+      channelId.replaceFirst(RegExp(r"_v\d+$"), "");
+
+  /// Channels with the placeholder sounds — deleted at start-up so the
+  /// phone's notification settings don't list each line twice.
+  static List<String> get retiredVoiceChannelIds => [
+    for (final k in voiceV2Kinds) ...["bhb_voice_${k}_hi", "bhb_voice_${k}_en"],
+  ];
+
   static Iterable<String> get _voiceChannelIds => _voiceKinds.keys.expand(
-    (k) => ["bhb_voice_${k}_hi", "bhb_voice_${k}_en"],
+    (k) => [voiceChannelId(k, "hi"), voiceChannelId(k, "en")],
   );
 
   static String _voiceChannelName(String id) {
-    final parts = id.split("_"); // bhb voice <kind> <lang>
+    final parts = id.split("_"); // bhb voice <kind> <lang> [v2]
     final names = _voiceKinds[parts[2]];
     if (names == null) return id;
-    return parts[3] == "hi" ? "${names.$2} (हिंदी आवाज़)" : "${names.$1} (English voice)";
+    return parts[3] == "hi"
+        ? "${names.$2} (हिंदी आवाज़)"
+        : "${names.$1} (English voice)";
   }
+
   // Shown in the phone's notification settings, so in the app's language.
   // Re-creating the channel at every start renames it after a switch.
   static String get _channelName => LocaleController.strings.sysPushChannelName;
@@ -83,7 +104,12 @@ class PushService {
       return;
     }
 
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    // No background handler on purpose. The server always sends a
+    // `notification` payload with its channel, so Android shows it itself
+    // while the app is closed. Registering even an empty handler made the
+    // plugin start its JobIntentService for every such push, and Android
+    // killing that service mid-start crashed the app with a
+    // SecurityException (Play vitals, 1.0.19–1.0.25; 11 Oct 2026).
 
     // Android channel + local-notification plugin (foreground display).
     const androidInit = AndroidInitializationSettings("@mipmap/ic_launcher");
@@ -115,17 +141,8 @@ class PushService {
         .resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin
         >();
-    for (final id in _voiceChannelIds) {
-      await androidLocal?.createNotificationChannel(
-        AndroidNotificationChannel(
-          id,
-          _voiceChannelName(id),
-          description: _channelDescription,
-          importance: Importance.high,
-          playSound: true,
-          sound: RawResourceAndroidNotificationSound(id),
-        ),
-      );
+    if (androidLocal != null) {
+      await setUpVoiceChannels(androidLocal, _channelDescription);
     }
 
     // iOS: show banners while the app is in the foreground too.
@@ -160,6 +177,31 @@ class PushService {
     FirebaseMessaging.instance.onTokenRefresh.listen((t) {
       unawaited(_send(t));
     });
+  }
+
+  /// Creates one channel per spoken line and deletes the retired
+  /// placeholder channels. Creating an existing channel only renames it;
+  /// deleting a missing one is a no-op, so this runs at every start.
+  @visibleForTesting
+  static Future<void> setUpVoiceChannels(
+    AndroidFlutterLocalNotificationsPlugin android,
+    String description,
+  ) async {
+    for (final id in retiredVoiceChannelIds) {
+      await android.deleteNotificationChannel(id);
+    }
+    for (final id in _voiceChannelIds) {
+      await android.createNotificationChannel(
+        AndroidNotificationChannel(
+          id,
+          _voiceChannelName(id),
+          description: description,
+          importance: Importance.high,
+          playSound: true,
+          sound: RawResourceAndroidNotificationSound(voiceSoundOf(id)),
+        ),
+      );
+    }
   }
 
   /// Ask for permission (no-op if already decided) and upload the current
@@ -231,6 +273,14 @@ class PushService {
     // The spoken line the server chose, when this app has that channel.
     final voice = m.data["voice"];
     final voiced = voice is String && _voiceChannelIds.contains(voice);
+    // The notification body is cut at 200 characters by the server; a
+    // broadcast carries its whole text, so the expanded notification shows
+    // all of it (and a tap opens it in full — BroadcastInbox).
+    final full = m.data["fullText"];
+    final expanded = full is String && full.trim().isNotEmpty
+        ? full
+        : (body ?? "");
+    final style = BigTextStyleInformation(expanded, contentTitle: title);
     await _local.show(
       m.hashCode,
       title,
@@ -244,7 +294,8 @@ class PushService {
                 importance: Importance.high,
                 priority: Priority.high,
                 playSound: true,
-                sound: RawResourceAndroidNotificationSound(voice),
+                sound: RawResourceAndroidNotificationSound(voiceSoundOf(voice)),
+                styleInformation: style,
               )
             : AndroidNotificationDetails(
                 _channelId,
@@ -252,25 +303,26 @@ class PushService {
                 channelDescription: _channelDescription,
                 importance: Importance.high,
                 priority: Priority.high,
+                styleInformation: style,
               ),
       ),
-      payload: jsonEncode(m.data),
+      payload: jsonEncode({...m.data, "title": ?title}),
     );
   }
 
-  static String? _routeFromMessage(RemoteMessage m) {
-    final url = m.data["url"];
-    if (url is String && url.startsWith("/")) return url;
-    return null;
-  }
+  /// A tapped broadcast routes to its full text (BroadcastInbox), anything
+  /// else to the `url` the server sent.
+  static String? _routeFromMessage(RemoteMessage m) => BroadcastInbox.routeFor({
+    ...m.data,
+    if (m.notification?.title != null) "title": m.notification!.title,
+  });
 
   static String? _routeFromPayload(String? payload) {
     if (payload == null || payload.isEmpty) return null;
     try {
       final data = jsonDecode(payload);
-      if (data is Map && data["url"] is String) {
-        final url = data["url"] as String;
-        if (url.startsWith("/")) return url;
+      if (data is Map) {
+        return BroadcastInbox.routeFor(Map<String, dynamic>.from(data));
       }
     } catch (_) {
       /* ignore */

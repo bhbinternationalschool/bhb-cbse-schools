@@ -3,10 +3,13 @@ import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { assertMobileFeature } from "@/lib/api/v1/mobileAccess.server";
 import {
   classLabelOf,
+  feeDiscountsKnown,
   householdContact,
   loadFeeContext,
+  openDueLinesFor,
   openDuesFor,
 } from "@/lib/api/v1/staffFees";
+import { allocationRanks, dueRefKey } from "@/lib/staffFeeCollect";
 import { TENDER_MODES, formatInr } from "@/lib/fees";
 import { academicYearStartOn } from "@/lib/masters";
 import { canBackdateReceipt } from "@/lib/rbac";
@@ -45,8 +48,21 @@ export async function GET(request: Request) {
     );
     const contact = householdContact(sis, student.householdId);
 
+    // A discount is only shown as a figure when every source behind it was
+    // read; otherwise the phone says "not loaded" rather than ₹0.
+    const discountsKnown = await feeDiscountsKnown(fees);
+    // The order a "total paying now" fills dues in — the web counter's own
+    // comparator over the whole household, so the phone need not re-implement
+    // it. The collect route re-derives the split and refuses a mismatch.
+    const ranks = allocationRanks(
+      siblings.flatMap((s) => openDueLinesFor(s, masters, fees, today)),
+    );
+
     const children = siblings.map((s) => {
-      const dues = openDuesFor(s, masters, fees);
+      const dues = openDuesFor(s, masters, fees, today, discountsKnown).map((d) => ({
+        ...d,
+        allocationRank: ranks.get(dueRefKey(s.id, d.dueKey)) ?? null,
+      }));
       const openPaise = dues.reduce((n, d) => n + d.balancePaise, 0);
       return {
         studentId: s.id,
@@ -82,6 +98,7 @@ export async function GET(request: Request) {
         mayOverride: canBackdateReceipt(ctx.session, masters),
       }),
       children,
+      discountsKnown,
       totalPaise,
       totalLabel: formatInr(totalPaise),
       tenderModes: TENDER_MODES.map((m) => ({
@@ -90,6 +107,7 @@ export async function GET(request: Request) {
         refLabel: m.refLabel,
         needsRef: m.needsRef,
         needsInstrumentDate: m.needsInstrumentDate,
+        needsBank: m.needsBank,
       })),
     });
   } catch (e) {

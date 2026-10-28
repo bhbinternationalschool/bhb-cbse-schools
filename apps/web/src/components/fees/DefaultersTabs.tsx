@@ -21,6 +21,7 @@ import { DefaultersPlaybook } from "@/components/fees/DefaultersPlaybook";
 import { DefaulterHoldPanel } from "@/components/fees/DefaulterHoldPanel";
 import { FeeAutopayPanel } from "@/components/fees/FeeAutopayPanel";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { canSeeModuleTab } from "@/lib/rbac";
 
 type Tab = "list" | "policy" | "autopay";
@@ -39,9 +40,13 @@ export function DefaultersTabs() {
   // sees only those tabs. The list is built from the fee desk, which only
   // the Fees grant reads and writes, so no function opens it.
   const session = useDemoSession();
-  const shown = (["list", "policy", "autopay"] as Tab[]).filter((t) =>
-    canSeeModuleTab(session, null, "fees", t),
-  );
+  const access = useAccessData();
+  // Nothing is cut until the roles and roster are known.
+  const shown = access.ready
+    ? (["list", "policy", "autopay"] as Tab[]).filter((t) =>
+        canSeeModuleTab(session, access.masters, "fees", t, access.rbac ?? undefined),
+      )
+    : [];
   const firstShown = shown[0] ?? null;
 
   useEffect(() => {

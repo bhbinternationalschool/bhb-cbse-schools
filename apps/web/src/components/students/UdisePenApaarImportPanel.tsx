@@ -45,9 +45,11 @@ import {
   type UdiseSheetRecord,
 } from "@/lib/udiseUploadStore";
 import {
+  clearOutcome,
   clearServerSheet,
   loadServerSheet,
   saveServerSheet,
+  sheetSaveFailureMessage,
 } from "@/lib/udiseUploadServer";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import {
@@ -550,7 +552,7 @@ export function UdisePenApaarImportPanel({
       // whether the sheet will be on the other machine tomorrow.
       if (!saved.ok) {
         setError(
-          `Saved in this browser only — it will not appear on another machine. ${saved.error}` +
+          sheetSaveFailureMessage(saved) +
             (keptLocal ? "" : " It could not be saved here either, so it will be lost on reload."),
         );
       }
@@ -1150,12 +1152,21 @@ export function UdisePenApaarImportPanel({
                   <button
                     type="button"
                     className="underline decoration-dotted underline-offset-2"
-                    onClick={() => {
-                      clearUdiseUpload();
-                      void clearServerSheet(
-                        academicYearCode ?? "",
-                        (records ?? []).map((r) => r.key),
+                    onClick={async () => {
+                      // The server first: a refused clear leaves the sheet on
+                      // screen (and in this browser) as it is.
+                      const outcome = clearOutcome(
+                        await clearServerSheet(
+                          academicYearCode ?? "",
+                          (records ?? []).map((r) => r.key),
+                        ),
                       );
+                      if (!outcome.clearScreen) {
+                        setError(outcome.error);
+                        return;
+                      }
+                      setError(null);
+                      clearUdiseUpload();
                       setStoredInfo(null);
                       setRecords(null);
                       setMatrix(null);

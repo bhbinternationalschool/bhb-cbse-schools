@@ -20,7 +20,7 @@
 #
 # WHAT RUNS HERE
 #   Tata Fleet Edge push   /api/transport/fleet-edge/live (URL set in Tata's portal)
-#   bhb-fleet-alerts-tick, bhb-fee-integrity-tick, bhb-birthday-tick,
+#   bhb-fleet-alerts-tick, bhb-gps-stops-nightly, bhb-fee-integrity-tick, bhb-birthday-tick,
 #   bhb-bigquery-nightly-sync   (scripts/setup-cloud-scheduler.sh, LITE_URL)
 # Nothing that uses after() or a debounced desk push may be pointed here.
 #

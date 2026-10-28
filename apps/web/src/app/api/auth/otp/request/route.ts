@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { issueParentOtp, normalizeMobile10 } from "@/lib/parentOtp.server";
 import { noteUnknownLoginServer } from "@/lib/loginUnknownNumbers.server";
+import { inviteNumberForVerify } from "@/lib/waNumberVerify.server";
 import { resolveHouseholdByMobileServer } from "@/lib/parentHousehold.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { isReviewLoginMobile } from "@/lib/reviewLogin.server";
@@ -48,7 +49,13 @@ export async function POST(request: Request) {
       // The office's call list (Comms → WhatsApp → Class groups): a family
       // who wants the app but whose number the ERP does not have.
       const m10 = normalizeMobile10(mobile);
-      if (m10) await noteUnknownLoginServer(m10, "parent");
+      if (m10) {
+        await noteUnknownLoginServer(m10, "parent");
+        // Ask the number on WhatsApp whether it belongs to a parent; five
+        // questions about the child link it (lib/waNumberVerify). Awaited —
+        // Cloud Run stops the CPU once the response is sent. Never throws.
+        await inviteNumberForVerify(m10, "login");
+      }
       return NextResponse.json(
         // The app offers "Link this number" on this code (lib/parentNumberLink).
         {

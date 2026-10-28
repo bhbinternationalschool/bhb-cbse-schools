@@ -1,8 +1,9 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { fetchServerBlob } from "@/lib/serverBlob";
+import { familyShelfLabels, readLibraryEbooks } from "@/lib/libraryEbooks.server";
 import { ebookAccess, keyForBook } from "@/lib/ebookAccess.server";
 import {
+  shelvesForClasses,
   bookcaseCode,
   normalizeEbook,
   type LibraryEbook,
@@ -39,15 +40,22 @@ export async function GET(request: Request) {
         missing: access.missing,
         shelfUrl: access.shelfUrl || null,
         books: [],
-        note: "The e-book shelf is not configured yet. Set EBOOK_SHELF_URL and EBOOK_SHELF_KEY on the server.",
+        note: "The e-book shelf is not configured yet. Set EBOOK_SHELF_KEY on the server.",
       });
     }
 
-    // The catalogue lives on the library blob (library_state). This used to
-    // read a "library" desk slice — a module that was never registered, so
-    // the shelf came back empty no matter what the office catalogued.
-    const remote = await fetchServerBlob<LibraryState>("library_state");
-    const raw = Array.isArray(remote.state?.ebooks) ? remote.state.ebooks : [];
+    // The shelves' own server store (12 Oct 2026). The library blob this
+    // used to read had held no e-books since 5 Aug — the desk save never
+    // wrote them — so parents saw an empty shelf.
+    const stored = await readLibraryEbooks();
+    if (!stored) throw new ApiError("server_error", "Could not read the e-book shelves — try again", 503);
+    // A family sees its children's classes' shelves (12 Oct 2026); staff,
+    // and a family whose classes cannot be read, see every shelf.
+    const labels =
+      persona !== "staff" && ctx.session.householdId
+        ? await familyShelfLabels(ctx.session.householdId, ctx.session.academicYearCode || "", ctx.masters.classes ?? [])
+        : null;
+    const raw = shelvesForClasses(stored, labels);
     const books = (raw as Partial<LibraryEbook>[])
       .map(normalizeEbook)
       .filter((b) => b.isActive)
@@ -80,6 +88,9 @@ export async function GET(request: Request) {
       configured: true,
       shelfUrl: access.shelfUrl,
       shelfKey: access.shelfKey,
+      // A shelf's books each ask for their own password (12 Oct 2026); the
+      // app fills it into the book's password box without showing it.
+      bookKey: access.bookKey,
       books,
       // Zero books with a working shelf is a real state — the catalogue is
       // empty, but the shelf link still works.

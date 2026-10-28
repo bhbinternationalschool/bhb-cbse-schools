@@ -3,6 +3,7 @@
  * Demo store: localStorage `bhb_homework_v1`.
  */
 
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
 import {
@@ -20,6 +21,9 @@ import {
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { recordHomeworkDiaryDeletion } from "@/lib/homeworkNormalizedClient";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
+import { classCalendar } from "@/lib/studentWorkingDays";
 
 const STORAGE_KEY = "bhb_homework_v1";
 
@@ -144,7 +148,7 @@ function nid(prefix: string) {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
 }
 
 function nowIso() {
@@ -313,6 +317,11 @@ export function homeworkStateIsEmpty(state: HomeworkState): boolean {
 export function seedHomeworkIfEmpty(ay?: string): HomeworkState {
   const existing = loadHomework();
   if (existing.posts.length > 0 || existing.diary.length > 0) return existing;
+  // Not a default: made-up rows that this used to save to the live desk
+  // whenever a page opened before its desk loaded (12 Oct 2026: a "practice"
+  // post under a real teacher's name reached parents). A school's desk holds
+  // only what its staff create; only the offline dev build gets the sample.
+  if (isSupabaseConfigured()) return existing;
   const masters = loadMasters();
   const section = masters.sections.find((s) => s.isActive !== false);
   const subject = (masters.subjects ?? []).find(
@@ -1062,6 +1071,9 @@ export function runHomeworkReport(
     sectionKeys?: Set<string>;
   },
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("homework", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const keys = filters.sectionKeys;
   const inScope = (classId: string, sectionId: string) =>
     !keys || keys.has(`${classId}|${sectionId}`);
@@ -1168,19 +1180,20 @@ export function runHomeworkReport(
     case "missing_hw_days": {
       const sections = masters.sections.filter((s) => s.isActive !== false);
       const rows: Record<string, string | number>[] = [];
-      const start = new Date(from + "T00:00:00");
-      const end = new Date(to + "T00:00:00");
+      // Working days of each section's class from the Masters holiday
+      // calendar, up to today (IST). The loop built dates at LOCAL midnight
+      // and read them back with toISOString() — in India that is the
+      // previous day, so every day was checked against yesterday's posts —
+      // and it counted holidays and future dates as "no homework".
+      const todayIst = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+      const until = to < todayIst ? to : todayIst;
       for (const sec of sections) {
         let missing = 0;
         const days: string[] = [];
-        for (
-          let d = new Date(start);
-          d <= end;
-          d.setDate(d.getDate() + 1)
-        ) {
-          const dow = d.getDay();
-          if (dow === 0) continue; // skip Sunday
-          const ymd = d.toISOString().slice(0, 10);
+        const calendar = from <= until ? classCalendar(masters, filters.academicYearCode, sec.classId, from, until) : [];
+        for (const day of calendar) {
+          if (!day.working) continue;
+          const ymd = day.date;
           const has = hw.posts.some(
             (p) =>
               p.sectionId === sec.id &&

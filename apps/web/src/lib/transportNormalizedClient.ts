@@ -2,6 +2,7 @@
  * Client → server sync for transport desk slices.
  */
 
+import { serialSave } from "@/lib/serialSave";
 import type { TransportState } from "@/lib/transport";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
@@ -164,7 +165,12 @@ export function captureTransportRevs(server: Record<string, unknown> | undefined
   if (server) captureRevBase("transport", server, local as unknown as Record<string, unknown>, TRANSPORT_REV);
 }
 
-async function pushTransportDeskApi(state: TransportState) {
+/** One save at a time for this desk — see lib/serialSave. */
+function pushTransportDeskApi(...args: Parameters<typeof pushTransportDeskApiNow>): ReturnType<typeof pushTransportDeskApiNow> {
+  return serialSave("transport", () => pushTransportDeskApiNow(...args)) as ReturnType<typeof pushTransportDeskApiNow>;
+}
+
+async function pushTransportDeskApiNow(state: TransportState) {
   try {
     // Which rows this save changed, and from which server version: only
     // those are written, and only if nobody changed them first (a driver's

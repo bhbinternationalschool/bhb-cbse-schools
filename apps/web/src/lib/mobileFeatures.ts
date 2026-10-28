@@ -35,6 +35,7 @@ export type MobileFeatureId =
   | "period_log"
   | "syllabus_scan"
   | "students_view"
+  | "class_broadcast"
   // care of students
   | "student_leave_decide"
   | "complaints_handle"
@@ -47,6 +48,8 @@ export type MobileFeatureId =
   | "staff_roster"
   | "broadcast"
   | "transport_requests"
+  | "staff_payslips_all"
+  | "staff_advances_all"
   // gate
   | "visitor_gate"
   | "gate_pass_release"
@@ -74,6 +77,15 @@ export type MobileFeature = {
     | "Self service";
   module: RbacModule;
   action: RbacAction;
+  /**
+   * The catalog function (lib/rbacFeatureCatalog) that also carries this
+   * screen, for someone given the function rather than the whole module —
+   * e.g. the gate clerk given Visitors → Visitor register. Set only where
+   * every route behind the screen is gated by assertMobileFeature alone, so
+   * the function honestly opens what the tile shows. Additive: the module
+   * grant still opens it as before.
+   */
+  feature?: { id: string; action: RbacAction };
   /** One line the office reads before switching it on. */
   note: string;
 };
@@ -109,6 +121,7 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     group: "Admissions",
     module: "admissions",
     action: "view",
+    feature: { id: "admissions.leads", action: "view" },
     note: "Counsellor's follow-up list — call, WhatsApp and log the outcome.",
   },
   {
@@ -117,6 +130,7 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     group: "Admissions",
     module: "admissions",
     action: "create",
+    feature: { id: "admissions.field_survey", action: "create" },
     note: "Door-to-door capture of a family into the admissions pipeline.",
   },
   {
@@ -176,6 +190,19 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     note: "Photograph a syllabus page and import it.",
   },
   {
+    // 13 Oct 2026. Not `broadcast` (notices.create, the principal's
+    // school-wide send): this is /api/v1/staff/broadcast, which lets any
+    // member of staff message only the families of the sections they teach
+    // (checked server-side). home.view like `messages` — the audience, not a
+    // module grant, is the restriction.
+    id: "class_broadcast",
+    label: "Message my classes",
+    group: "Teaching",
+    module: "home",
+    action: "view",
+    note: "WhatsApp + app message to the families of the teacher's own sections only.",
+  },
+  {
     id: "students_view",
     label: "Student roster",
     group: "Students",
@@ -221,7 +248,7 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     group: "Students",
     module: "ptm",
     action: "edit",
-    note: "Mark a booking met or no-show and write the meeting note.",
+    note: "Add, change or cancel own slots for a PTM the office opened; mark a booking met or no-show and write the meeting note.",
   },
   {
     id: "school_snapshot",
@@ -264,11 +291,31 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     note: "The queue of parents asking for bus service.",
   },
   {
+    // 20 Oct 2026 (mr_mva1bgmhdfu3): read-only. Ordinary staff keep only
+    // their own payslips (my_payslips); this is everyone's, month by month.
+    id: "staff_payslips_all",
+    label: "Staff payslips",
+    group: "Leadership",
+    module: "payroll",
+    action: "view",
+    note: "Every staff member's pay for a session, month by month: gross, deductions, net, what was paid on which day and what is still unpaid. Read only.",
+  },
+  {
+    // 20 Oct 2026 (mr_mva1j71v1ttn): read-only, the web's Advances register.
+    id: "staff_advances_all",
+    label: "Staff advances",
+    group: "Leadership",
+    module: "staff_advances",
+    action: "view",
+    note: "Staff who hold an advance: taken, recovered and due, and each advance's recoveries. Read only.",
+  },
+  {
     id: "visitor_gate",
     label: "Visitor gate",
     group: "Gate",
     module: "visitors",
     action: "create",
+    feature: { id: "visitors.register", action: "create" },
     note: "Check visitors in and out at the gate. The mobile lookup says whose parent they are before they are let in.",
   },
   {
@@ -277,15 +324,16 @@ export const MOBILE_FEATURES: MobileFeature[] = [
     group: "Gate",
     module: "visitors",
     action: "edit",
+    feature: { id: "visitors.register", action: "edit" },
     note: "Hand a child over for an early pickup against an approved pass, and record who collected them.",
   },
   {
     id: "route_manifest",
-    label: "Route & boarding",
+    label: "Route, bus register & log book",
     group: "Transport",
     module: "transport",
     action: "view",
-    note: "The bus route, stops and the day's boarding list.",
+    note: "The bus route and stops, the bus register (children on and off each run) and the vehicle log book (odometer, fuel). The server shows a driver only their own bus.",
   },
   {
     id: "gps_punch",
@@ -375,6 +423,7 @@ const TEACHING: MobileFeatureId[] = [
   "period_log",
   "syllabus_scan",
   "students_view",
+  "class_broadcast",
   "student_leave_decide",
   "complaints_handle",
   "documents_verify",
@@ -491,6 +540,8 @@ export function resolveMobileFeatures(input: {
   staffId?: string;
   access: MobileAccessState;
   can: (module: RbacModule, action: RbacAction) => boolean;
+  /** A FUNCTION grant check (featureId, action) — optional, additive. */
+  canFeature?: (featureId: string, action: RbacAction) => boolean;
 }): MobileFeatureResolution {
   const access = input.access;
   const wanted = new Set<MobileFeatureId>();
@@ -516,7 +567,9 @@ export function resolveMobileFeatures(input: {
   for (const id of MOBILE_FEATURE_IDS) {
     if (!wanted.has(id) || denied.has(id)) continue;
     const meta = FEATURE_BY_ID.get(id)!;
-    if (input.can(meta.module, meta.action)) features.push(id);
+    const viaFunction =
+      !!meta.feature && !!input.canFeature?.(meta.feature.id, meta.feature.action);
+    if (input.can(meta.module, meta.action) || viaFunction) features.push(id);
     else blockedByRbac.push(id);
   }
   return { features, blockedByRbac };

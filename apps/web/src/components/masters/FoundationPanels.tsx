@@ -29,6 +29,8 @@ import {
   type NumberSeries,
 } from "@/lib/foundationMasters";
 import { formatSeriesNumber } from "@/lib/numberSeries";
+import { useObjectDraft } from "@/components/masters/useObjectDraft";
+import type { MastersCommitOpts } from "@/lib/data/client/mastersElementPlan";
 import {
   UP_HOLIDAY_CALENDAR,
   UP_HOLIDAY_CALENDAR_SESSION,
@@ -80,7 +82,7 @@ import { forgetSchoolIdentity } from "@/lib/schoolIdentity";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { RowAction } from "@/components/ui/erp-grid";
 
-type Commit = (s: MastersState, msg?: string) => void;
+type Commit = (s: MastersState, msg?: string, opts?: MastersCommitOpts) => void;
 
 export function CompletenessDashboard({
   state,
@@ -310,7 +312,13 @@ export function SchoolProfilePanel({
   commit: Commit;
 }) {
   const p = state.schoolProfile;
-  const [draft, setDraft] = useState(p);
+  // The tables show the SAVED profile (the working form says "save to update
+  // tables above"). A profile saved elsewhere reaches this open panel with
+  // the next masters answer (data-layer 2.2c): the form follows it too, unless
+  // it holds unsaved typing — then the typing stays, and its save is based on
+  // the stamp it was LOADED at, so it conflicts instead of putting the other
+  // person's values back (useObjectDraft).
+  const { draft, setDraft, base: profileBase } = useObjectDraft("schoolProfile", p);
   const [schoolStep, setSchoolStep] = useState<SchoolStep>("profile");
 
   function set<K extends keyof typeof draft>(key: K, value: (typeof draft)[K]) {
@@ -335,14 +343,14 @@ export function SchoolProfilePanel({
             <dl className="divide-y divide-[var(--border)] text-sm">
               {(
                 [
-                  ["Legal name", draft.legalName],
-                  ["Display", draft.displayName],
-                  ["UDISE", draft.udiseCode || "—"],
-                  ["Board", `${BOARD_MODES.find((b) => b.value === draft.boardMode)?.label || draft.boardMode}${
-                    draft.cbseAffiliationInProcess ? " · CBSE affiliation under process" : ""
+                  ["Legal name", p.legalName],
+                  ["Display", p.displayName],
+                  ["UDISE", p.udiseCode || "—"],
+                  ["Board", `${BOARD_MODES.find((b) => b.value === p.boardMode)?.label || p.boardMode}${
+                    p.cbseAffiliationInProcess ? " · CBSE affiliation under process" : ""
                   }`],
-                  ["Affiliation", draft.affiliationNo || "—"],
-                  ["Address", [draft.address, draft.city, draft.state, draft.pincode].filter(Boolean).join(", ") || "—"],
+                  ["Affiliation", p.affiliationNo || "—"],
+                  ["Address", [p.address, p.city, p.state, p.pincode].filter(Boolean).join(", ") || "—"],
                 ] as const
               ).map(([k, v]) => (
                 <div
@@ -361,16 +369,16 @@ export function SchoolProfilePanel({
             <dl className="divide-y divide-[var(--border)] text-sm">
               {(
                 [
-                  ["Office phone", draft.phone || "—"],
-                  ["Mobile", draft.mobile || "—"],
-                  ["WhatsApp", draft.whatsapp || "—"],
-                  ["Email", draft.email || "—"],
-                  ["Website", draft.website || "—"],
-                  ["Facebook", draft.facebook || "—"],
-                  ["Instagram", draft.instagram || "—"],
-                  ["Google", draft.google || "—"],
-                  ["YouTube", draft.youtube || "—"],
-                  ["Collections UPI", draft.collectionsUpiVpa || "—"],
+                  ["Office phone", p.phone || "—"],
+                  ["Mobile", p.mobile || "—"],
+                  ["WhatsApp", p.whatsapp || "—"],
+                  ["Email", p.email || "—"],
+                  ["Website", p.website || "—"],
+                  ["Facebook", p.facebook || "—"],
+                  ["Instagram", p.instagram || "—"],
+                  ["Google", p.google || "—"],
+                  ["YouTube", p.youtube || "—"],
+                  ["Collections UPI", p.collectionsUpiVpa || "—"],
                 ] as const
               ).map(([k, v]) => (
                 <div
@@ -547,6 +555,7 @@ export function SchoolProfilePanel({
                 commit(
                   { ...state, schoolProfile: draft },
                   "School profile saved",
+                  { objectBases: { schoolProfile: profileBase } },
                 );
               }}
             >
@@ -1965,12 +1974,16 @@ export function StaffMastersPanel({
       name: depName.trim(),
       isActive: true,
     };
-    commit(
-      { ...state, departments: [...state.departments, row] },
-      `Department ${row.code}`,
-    );
-    setDepCode("");
-    setDepName("");
+    const [code, name] = [depCode, depName];
+    // The fields clear only after the server confirmed (2.2d follow-up): a
+    // refused save keeps what was typed.
+    commit({ ...state, departments: [...state.departments, row] }, `Department ${row.code}`, {
+      onDone: (saved) => {
+        if (!saved) return;
+        setDepCode((c) => (c === code ? "" : c));
+        setDepName((n) => (n === name ? "" : n));
+      },
+    });
   }
 
   function addDes() {
@@ -1982,12 +1995,14 @@ export function StaffMastersPanel({
       departmentId: desDep || null,
       isActive: true,
     };
-    commit(
-      { ...state, designations: [...state.designations, row] },
-      `Designation ${row.code}`,
-    );
-    setDesCode("");
-    setDesName("");
+    const [code, name] = [desCode, desName];
+    commit({ ...state, designations: [...state.designations, row] }, `Designation ${row.code}`, {
+      onDone: (saved) => {
+        if (!saved) return;
+        setDesCode((c) => (c === code ? "" : c));
+        setDesName((n) => (n === name ? "" : n));
+      },
+    });
   }
 
   const deptCols: DataTableColumn<(typeof activeDepts)[number]>[] = [

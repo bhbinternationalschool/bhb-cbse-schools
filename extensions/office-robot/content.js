@@ -233,11 +233,17 @@
       let done = 0;
       let failed = 0;
       let batch = [];
+      let saved = 0;
+      // Take the batch BEFORE waiting on the ERP: three readers keep adding
+      // children while a send is out, and clearing the batch after the reply
+      // threw those children away (13 Oct 2026).
       const send = async () => {
         if (!batch.length) return;
-        const res = await ask({ type: "student-details", academicYearCode: ay, students: batch });
+        const out = batch;
         batch = [];
+        const res = await ask({ type: "student-details", academicYearCode: ay, students: out });
         if (!res.ok) throw new Error(`The ERP did not take the batch: ${res.error}`);
+        saved += out.length;
       };
       await pool(list, 3, async (s) => {
         const sid = s.studentId;
@@ -249,8 +255,9 @@
         if (batch.length >= 40) await send();
       });
       await send();
+      if (!saved) throw new Error(`No child's record could be read from the portal (${failed} of ${list.length} failed) — nothing was sent. Reload the portal, sign in again and click once more.`);
       say(
-        `✓ Sent ${list.length - failed} children's full records (${ay}) to the ERP.` +
+        `✓ Saved ${saved} children's full records (${ay}) in the ERP.` +
           (failed ? ` ${failed} could not be read — click again later for those.` : "") +
           "\nReview them in the ERP: Students → UDISE+ → Portal ↔ ERP.",
         failed ? "" : "ok",

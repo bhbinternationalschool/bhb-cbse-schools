@@ -50,6 +50,13 @@ export async function sendTemplateToAudience(opts: {
   variables: Record<string, string>;
   originUrl: string;
   audienceKind: string;
+  /**
+   * Optional: each chunk's per-recipient outcome (refId + dispatch status:
+   * "sent", "failed", "deferred", "queued_stub", or "unknown" when the
+   * dispatch threw and the outcome is not known), awaited before the next
+   * chunk — for callers that record who was reached as it happens.
+   */
+  onChunkResults?: (results: { refId: string; status: string }[]) => Promise<void>;
 }): Promise<WaAudienceSendResult> {
   const out: WaAudienceSendResult = {
     sent: 0,
@@ -87,6 +94,7 @@ export async function sendTemplateToAudience(opts: {
   };
 
   const messages: Msg[] = [];
+  const refIdOf = new Map<string, string>();
   const reasons = new Set<string>();
   for (const r of opts.recipients) {
     const resolved = resolveTemplateForSend({
@@ -100,8 +108,10 @@ export async function sendTemplateToAudience(opts: {
       continue;
     }
     const tpl = resolved.template;
+    const messageId = `aud_${opts.audienceKind}_${r.refId}_${r.mobile}`;
+    refIdOf.set(messageId, r.refId);
     messages.push({
-      messageId: `aud_${opts.audienceKind}_${r.refId}_${r.mobile}`,
+      messageId,
       mobile: r.mobile,
       fallbackMobile: r.fallbackMobile,
       fromPhoneNumberId: resolved.sender?.phoneNumberId || undefined,
@@ -119,6 +129,35 @@ export async function sendTemplateToAudience(opts: {
   if (reasons.size) out.error = [...reasons].slice(0, 2).join(" · ");
   if (!messages.length) return out;
 
+  await dispatchInChunks({
+    messages,
+    module: moduleFor(opts.audienceKind),
+    originUrl: opts.originUrl,
+    refIdOf,
+    out,
+    onChunkResults: opts.onChunkResults,
+  });
+
+  return out;
+}
+
+type ChunkMsg = { messageId: string };
+
+/**
+ * The one dispatch loop: chunks of 100 through /api/wa/dispatch (quiet
+ * hours, number failover, delivery log), counting what came back into
+ * `out`. Shared by the template and the free-text sends so they cannot
+ * drift apart in how they count.
+ */
+async function dispatchInChunks(opts: {
+  messages: ChunkMsg[];
+  module: string;
+  originUrl: string;
+  refIdOf: Map<string, string>;
+  out: WaAudienceSendResult;
+  onChunkResults?: (results: { refId: string; status: string }[]) => Promise<void>;
+}): Promise<void> {
+  const { messages, refIdOf, out } = opts;
   const dispatchSecret = process.env.WA_DISPATCH_SECRET?.trim();
   const dispatchUrl = new URL("/api/wa/dispatch", opts.originUrl).toString();
 
@@ -131,14 +170,14 @@ export async function sendTemplateToAudience(opts: {
         ...(dispatchSecret ? { "x-wa-dispatch-secret": dispatchSecret } : {}),
       },
       body: JSON.stringify({
-        module: moduleFor(opts.audienceKind),
+        module: opts.module,
         messages: chunk,
       }),
     });
     try {
       const res = await dispatchPost(req);
       const json = (await res.json()) as {
-        results?: { status?: string; error?: string }[];
+        results?: { messageId?: string; status?: string; error?: string }[];
         error?: string;
       };
       if (json.error && !out.error) out.error = json.error;
@@ -158,7 +197,22 @@ export async function sendTemplateToAudience(opts: {
           if (r.error && !out.error) out.error = r.error;
         }
       }
+      if (opts.onChunkResults) {
+        await opts.onChunkResults(
+          (json.results ?? []).map((r) => ({
+            refId: refIdOf.get(String(r.messageId ?? "")) ?? "",
+            status: String(r.status ?? "failed"),
+          })),
+        );
+      }
     } catch (e) {
+      // The chunk may or may not have reached Meta: say "unknown", so a
+      // caller that records who was reached can treat it as possibly sent.
+      if (opts.onChunkResults) {
+        await opts
+          .onChunkResults(chunk.map((m) => ({ refId: refIdOf.get(m.messageId) ?? "", status: "unknown" })))
+          .catch(() => undefined);
+      }
       out.failed += chunk.length;
       if (!out.error) {
         out.error = e instanceof Error ? e.message : "Dispatch failed";
@@ -166,5 +220,45 @@ export async function sendTemplateToAudience(opts: {
     }
   }
 
+}
+
+/**
+ * Free text to recipients the caller has ALREADY found inside their 24-hour
+ * window (see lib/staffAppBroadcast splitCustomMessage). Meta refuses free
+ * text to anyone else, so this must never be handed a whole audience.
+ */
+export async function sendTextToAudience(opts: {
+  recipients: WaAudienceRecipient[];
+  text: string;
+  originUrl: string;
+  audienceKind: string;
+}): Promise<WaAudienceSendResult> {
+  const out: WaAudienceSendResult = {
+    sent: 0,
+    failed: 0,
+    deferred: 0,
+    skippedNoTemplate: 0,
+    error: "",
+  };
+  const text = opts.text.trim();
+  if (!text || !opts.recipients.length) return out;
+  const refIdOf = new Map<string, string>();
+  const messages = opts.recipients.map((r) => {
+    const messageId = `aud_text_${opts.audienceKind}_${r.refId}_${r.mobile}`;
+    refIdOf.set(messageId, r.refId);
+    return {
+      messageId,
+      mobile: r.mobile,
+      fallbackMobile: r.fallbackMobile,
+      body: text,
+    };
+  });
+  await dispatchInChunks({
+    messages,
+    module: moduleFor(opts.audienceKind),
+    originUrl: opts.originUrl,
+    refIdOf,
+    out,
+  });
   return out;
 }

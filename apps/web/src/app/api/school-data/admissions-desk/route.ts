@@ -5,6 +5,7 @@ import { SCHOOL_DATA_DESK_RBAC } from "@/lib/apiRouteAuth.server";
 import {
   deskReadGate,
   deskWriteGate,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -227,6 +228,23 @@ export async function POST(req: Request) {
   // beats — and an invented empty list reads as "removed everything").
   // pushAdmissionDeskToDb keeps every guard it has for everyone: stub leads
   // are restored from lead_json, paid / enrolled leads are never pruned.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (gate.mode === "full") {
+    const sentKeys = body.state as Record<string, unknown>;
+    const incoming: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(normalized)) if (k in sentKeys) incoming[k] = v;
+    const refused = await deniedSliceGuard(
+      req,
+      "admissions",
+      async () => {
+        const s = await fetchAdmissionDeskFromDb();
+        return s.ok ? (s.state as unknown as Record<string, unknown>) : null;
+      },
+      incoming,
+    );
+    if (refused) return refused;
+  }
   if (gate.mode === "feature") {
     const stored = await fetchAdmissionDeskFromDb();
     if (!stored.ok) {

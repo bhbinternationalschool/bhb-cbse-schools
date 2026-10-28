@@ -2,6 +2,7 @@
  * Staff attendance remote sync — jsonb blob + normalized staff_attendance_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadStaffAttendance,
@@ -42,6 +43,8 @@ export function resetStaffAttendancePersistenceCache() {
 }
 
 export function scheduleStaffAttendanceSync(state: StaffAttendanceState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureStaffAttendanceHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushStaffAttendanceRemoteServer(state));
     return;

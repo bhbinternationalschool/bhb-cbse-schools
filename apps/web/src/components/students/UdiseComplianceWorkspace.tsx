@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { loadMasters, type MastersState } from "@/lib/masters";
-import { displayAadhaar, loadSis, saveSis, type SisState } from "@/lib/sis";
+import { aadhaarForExport, displayAadhaar, loadSis, saveSis, type SisState } from "@/lib/sis";
 import { openWaMe } from "@/lib/waMe";
 import {
   composeUdiseComplianceWhatsApp,
@@ -48,6 +47,8 @@ import { useDemoSession } from "@/components/shell/SessionContext";
 import { hasFeaturePermission } from "@/lib/rbac";
 import { ComplianceFactsPanel } from "@/components/students/ComplianceFactsPanel";
 import { currentAcademicYearCode } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import {
   ErpTable,
@@ -265,7 +266,7 @@ export function UdiseComplianceWorkspace({
   onChanged?: (sis: SisState, message?: string) => void;
 }) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [settings, setSettings] = useState<UdiseComplianceSettings>(
     loadUdiseComplianceSettings,
@@ -284,7 +285,6 @@ export function UdiseComplianceWorkspace({
   const [error, setError] = useState<string | null>(null);
 
   function refresh() {
-    setMasters(loadMasters());
     setSis(loadSis());
     setSettings(loadUdiseComplianceSettings());
   }
@@ -409,11 +409,7 @@ export function UdiseComplianceWorkspace({
         r.student.admissionNo,
         r.student.fullName,
         r.classLabel,
-        displayAadhaar({
-          number: r.student.aadhaarNumber,
-          last4: r.student.aadhaarLast4,
-          verification: r.student.aadhaarVerification,
-        }),
+        aadhaarForExport({ number: r.student.aadhaarNumber, last4: r.student.aadhaarLast4 }),
         r.reason,
         r.student.penStatus || "",
         r.student.fatherName,
@@ -563,6 +559,9 @@ export function UdiseComplianceWorkspace({
     }
   };
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!sis || !masters) {
     return (
       <p className="mt-4 text-sm text-[var(--muted)]">Loading UDISE+…</p>

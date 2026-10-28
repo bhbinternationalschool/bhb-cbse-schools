@@ -86,7 +86,11 @@ export type RbacAction =
   | "approve"
   | "export"
   | "unlock"
-  | "impersonate";
+  | "impersonate"
+  /** Function-only (never a module column): sends something out on the
+   * school's behalf — an app invitation, a reminder. A module holder has it
+   * through the module's "edit" (FEATURE_ACTION_IMPLIED_BY). */
+  | "send";
 
 export type PermissionGrant = {
   module: RbacModule;
@@ -119,6 +123,12 @@ export type RbacRole = {
   permissions: PermissionGrant[];
   /** Function-level grants inside modules the role does not hold whole. */
   featureGrants?: FeatureGrant[];
+  /**
+   * Ids of BUILT_IN_GRANT_ADDITIONS already merged into this (built-in)
+   * role. An addition is applied once: if the office later clears the box,
+   * that decision stands.
+   */
+  defaultsApplied?: string[];
   note: string;
 };
 
@@ -141,19 +151,54 @@ export type UserRoleAssignment = {
  * handing it to every teacher in the school. Deliberately narrow: no scope
  * fields, an optional expiry, and it shows up in the access summary and the
  * audit trail so it can never be a quiet back door.
+ *
+ * Four kinds, exactly one target field set (12 Oct 2026, Assign to user):
+ *   module      — module-wide ALLOW (the original shape)
+ *   feature     — one function, ALLOW or DENY (`effect`)
+ *   denyModule  — module-wide DENY
+ * Resolution: personal deny > personal allow > roles. A protected super
+ * admin is never denied (nobody locks the school out of its own settings).
+ *
+ * Only a module-wide allow carries `module`. A browser or server on an older
+ * build reads every row with `module` as a module ALLOW and drops rows
+ * without it — so a deny or a function row must never carry `module`, or an
+ * old copy would read "take fees away from Shreya" as "give her fees".
  */
+export type UserGrantEffect = "allow" | "deny";
+
 export type UserPermissionGrant = {
   id: string;
   staffId: string;
-  module: RbacModule;
+  /** Module-wide allow. Absent on function rows and on denies (see above). */
+  module?: RbacModule;
+  /** One function (lib/rbacFeatures id) — allow or deny. */
+  feature?: string;
+  /** Module-wide deny. */
+  denyModule?: RbacModule;
+  effect: UserGrantEffect;
   actions: RbacAction[];
   /** Why it was given — read back in the access summary. */
   note: string;
   grantedBy: string;
   grantedAt: string;
-  /** ISO date (YYYY-MM-DD); empty = no expiry */
+  /** ISO date (YYYY-MM-DD); empty = no expiry. The day itself still counts. */
   expiresOn: string;
 };
+
+/** What a personal row points at. */
+export type PersonalGrantTarget = { level: "module" | "feature"; id: string };
+
+export function personalGrantTarget(g: UserPermissionGrant): PersonalGrantTarget {
+  if (g.feature) return { level: "feature", id: g.feature };
+  return { level: "module", id: (g.module || g.denyModule || "") as string };
+}
+
+/** The module a personal row belongs to (a function's own module). */
+export function personalGrantModule(g: UserPermissionGrant): RbacModule | null {
+  if (g.module) return g.module;
+  if (g.denyModule) return g.denyModule;
+  return g.feature ? findFeature(g.feature)?.module ?? null : null;
+}
 
 export type RbacAuditEntry = {
   id: string;
@@ -344,7 +389,50 @@ export const RBAC_ACTIONS: { id: RbacAction; label: string }[] = [
   { id: "impersonate", label: "Impersonate" },
 ];
 
+/**
+ * Actions that exist on FUNCTIONS only (lib/rbacFeatureCatalog), never as a
+ * module column — so the office can grant "send the app invitation" to one
+ * person without the module's whole edit. Each is implied by a module
+ * action: anyone who held the module's edit before still does it.
+ */
+export const RBAC_FEATURE_ONLY_ACTIONS: { id: RbacAction; label: string }[] = [
+  { id: "send", label: "Send" },
+];
+
+/** Every action a function row can carry, module columns first. */
+export const RBAC_FEATURE_ACTIONS: { id: RbacAction; label: string }[] = [
+  ...RBAC_ACTIONS,
+  ...RBAC_FEATURE_ONLY_ACTIONS,
+];
+
+/** The module action that already carries a function-only action. */
+export const FEATURE_ACTION_IMPLIED_BY: Partial<Record<RbacAction, RbacAction>> = {
+  send: "edit",
+};
+
+/** The module-level action a check for `action` is answered by. */
+function moduleActionFor(action: RbacAction): RbacAction {
+  return FEATURE_ACTION_IMPLIED_BY[action] ?? action;
+}
+
 const ALL_ACTIONS: RbacAction[] = RBAC_ACTIONS.map((a) => a.id);
+
+/**
+ * Today in India (YYYY-MM-DD). Expiry dates are the school's calendar days:
+ * a grant "until 12 Oct" must still hold at 2 a.m. IST on the 12th, which
+ * the UTC date (still the 11th) would get right only by luck.
+ */
+export function rbacTodayIst(nowMs: number = Date.now()): string {
+  return new Date(nowMs + 330 * 60_000).toISOString().slice(0, 10);
+}
+
+/** An expiry the screens may save: empty (none) or a real YYYY-MM-DD date. */
+export function isValidRbacExpiry(v: string): boolean {
+  if (!v) return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
 
 function nid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -388,6 +476,39 @@ function grant(module: RbacModule, actions: RbacAction[]): PermissionGrant {
 function allExcept(...deny: RbacAction[]): RbacAction[] {
   return ALL_ACTIONS.filter((a) => !deny.includes(a));
 }
+
+/** The office role's function grants out of the box. */
+const OFFICE_DEFAULT_FEATURE_GRANTS: FeatureGrant[] = [
+  { feature: "notices.parent_app_usage", actions: ["view", "send"] },
+];
+
+/**
+ * Function grants added to a BUILT-IN role after schools already stored
+ * their copy of it. normalizeRbacState merges each one into the stored role
+ * once — adding only, never removing — records its id in the role's
+ * `defaultsApplied` and writes an audit line; a role that already carries
+ * the id is left exactly as saved (so a box the office cleared stays
+ * cleared). Never reuse an id.
+ */
+export const BUILT_IN_GRANT_ADDITIONS: {
+  id: string;
+  roleCode: string;
+  grant: FeatureGrant;
+  why: string;
+}[] = [
+  {
+    id: "2026-10-12.office.parent_app_invite",
+    roleCode: "office",
+    grant: { feature: "notices.parent_app_usage", actions: ["view", "send"] },
+    why: "Director, 12 Oct 2026: the office sends parent-app invitations",
+  },
+  {
+    id: "2026-10-21.accounts.staff_sensitive_edit",
+    roleCode: "accounts",
+    grant: { feature: "staff.sensitive_edit", actions: ["edit"] },
+    why: "Director, 21 Oct 2026: a staff record's bank, UPI, Aadhaar, PAN and pay are changed only by the owner and the accountant",
+  },
+];
 
 /** Built-in role templates (Phase 1) — Accounts has no payroll. */
 export function defaultBuiltInRoles(): RbacRole[] {
@@ -540,6 +661,10 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("policies", ["view"]),
         grant("settings", ["view"]),
       ],
+      // Director, 12 Oct 2026: the office sends the parent-app invitation
+      // (Comms → Parents on app) without the whole Notifications edit.
+      featureGrants: OFFICE_DEFAULT_FEATURE_GRANTS.map((g) => ({ feature: g.feature, actions: [...g.actions] })),
+      defaultsApplied: BUILT_IN_GRANT_ADDITIONS.filter((a) => a.roleCode === "office").map((a) => a.id),
     },
     {
       id: "role_auditor",
@@ -596,6 +721,11 @@ export function defaultBuiltInRoles(): RbacRole[] {
         grant("trust", ["view", "create", "edit", "export", "approve"]),
         // no payroll, masters edit, settings
       ],
+      // The accountant changes staff bank / ID / pay details (director, 21 Oct 2026).
+      featureGrants: [{ feature: "staff.sensitive_edit", actions: ["edit"] }],
+      // A fresh role already carries it: stamped, so a later removal by the
+      // office stands (BUILT_IN_GRANT_ADDITIONS runs once per stored role).
+      defaultsApplied: BUILT_IN_GRANT_ADDITIONS.filter((a) => a.roleCode === "accounts").map((a) => a.id),
     },
     {
       id: "role_transport",
@@ -784,6 +914,9 @@ function normalizeRole(r: Partial<RbacRole> | null | undefined): RbacRole | null
     makerChecker: !!r.makerChecker,
     permissions,
     featureGrants,
+    defaultsApplied: Array.isArray(r.defaultsApplied)
+      ? [...new Set(r.defaultsApplied.map((x) => String(x)))]
+      : [],
     note: String(r.note || ""),
   };
 }
@@ -850,6 +983,7 @@ export function normalizeRbacState(
           : existing.featureGrants,
     };
   }
+  const added = applyBuiltInGrantAdditions(roles, rolesRaw);
   const assignments = (Array.isArray(raw.assignments) ? raw.assignments : [])
     .map(normalizeAssignment)
     .filter((a): a is UserRoleAssignment => !!a);
@@ -862,11 +996,24 @@ export function normalizeRbacState(
         detail: String(e?.detail || ""),
       }))
     : [];
+  // One line per addition, deterministic (same id and time on every load
+  // until the role row is next saved), never repeated.
+  for (const a of added) {
+    const id = `aud_default_${a.id}`;
+    if (audit.some((e) => e.id === id)) continue;
+    audit.unshift({
+      id,
+      at: `${a.id.slice(0, 10)}T00:00:00.000Z`,
+      by: "system",
+      action: "grant",
+      detail: `built-in default ${a.id}: ${a.roleCode} ${a.grant.feature}.${a.grant.actions.join("+")} — ${a.why}`,
+    });
+  }
   return {
     version: 1,
     roles,
     assignments,
-    audit,
+    audit: audit.slice(0, 200),
     userGrants: (Array.isArray(raw.userGrants) ? raw.userGrants : [])
       .map(normalizeUserGrant)
       .filter((g): g is UserPermissionGrant => !!g),
@@ -874,26 +1021,92 @@ export function normalizeRbacState(
   };
 }
 
+/**
+ * Merge BUILT_IN_GRANT_ADDITIONS into stored built-in roles (in place).
+ * Only adds actions; a role that already lists the addition's id is not
+ * touched. A stored role that predates `defaultsApplied` AND never carried
+ * featureGrants already took the defaults wholesale above — it is only
+ * stamped. Returns the additions newly applied (for the audit).
+ */
+function applyBuiltInGrantAdditions(
+  roles: RbacRole[],
+  rolesRaw: Partial<RbacRole>[],
+): (typeof BUILT_IN_GRANT_ADDITIONS)[number][] {
+  const applied: (typeof BUILT_IN_GRANT_ADDITIONS)[number][] = [];
+  for (const add of BUILT_IN_GRANT_ADDITIONS) {
+    const idx = roles.findIndex((r) => r.isBuiltIn && r.code === add.roleCode);
+    if (idx < 0) continue;
+    const role = roles[idx]!;
+    const done = role.defaultsApplied ?? [];
+    if (done.includes(add.id)) continue;
+    const def = findFeature(add.grant.feature);
+    if (!def) continue;
+    const grants = [...(role.featureGrants ?? [])];
+    const cur = grants.find((g) => g.feature === add.grant.feature);
+    const actions = new Set(cur?.actions ?? []);
+    for (const a of add.grant.actions) if (def.actions.includes(a)) actions.add(a);
+    const next = grants
+      .filter((g) => g.feature !== add.grant.feature)
+      .concat([{ feature: add.grant.feature, actions: [...actions] }]);
+    roles[idx] = { ...role, featureGrants: next, defaultsApplied: [...done, add.id] };
+    const rawRole = rolesRaw.find(
+      (r) => r && String(r.code || "").trim().toLowerCase() === add.roleCode && r.isBuiltIn,
+    );
+    // A freshly created state (no stored copy) carries it from the template.
+    if (rawRole) applied.push(add);
+  }
+  return applied;
+}
+
 function normalizeUserGrant(
   g: Partial<UserPermissionGrant> | null | undefined,
 ): UserPermissionGrant | null {
   const staffId = String(g?.staffId || "").trim();
-  if (!staffId || !g?.module) return null;
-  if (!RBAC_MODULES.some((m) => m.id === g.module)) return null;
+  if (!staffId || !g) return null;
+  const effect: UserGrantEffect = g.effect === "deny" ? "deny" : "allow";
+  let allowModule: RbacModule | undefined;
+  let feature: string | undefined;
+  let denyModule: RbacModule | undefined;
+  let allowed: RbacAction[] = ALL_ACTIONS;
+  if (g.feature) {
+    // A function the catalogue no longer has is dropped, not widened.
+    const def = findFeature(String(g.feature));
+    if (!def) return null;
+    feature = def.id;
+    allowed = def.actions;
+  } else {
+    const mod = (g.denyModule || g.module) as RbacModule | undefined;
+    if (!mod || !RBAC_MODULES.some((m) => m.id === mod)) return null;
+    // A deny that somehow carries `module` is still a deny — never an allow.
+    if (effect === "deny" || g.denyModule) denyModule = mod;
+    else allowModule = mod;
+  }
   const actions = (Array.isArray(g.actions) ? g.actions : []).filter(
-    (a): a is RbacAction => ALL_ACTIONS.includes(a as RbacAction),
+    (a): a is RbacAction => allowed.includes(a as RbacAction),
   );
   if (actions.length === 0) return null;
-  return {
+  // A malformed expiry must never read as "already expired" (that would
+  // silently lift a deny) nor as "never" for an allow (that would widen it):
+  // a deny keeps denying with no end date, an allow is dropped.
+  let expiresOn = String(g.expiresOn || "").trim();
+  if (!isValidRbacExpiry(expiresOn)) {
+    if (denyModule || effect === "deny") expiresOn = "";
+    else return null;
+  }
+  const row: UserPermissionGrant = {
     id: String(g.id || nid("ug")),
     staffId,
-    module: g.module,
+    effect: denyModule ? "deny" : effect,
     actions: [...new Set(actions)],
     note: String(g.note || ""),
     grantedBy: String(g.grantedBy || ""),
     grantedAt: String(g.grantedAt || new Date().toISOString()),
-    expiresOn: String(g.expiresOn || ""),
+    expiresOn,
   };
+  if (allowModule) row.module = allowModule;
+  if (feature) row.feature = feature;
+  if (denyModule) row.denyModule = denyModule;
+  return row;
 }
 
 /** Live per-person grants for the staff member this session resolves to. */
@@ -905,7 +1118,7 @@ export function userGrantsFor(
   const self = masters ? resolveStaffForRbac(session, masters) : null;
   const staffId = self?.id || session.staffId || "";
   if (!staffId) return [];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = rbacTodayIst();
   return (rbac.userGrants ?? []).filter(
     (g) => g.staffId === staffId && (!g.expiresOn || g.expiresOn >= today),
   );
@@ -926,7 +1139,7 @@ export function setUserGrant(
   const staffId = input.staffId.trim();
   if (!staffId) return state;
   const rest = (state.userGrants ?? []).filter(
-    (g) => !(g.staffId === staffId && g.module === input.module),
+    (g) => !(g.staffId === staffId && g.module === input.module && g.effect === "allow"),
   );
   const actions = [...new Set(input.actions)].filter((a) =>
     ALL_ACTIONS.includes(a),
@@ -936,6 +1149,7 @@ export function setUserGrant(
     id: nid("ug"),
     staffId,
     module: input.module,
+    effect: "allow",
     actions,
     note: input.note || "",
     grantedBy: input.grantedBy || "",
@@ -950,6 +1164,137 @@ export function removeUserGrant(state: RbacState, id: string): RbacState {
     ...state,
     userGrants: (state.userGrants ?? []).filter((g) => g.id !== id),
   };
+}
+
+/**
+ * Set one person's actions on one target (a module or a function), as an
+ * allow or a deny. The row keeps its id when it already exists — an edit,
+ * not a delete and a fresh insert — and empty actions remove it (a named
+ * delete on the next save).
+ */
+export function setPersonalGrant(
+  state: RbacState,
+  input: {
+    staffId: string;
+    target: PersonalGrantTarget;
+    effect: UserGrantEffect;
+    actions: RbacAction[];
+    note?: string;
+    grantedBy?: string;
+    expiresOn?: string;
+  },
+): RbacState {
+  const staffId = input.staffId.trim();
+  if (!staffId || !input.target.id) return state;
+  if (input.expiresOn !== undefined && !isValidRbacExpiry(input.expiresOn)) {
+    throw new Error(`"${input.expiresOn}" is not a date — use YYYY-MM-DD, or leave the expiry empty.`);
+  }
+  const all = state.userGrants ?? [];
+  const same = (g: UserPermissionGrant) => {
+    if (g.staffId !== staffId || g.effect !== input.effect) return false;
+    const t = personalGrantTarget(g);
+    return t.level === input.target.level && t.id === input.target.id;
+  };
+  const prev = all.find(same);
+  const rest = all.filter((g) => !same(g));
+  const row = normalizeUserGrant({
+    id: prev?.id || nid("ug"),
+    staffId,
+    effect: input.effect,
+    actions: input.actions,
+    note: input.note ?? prev?.note ?? "",
+    grantedBy: input.grantedBy ?? prev?.grantedBy ?? "",
+    grantedAt: prev && sameActions(prev.actions, input.actions) ? prev.grantedAt : new Date().toISOString(),
+    expiresOn: input.expiresOn ?? prev?.expiresOn ?? "",
+    ...(input.target.level === "feature"
+      ? { feature: input.target.id }
+      : input.effect === "deny"
+        ? { denyModule: input.target.id as RbacModule }
+        : { module: input.target.id as RbacModule }),
+  });
+  if (!row) return { ...state, userGrants: rest };
+  // Keep the row where it was, so a save sends one changed row.
+  const next = prev
+    ? all.filter((g) => g === prev || !same(g)).map((g) => (g === prev ? row : g))
+    : [...all, row];
+  return { ...state, userGrants: next };
+}
+
+function sameActions(a: RbacAction[], b: RbacAction[]): boolean {
+  return a.length === b.length && a.every((x) => b.includes(x));
+}
+
+/**
+ * Has the office turned this off for this one person? A personal deny on
+ * the function, or on its whole module. Never true for a protected super
+ * admin.
+ */
+export function isFeaturePersonallyDenied(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  featureId: string,
+  action: RbacAction,
+  rbac?: RbacState,
+): boolean {
+  if (isProtectedSuperAdminEmail(session.email)) return false;
+  const def = findFeature(featureId);
+  if (!def) return false;
+  const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  // Nearly every school has no denies at all; skip the roster lookup then.
+  if (!state.userGrants?.some((g) => g.effect === "deny")) return false;
+  // A module deny is on the module's actions: "send" is the module's
+  // "edit" (FEATURE_ACTION_IMPLIED_BY), so a Notices · edit deny blocks it.
+  const modAction = moduleActionFor(action);
+  return userGrantsFor(state, session, masters).some(
+    (g) =>
+      g.effect === "deny" &&
+      ((g.feature === def.id && g.actions.includes(action)) ||
+        (g.denyModule === def.module && g.actions.includes(modAction))),
+  );
+}
+
+function moduleDeniedFor(
+  personal: UserPermissionGrant[],
+  session: SessionLike,
+  module: RbacModule,
+  action: RbacAction,
+): boolean {
+  if (isProtectedSuperAdminEmail(session.email)) return false;
+  return personal.some(
+    (g) => g.effect === "deny" && g.denyModule === module && g.actions.includes(action),
+  );
+}
+
+/** Does this person carry any personal function deny inside `module`? */
+function hasFeatureDeniesIn(
+  state: RbacState,
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+): boolean {
+  if (isProtectedSuperAdminEmail(session.email)) return false;
+  if (!state.userGrants?.some((g) => g.effect === "deny")) return false;
+  return userGrantsFor(state, session, masters).some(
+    (g) => g.effect === "deny" && !!g.feature && findFeature(g.feature)?.module === module,
+  );
+}
+
+/**
+ * A tab the person holds through the whole module, but where the office
+ * has personally denied `action` on every function the tab serves. A tab
+ * no function lists is never closed this way — deny the module instead.
+ */
+function tabPersonallyDenied(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  module: RbacModule,
+  tab: string,
+  action: RbacAction,
+  state: RbacState,
+): boolean {
+  const fns = featuresForTab(module, tab);
+  if (fns.length === 0) return false;
+  return fns.every((f) => isFeaturePersonallyDenied(session, masters, f.id, action, state));
 }
 
 export function loadRbac(): RbacState {
@@ -1260,6 +1605,10 @@ export function featureAccess(
   const def = findFeature(featureId);
   if (!def) return { allowed: false, ownClassesOnly: false };
   const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  // Personal deny > personal allow > roles (Masters → Roles → Assign to user).
+  if (isFeaturePersonallyDenied(session, masters, featureId, action, state)) {
+    return { allowed: false, ownClassesOnly: false };
+  }
   if (hasPermission(session, masters, def.module, action, state)) {
     return { allowed: true, ownClassesOnly: false };
   }
@@ -1267,12 +1616,47 @@ export function featureAccess(
   const granting = roles.filter((r) =>
     (r.featureGrants ?? []).some((g) => g.feature === featureId && g.actions.includes(action)),
   );
-  if (granting.length === 0) return { allowed: false, ownClassesOnly: false };
+  const personalAllow = userGrantsFor(state, session, masters).some(
+    (g) => g.effect === "allow" && g.feature === featureId && g.actions.includes(action),
+  );
+  if (granting.length === 0 && !personalAllow) return { allowed: false, ownClassesOnly: false };
   // A class-scoped function always reaches the person's own classes only —
   // whichever role (or clone of one) carries it. Leadership and office
   // reach every class through the server's teaching scope, and the whole
   // school through the module grant.
   return { allowed: true, ownClassesOnly: !!def.classScoped };
+}
+
+/**
+ * Does one of this person's roles hold `featureId` for `action` as a
+ * FUNCTION grant? Unlike featureAccess, the module grant does not count —
+ * for routes whose module grant is a different, narrower action than the
+ * function's (Parents on app: the list needs notices · edit, a function
+ * holder needs only its own "view").
+ */
+export function featureGrantHeld(
+  session: SessionLike,
+  masters: MastersState | null | undefined,
+  featureId: string,
+  action: RbacAction,
+  rbac?: RbacState,
+): boolean {
+  const def = findFeature(featureId);
+  if (!def || !def.actions.includes(action)) return false;
+  const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  // Personal deny (the function, or its module at the module action) wins;
+  // then a role's function grant, or a personal allow of the function.
+  if (isFeaturePersonallyDenied(session, masters, featureId, action, state)) return false;
+  if (
+    resolveSessionRoles(state, session, masters).some((r) =>
+      (r.featureGrants ?? []).some((g) => g.feature === featureId && g.actions.includes(action)),
+    )
+  ) {
+    return true;
+  }
+  return userGrantsFor(state, session, masters).some(
+    (g) => g.effect === "allow" && g.feature === featureId && g.actions.includes(action),
+  );
 }
 
 export function hasFeaturePermission(
@@ -1310,11 +1694,14 @@ export function canSeeModuleTab(
   tab: string,
   rbac?: RbacState,
 ): boolean {
-  if (hasPermission(session, masters, module, "view", rbac)) return true;
+  if (hasPermission(session, masters, module, "view", rbac)) {
+    const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+    return !tabPersonallyDenied(session, masters, module, tab, "view", state);
+  }
+  // Any action the function carries opens its tab — a person given only
+  // "Send" on Parents on the app still has to reach the button.
   return featuresForTab(module, tab).some((f) =>
-    (["view", "create", "edit", "delete"] as RbacAction[]).some(
-      (a) => featureAccess(session, masters, f.id, a, rbac).allowed,
-    ),
+    f.actions.some((a) => featureAccess(session, masters, f.id, a, rbac).allowed),
   );
 }
 
@@ -1330,7 +1717,10 @@ export function canWriteModuleTab(
   action: RbacAction = "edit",
   rbac?: RbacState,
 ): boolean {
-  if (hasPermission(session, masters, module, action, rbac)) return true;
+  if (hasPermission(session, masters, module, action, rbac)) {
+    const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+    return !tabPersonallyDenied(session, masters, module, tab, action, state);
+  }
   return featuresForTab(module, tab).some(
     (f) => featureAccess(session, masters, f.id, action, rbac).allowed,
   );
@@ -1344,7 +1734,10 @@ export function visibleModuleTabs<T extends { id: string }>(
   module: RbacModule,
   rbac?: RbacState,
 ): T[] {
-  if (hasPermission(session, masters, module, "view", rbac)) return items;
+  if (hasPermission(session, masters, module, "view", rbac)) {
+    const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+    if (!hasFeatureDeniesIn(state, session, masters, module)) return items;
+  }
   return items.filter((t) => canSeeModuleTab(session, masters, module, t.id, rbac));
 }
 
@@ -1416,6 +1809,9 @@ export function moduleForHref(href: string): RbacModule | null {
   if (path.startsWith("/timetable")) return "timetable";
   if (path.startsWith("/online-classes")) return "online_classes";
   if (path.startsWith("/teaching")) return "teaching";
+  // Learning games: a teaching screen (teachers launch for their own sections;
+  // the server checks each section and the settings are school-wide only).
+  if (path === "/games" || path.startsWith("/games/")) return "teaching";
   if (path.startsWith("/ptm")) return "ptm";
   if (path.startsWith("/events")) return "events";
   if (path.startsWith("/student-leave")) return "student_leave";
@@ -1455,7 +1851,7 @@ export function moduleForHref(href: string): RbacModule | null {
 }
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return rbacTodayIst();
 }
 
 function assignmentActive(a: UserRoleAssignment): boolean {
@@ -1506,6 +1902,10 @@ export function inferRoleCodes(
     matched.push("gate");
   }
   if (/parent|guardian/.test(rc)) matched.push("parent");
+  // The server mints "support" for a roster member whose designation
+  // matches nothing. Read back without the roster it matched no pattern and
+  // fell through to the blank-login fallback below — principal.
+  if (rc === "support") matched.push("support");
 
   let onRoster = false;
   if (masters) {
@@ -1561,12 +1961,30 @@ export type ScopedRole = { role: RbacRole; scope: RoleScope | null };
 
 function activeAssignmentsFor(
   rbac: RbacState,
-  self: { id: string } | null,
+  staffId: string,
 ): UserRoleAssignment[] {
-  if (!self) return [];
-  return rbac.assignments.filter(
-    (a) => a.staffId === self.id && assignmentActive(a),
+  if (!staffId) return [];
+  return (rbac.assignments ?? []).filter(
+    (a) => a.staffId === staffId && assignmentActive(a),
   );
+}
+
+/**
+ * The roles Masters → Roles explicitly assigned to one staff member (live,
+ * unexpired assignments to active roles), each with its assignment scope.
+ * Keyed on the staff id alone: the rbac slice is enough to answer it, so it
+ * never waits on — or silently skips for want of — the staff roster.
+ */
+export function assignedRoleScopes(
+  rbac: RbacState,
+  staffId: string | null | undefined,
+): ScopedRole[] {
+  return activeAssignmentsFor(rbac, (staffId || "").trim())
+    .map((a): ScopedRole | null => {
+      const role = rbac.roles.find((r) => r.id === a.roleId);
+      return role && role.isActive ? { role, scope: a.scope } : null;
+    })
+    .filter((x): x is ScopedRole => !!x);
 }
 
 /**
@@ -1579,18 +1997,15 @@ export function resolveSessionRoleScopes(
   session: SessionLike,
   masters?: MastersState | null,
 ): ScopedRole[] {
+  // Explicit assignments come first, found by the session's own staff id
+  // when the roster is not in this browser yet. Until 12 Oct 2026 they were
+  // looked up only through the roster, so every check made before
+  // masters.staff landed — and every caller passing masters = null — fell
+  // back to designation guessing: the office (a "Computer Operator" assigned
+  // the office role) lost Comms → App pop-ups and Parents on app.
   const self = masters ? resolveStaffForRbac(session, masters) : null;
-  const fromAssign = activeAssignmentsFor(rbac, self);
-
-  if (fromAssign.length > 0) {
-    const scoped = fromAssign
-      .map((a): ScopedRole | null => {
-        const role = rbac.roles.find((r) => r.id === a.roleId);
-        return role && role.isActive ? { role, scope: a.scope } : null;
-      })
-      .filter((x): x is ScopedRole => !!x);
-    if (scoped.length) return scoped;
-  }
+  const scoped = assignedRoleScopes(rbac, self?.id || session.staffId);
+  if (scoped.length) return scoped;
 
   const codes = inferRoleCodes(session, masters);
   return rbac.roles
@@ -1631,12 +2046,19 @@ export function hasPermission(
   rbac?: RbacState,
 ): boolean {
   const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  // A function-only action ("send") is held at module level through the
+  // module action that always carried it ("edit") — and a personal deny of
+  // that module action blocks it too.
+  const modAction = moduleActionFor(action);
+  const personal = userGrantsFor(state, session, masters);
+  // A personal deny on the whole module beats every role and grant.
+  if (moduleDeniedFor(personal, session, module, modAction)) return false;
   const roles = resolveSessionRoles(state, session, masters);
   const eff = effectivePermissions(roles);
-  if (eff.get(module)?.has(action)) return true;
+  if (eff.get(module)?.has(modAction)) return true;
   // …then anything the office gave this person alone.
-  return userGrantsFor(state, session, masters).some(
-    (g) => g.module === module && g.actions.includes(action),
+  return personal.some(
+    (g) => g.effect === "allow" && g.module === module && g.actions.includes(modAction),
   );
 }
 
@@ -1692,14 +2114,21 @@ export function hasScopedPermission(
   entity?: EntityScope,
 ): boolean {
   const state = rbac ?? (typeof window !== "undefined" ? loadRbac() : defaultRbacState());
+  // A function-only action ("send") is held at module level through the
+  // module action that always carried it ("edit") — and a personal deny of
+  // that module action blocks it too.
+  const modAction = moduleActionFor(action);
+  const personal = userGrantsFor(state, session, masters);
+  // A personal deny on the whole module beats every role and grant.
+  if (moduleDeniedFor(personal, session, module, modAction)) return false;
   const scopedRoles = resolveSessionRoleScopes(state, session, masters);
   for (const { role, scope } of scopedRoles) {
     const grant = role.permissions.find((g) => g.module === module);
-    if (!grant?.actions.includes(action)) continue;
+    if (!grant?.actions.includes(modAction)) continue;
     if (scopeAllows(scope, entity)) return true;
   }
-  return userGrantsFor(state, session, masters).some(
-    (g) => g.module === module && g.actions.includes(action),
+  return personal.some(
+    (g) => g.effect === "allow" && g.module === module && g.actions.includes(modAction),
   );
 }
 
@@ -1760,8 +2189,12 @@ export function canAccessMastersTab(
   // A function of Masters (e.g. a teacher's Class subjects) opens its tab;
   // the WhatsApp tabs open for functions of their own modules.
   const fns = tabModule === "masters" ? featuresForMastersTab(tab) : featuresForTab(tabModule, tab);
-  return fns.some(
-    (f) => featureAccess(session, masters, f.id, action, rbac).allowed,
+  // Opening the tab ("view") takes any action the function carries; a
+  // change needs that action itself.
+  return fns.some((f) =>
+    (action === "view" ? f.actions : [action]).some(
+      (a) => featureAccess(session, masters, f.id, a, rbac).allowed,
+    ),
   );
 }
 
@@ -1771,8 +2204,9 @@ export function canAccessMastersTab(
  * for Notifications → Send WhatsApp; Students → UDISE+ for Compliance).
  */
 const SCREEN_EXTRA_MODULES: Record<string, RbacModule[]> = {
-  "/comms": ["notices", "news", "gallery", "notifications", "wa_automation"],
+  "/comms": ["notices", "news", "gallery", "notifications", "wa_automation", "wa_chatbot"],
   "/students": ["compliance"],
+  "/attendance": ["student_leave"],
 };
 
 /** Holds any action of a function of these modules (on `tab`, if named). */
@@ -1785,9 +2219,7 @@ function holdsScreenFunction(
 ): boolean {
   const fns = modules.flatMap((m) => (tab ? featuresForTab(m, tab) : featuresForModule(m)));
   return fns.some((f) =>
-    (["view", "create", "edit", "delete", "approve"] as RbacAction[]).some(
-      (a) => featureAccess(session, masters, f.id, a, rbac).allowed,
-    ),
+    f.actions.some((a) => featureAccess(session, masters, f.id, a, rbac).allowed),
   );
 }
 
@@ -1817,7 +2249,8 @@ export function canAccessHref(
   if (path.startsWith("/student-leave")) {
     return (
       (canAccessModule(session, masters, "student_leave", rbac) ||
-        canAccessModule(session, masters, "attendance", rbac)) &&
+        canAccessModule(session, masters, "attendance", rbac) ||
+        holdsScreenFunction(session, masters, ["student_leave"], null, rbac)) &&
       canAccessModuleHref(href)
     );
   }
@@ -1852,7 +2285,9 @@ export function canAccessHref(
     if (tab === "leave" || tab === "student-leave" || tab === "student_leave") {
       return (
         (canAccessModule(session, masters, "student_leave", rbac) ||
-          canAccessModule(session, masters, "attendance", rbac)) &&
+          canAccessModule(session, masters, "attendance", rbac) ||
+          // A Student leave function (Masters → Roles) opens its own tab.
+          holdsScreenFunction(session, masters, ["student_leave"], null, rbac)) &&
         canAccessModuleHref(href)
       );
     }
@@ -1866,6 +2301,17 @@ export function canAccessHref(
           canAccessModule(session, masters, "store", rbac)) &&
         canAccessModuleHref(href)
       );
+    }
+  }
+  if (path.startsWith("/staff")) {
+    // Staff → Visiting pay is paid out of payroll: its route takes Payroll
+    // view as well as the Staff function, so the tab's page does too.
+    const qs = href.includes("?") ? href.split("?")[1] : "";
+    if (
+      new URLSearchParams(qs).get("tab") === "visiting_pay" &&
+      canAccessModule(session, masters, "payroll", rbac)
+    ) {
+      return canAccessModuleHref(href);
     }
   }
   if (path.startsWith("/payroll")) {
@@ -2108,5 +2554,5 @@ export function roleHasAction(
 ): boolean {
   return !!role.permissions
     .find((p) => p.module === module)
-    ?.actions.includes(action);
+    ?.actions.includes(moduleActionFor(action));
 }

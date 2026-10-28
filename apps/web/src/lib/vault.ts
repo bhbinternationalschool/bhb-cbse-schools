@@ -3,6 +3,7 @@
  * Demo store: localStorage `bhb_vault_v1`.
  */
 
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { TENANT } from "@/lib/types";
 import {
@@ -13,6 +14,8 @@ import {
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
 import { recordVaultDocumentDeletion } from "@/lib/vaultNormalizedClient";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 const STORAGE_KEY = "bhb_vault_v1";
 
@@ -83,7 +86,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
 }
 
 export function vaultDocTypeLabel(id: VaultDocType): string {
@@ -149,6 +152,11 @@ export function vaultStateIsEmpty(state: VaultState): boolean {
 export function seedVaultIfEmpty(): VaultState {
   const existing = loadVault();
   if (existing.documents.length > 0) return existing;
+  // Not a default: made-up rows that this used to save to the live desk
+  // whenever a page opened before its desk loaded (12 Oct 2026: a "practice"
+  // post under a real teacher's name reached parents). A school's desk holds
+  // only what its staff create; only the offline dev build gets the sample.
+  if (isSupabaseConfigured()) return existing;
   const today = todayIso();
   const y = Number(today.slice(0, 4));
   const docs: VaultDocument[] = [
@@ -302,6 +310,9 @@ export function runVaultReport(
   id: VaultReportId,
   filters: { format: "excel" | "pdf"; vault?: VaultState },
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("vault", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const vault = filters.vault ?? loadVault();
   const note = describeFilters([TENANT.shortName, todayIso()]);
   const asOf = todayIso();

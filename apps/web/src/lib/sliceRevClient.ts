@@ -186,10 +186,7 @@ export function onSaveConflicts(
   if (!count || typeof window === "undefined") return;
   forgetRevBase(module);
   window.dispatchEvent(new CustomEvent("bhb-desk-conflict", { detail: { id: hydrateModule, count } }));
-  void Promise.all([import("@/lib/deskHydrateGuard"), import("@/lib/deskHydrationSchedule")]).then(
-    ([guard, sched]) => {
-      guard.resetDeskHydrated(hydrateModule);
-      return sched.ensureAllDeskHydrated();
-    },
-  );
+  // Only this desk reloads (data-layer 0.5a). Reloading every desk here
+  // pulled the heavy on-demand desks too — megabytes per refused row.
+  void import("@/lib/deskHydrationSchedule").then((sched) => sched.reloadDeskAfterConflict(hydrateModule));
 }

@@ -37,6 +37,8 @@ export function mergeDbDeskIntoLibraryState(
   return {
     ...state,
     version: 2,
+    // The shelves are kept on the server since 12 Oct 2026: its list is the list.
+    ebooks: Array.isArray(bundle.ebooks) ? bundle.ebooks : state.ebooks ?? [],
     titles: mergeById(
       state.titles ?? [],
       bundle.titles,
@@ -66,6 +68,8 @@ export function mergeDbDeskIntoLibraryState(
       loanDays: bundle.settings?.loanDays ?? state.settings?.loanDays ?? 14,
       finePaisePerDay:
         bundle.settings?.finePaisePerDay ?? state.settings?.finePaisePerDay ?? 500,
+      graceDays: bundle.settings?.graceDays ?? state.settings?.graceDays ?? 0,
+      capPaise: bundle.settings?.capPaise ?? state.settings?.capPaise ?? 0,
     },
   };
 }

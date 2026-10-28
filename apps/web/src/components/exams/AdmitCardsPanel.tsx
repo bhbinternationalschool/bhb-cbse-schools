@@ -1,5 +1,6 @@
 "use client";
 
+import { useDuesInputs } from "@/components/fees/useDuesInputs";
 import { useEffect, useMemo, useState } from "react";
 import { listExamDateSheet, loadExams, type ExamTerm } from "@/lib/exams";
 import { rosterForSection } from "@/lib/attendance";
@@ -17,6 +18,9 @@ import {
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { field } from "@/components/ui/erp-ui";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { usePrintSignatures } from "@/components/shared/usePrintSignatures";
+import { PrintWithSignaturesButton } from "@/components/shared/PrintWithSignaturesButton";
+import { ADMIT_CARD_SIGNATURE_REQUEST } from "@/lib/printSignatures";
 
 type Props = {
   academicYearCode: string;
@@ -40,6 +44,8 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
     check: Extract<HoldCheck, { allowed: false }>;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  // The principal's signature for the "Principal" line; Print waits for it.
+  const sigs = usePrintSignatures(ADMIT_CARD_SIGNATURE_REQUEST);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,6 +101,9 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
     [academicYearCode, examTermId, exams],
   );
 
+  // A fee hold is decided from dues, and dues include the bus: re-decided
+  // when the fee book or the transport desk lands (15 Oct 2026).
+  const duesInputs = useDuesInputs();
   const rows = useMemo(
     () =>
       roster.map((student) => ({
@@ -103,7 +112,7 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
       })),
     // holdDecisions.version matters: the verdicts below are computed from a
     // snapshot that arrives after the first render.
-    [roster, tick, holdDecisions.version], // eslint-disable-line react-hooks/exhaustive-deps
+    [roster, tick, holdDecisions.version, duesInputs.tick], // eslint-disable-line react-hooks/exhaustive-deps
   );
   const allowedRows = rows.filter((r) => r.hold.allowed);
   const blockedRows = rows.filter(
@@ -150,8 +159,19 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
           examSubjects: exams.subjects,
         }),
       );
-      await downloadAdmitCardsPdf(docs, { masters });
-      setNotice(`${docs.length} admit card(s) generated.`);
+      // The principal's signature on the "Principal" line. Not on file: the
+      // line is blank. Not readable: the person chose to print without it.
+      const principalSignature = sigs.signatures?.principal?.src || null;
+      await downloadAdmitCardsPdf(docs, { masters, principalSignature });
+      setNotice(
+        `${docs.length} admit card(s) generated${
+          principalSignature
+            ? " with the principal's signature"
+            : sigs.status === "failed"
+              ? " without the principal's signature (it could not be loaded)"
+              : " — no principal's signature on file, the line is blank"
+        }.`,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -303,14 +323,14 @@ export function AdmitCardsPanel({ academicYearCode, masters, terms }: Props) {
             )}
           </div>
 
-          <button
-            type="button"
+          <PrintWithSignaturesButton
             className="btn-accent rounded-lg px-4 py-2 text-sm font-bold disabled:opacity-50"
+            status={sigs.status}
+            onRetry={sigs.retry}
             disabled={busy || !selectedIds.length || !examTermId}
-            onClick={onGenerate}
-          >
-            {busy ? "Generating…" : `Print ${selectedIds.length} admit card(s)`}
-          </button>
+            onPrint={() => void onGenerate()}
+            label={busy ? "Generating…" : `Print ${selectedIds.length} admit card(s)`}
+          />
         </>
       )}
 

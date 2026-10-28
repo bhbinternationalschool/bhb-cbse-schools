@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import type { MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { SchoolLetterhead } from "@/components/shared/SchoolLetterhead";
 import {
   currentMonthIso,
@@ -9,6 +11,7 @@ import {
   loadPayroll,
   paymentModeLabel,
   payrollStatusLabel,
+  monthPayslipLines,
   pickPayslipRun,
   type PayrollRun,
   type PayrollStaffLine,
@@ -46,7 +49,7 @@ export function PrintPayslipsPanel({
 }: {
   academicYearCode: string;
 }) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [runs, setRuns] = useState<PayrollRun[]>([]);
   const [month, setMonth] = useState(currentMonthIso);
   const [mode, setMode] = useState<"bulk" | "individual">("bulk");
@@ -54,7 +57,6 @@ export function PrintPayslipsPanel({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   useEffect(() => {
-    setMasters(loadMasters());
     setRuns(loadPayroll().runs);
   }, []);
 
@@ -79,22 +81,28 @@ export function PrintPayslipsPanel({
     }
   }, [monthsAvailable, month]);
 
-  const run = useMemo(
-    () => pickPayslipRun(runs, month, academicYearCode),
+  // Every staff member paid for the month, from whichever run paid them —
+  // a month can be paid in several runs.
+  const entries = useMemo(
+    () => monthPayslipLines(runs, month, academicYearCode),
     [runs, month, academicYearCode],
   );
+  const runByStaff = useMemo(
+    () => new Map(entries.map((e) => [e.line.staffId, e.run])),
+    [entries],
+  );
+  const run = entries[0]?.run ?? null;
+  const statuses = [...new Set(entries.map((e) => e.run.status))];
+  const runKey = entries.map((e) => `${e.run.id}:${e.line.staffId}`).join(",");
 
-  const lines = useMemo(() => {
-    if (!run) return [];
-    return [...run.lines].sort((a, b) => a.empCode.localeCompare(b.empCode));
-  }, [run]);
+  const lines = useMemo(() => entries.map((e) => e.line), [entries]);
 
   useEffect(() => {
     setSelectedIds(lines.map((l) => l.staffId));
     if (lines.length && !lines.some((l) => l.staffId === staffId)) {
       setStaffId(lines[0]?.staffId || "");
     }
-  }, [run?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const printLines = useMemo(() => {
     if (!run) return [];
@@ -113,6 +121,15 @@ export function PrintPayslipsPanel({
 
   function selectAll(on: boolean) {
     setSelectedIds(on ? lines.map((l) => l.staffId) : []);
+  }
+
+  // A failed Masters read is a failure on screen (R6); the letterhead's school
+  // profile comes from it, so no payslip is drawn without it.
+  if (mastersError) {
+    return <QueryError what="the school profile for the payslip letterhead" error={mastersError} retry={retryMasters} />;
+  }
+  if (!masters) {
+    return <p className="text-sm text-[var(--muted)]">Loading payslips…</p>;
   }
 
   return (
@@ -208,8 +225,12 @@ export function PrintPayslipsPanel({
           </p>
         ) : (
           <p className="text-xs text-[var(--muted)]">
-            Using run status <strong>{payrollStatusLabel(run.status)}</strong> ·{" "}
+            Status{" "}
+            <strong>{statuses.map((st) => payrollStatusLabel(st)).join(" / ")}</strong> ·{" "}
             {lines.length} staff in month
+            {new Set(entries.map((e) => e.run.id)).size > 1
+              ? ` · from ${new Set(entries.map((e) => e.run.id)).size} runs`
+              : ""}
           </p>
         )}
 
@@ -256,7 +277,7 @@ export function PrintPayslipsPanel({
             <PrintablePayslip
               key={line.staffId}
               masters={masters}
-              run={run}
+              run={runByStaff.get(line.staffId) ?? run!}
               line={line}
             />
           ))
@@ -310,10 +331,11 @@ export function PrintablePayslip({
           <span className="text-[var(--muted)]">Status: </span>
           {payrollStatusLabel(run.status)}
         </p>
-        {line.paymentDate ? (
+        {line.paidOn || line.paymentDate ? (
           <p>
-            <span className="text-[var(--muted)]">Pay date: </span>
-            {line.paymentDate}
+            <span className="text-[var(--muted)]">{line.paidOn ? "Paid on: " : "Pay date: "}</span>
+            {line.paidOn || line.paymentDate}
+            {line.paymentRef ? ` · ref ${line.paymentRef}` : ""}
           </p>
         ) : null}
         {line.paymentMode ? (

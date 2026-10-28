@@ -6,7 +6,7 @@ import {
   resolveApiAuth,
 } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { assertSectionScope } from "@/lib/api/v1/staffScope";
+import { assertAttendanceScope } from "@/lib/api/v1/attendanceScope.server";
 import { markAttendanceServer } from "@/lib/attendanceMark.server";
 import { loadSisForStaff, studentsInSession } from "@/lib/sis";
 import type { AttendanceMark, AttendanceStatus } from "@/lib/attendance";
@@ -40,8 +40,10 @@ export async function POST(request: Request) {
     await ensureSchoolMirrorHydrated();
     // Class teacher, a subject teacher on the section's timetable, or the
     // office — the module permission alone let any staff login mark any class.
+    // Plus today's cover: a substitute on the class's period, or its
+    // co-ordinator while the class teacher is away (13 Oct 2026).
     // This is the route's own guard; the command desk checks its own scope.
-    const scope = await assertSectionScope(ctx, body.classId, body.sectionId);
+    const { scope, cover } = await assertAttendanceScope(ctx, body.classId, body.sectionId, body.date);
 
     // A teacher's register is for the working year and for the children of
     // THIS section only; the office may still name another year.
@@ -89,7 +91,7 @@ export async function POST(request: Request) {
       action: "edit",
       entityType: "register",
       entityId: result.register.id,
-      summary: `Marked attendance ${body.date} section ${body.sectionId}`,
+      summary: `Marked attendance ${body.date} section ${body.sectionId}${cover ? ` (cover: ${cover.detail})` : ""}`,
       after: { date: body.date, count: marks.length },
       ip: meta.ip,
       userAgent: meta.userAgent,

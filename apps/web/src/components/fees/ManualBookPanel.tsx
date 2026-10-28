@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PaymentChannelSelect } from "@/components/accounts/PaymentChannelSelect";
 import {
   decodeTenderChannel,
@@ -28,14 +28,17 @@ import {
   type VoucherTender,
 } from "@/lib/fees";
 import { loadMasters, type MastersState } from "@/lib/masters";
+import { issueSeriesNumber } from "@/lib/numberSeries";
 import { canBackdateReceipt } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { DueBreakupPicker } from "@/components/fees/DueBreakupPicker";
+import { istTodayIso } from "@/lib/monthRange";
 
+/** Today in India — the day the back-dating rule judges against (not the UTC date). */
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return istTodayIso();
 }
 
 type TenderLine = {
@@ -362,10 +365,25 @@ export function ManualBookPanel({
     setError(null);
   }
 
-  function post(opts?: { allowBackdate?: boolean; allowDuplicate?: boolean }) {
-    if (!selectedStudent || !sis) return;
+  const posting = useRef(false);
+
+  async function post(opts?: { allowBackdate?: boolean; allowDuplicate?: boolean }) {
+    if (!selectedStudent || !sis || posting.current) return;
     if (!matched) {
       setError("Add payments until total matches selected dues");
+      return;
+    }
+    // The system receipt number comes from the server (data-layer 2.2e) —
+    // max(the RECEIPT counter, the highest on record + 1), never this tab's copy.
+    posting.current = true;
+    let issued: Awaited<ReturnType<typeof issueSeriesNumber>>;
+    try {
+      issued = await issueSeriesNumber("RECEIPT", academicYearCode);
+    } finally {
+      posting.current = false;
+    }
+    if (!issued.ok && issued.kind === "failed") {
+      setError(`Not saved — the server did not give the next receipt number (${issued.message}). Try again.`);
       return;
     }
     const nameById = new Map(
@@ -401,6 +419,7 @@ export function ManualBookPanel({
       manualBookLeaf: leaf,
       allowBackdate: opts?.allowBackdate,
       allowDuplicate: opts?.allowDuplicate,
+      issuedReceiptNo: issued.ok ? issued.formatted : undefined,
       note: tenders.some((t) => t.realisation === "subject_to_clearance")
         ? "Cheque realisation subject to clearance"
         : undefined,
@@ -409,13 +428,13 @@ export function ManualBookPanel({
     if (!result.ok) {
       if (result.code === "backdate") {
         if (window.confirm(`${result.error}\n\nPost anyway?`)) {
-          post({ ...opts, allowBackdate: true });
+          void post({ ...opts, allowBackdate: true });
         }
         return;
       }
       if (result.code === "duplicate") {
         if (window.confirm(`${result.error}\n\nPost anyway?`)) {
-          post({ ...opts, allowDuplicate: true });
+          void post({ ...opts, allowDuplicate: true });
         }
         return;
       }
@@ -1045,7 +1064,7 @@ export function ManualBookPanel({
                 : "bg-[#ef4444] disabled:opacity-90"
             }`}
             disabled={!manualRef || !matched}
-            onClick={() => post()}
+            onClick={() => void post()}
           >
             {matched
               ? `Post to ledger · ${manualRef}`

@@ -11,6 +11,7 @@ import {
   normalizeNcfTagId,
 } from "@/lib/cbseSubjectGroups";
 import { TENANT } from "@/lib/types";
+import { normalizeVisitingPay, type VisitingPayProfile } from "@/lib/visitingPay";
 import {
   defaultSchoolTimingConfig,
   normalizeSchoolTimingConfig,
@@ -443,7 +444,11 @@ export type Designation = {
 };
 
 export type StaffStream = "teaching" | "non_teaching";
-export type StaffCategory = "permanent" | "contract" | "part_time";
+/**
+ * "visiting" — paid per period / hour / day, not on payroll (AI teacher,
+ * music, dance, survey members). See lib/visitingPay.ts.
+ */
+export type StaffCategory = "permanent" | "contract" | "part_time" | "visiting";
 export type StaffJobType =
   | ""
   | "confirmed"
@@ -538,6 +543,8 @@ export type StaffRecord = {
   subjectTeachingLinks: StaffSubjectTeachingLink[];
   vehicleLinks: StaffVehicleLink[];
   dutyLinks: StaffDutyLink[];
+  /** Visiting staff only: pay basis, rate, TDS tick (lib/visitingPay.ts). */
+  visitingPay?: VisitingPayProfile;
 };
 
 export type StaffDocKey =
@@ -973,7 +980,7 @@ export function normalizeStaffRecord(
   const stream: StaffStream =
     s.stream === "non_teaching" ? "non_teaching" : "teaching";
   const category: StaffCategory =
-    s.category === "contract" || s.category === "part_time"
+    s.category === "contract" || s.category === "part_time" || s.category === "visiting"
       ? s.category
       : "permanent";
   const gender: StaffGender =
@@ -1106,6 +1113,11 @@ export function normalizeStaffRecord(
           .map((x) => normalizeDutyLink(x))
           .filter((x): x is StaffDutyLink => !!x)
       : [],
+    // Kept whenever it was ever set, so moving someone off "visiting" and
+    // back does not lose their rate.
+    ...(s.visitingPay !== undefined || category === "visiting"
+      ? { visitingPay: normalizeVisitingPay(s.visitingPay) }
+      : {}),
   };
 }
 
@@ -2358,6 +2370,7 @@ export const STAFF_CATEGORIES: { value: StaffCategory; label: string }[] = [
   { value: "permanent", label: "Permanent" },
   { value: "contract", label: "Contract" },
   { value: "part_time", label: "Part-time" },
+  { value: "visiting", label: "Visiting (paid per period / hour / day)" },
 ];
 
 export const STAFF_JOB_TYPES: {

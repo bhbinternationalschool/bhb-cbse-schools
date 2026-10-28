@@ -70,6 +70,8 @@ import {
   ledgerVendors,
   ledgerVendorStatement,
   accountStatement,
+  ledgerLastEntries,
+  ledgerVoucherDetail,
   ledgerSearchVouchers,
   ledgerReclassifyHead,
   ledgerVoidVoucher,
@@ -94,6 +96,14 @@ import {
 import type { VoucherFilter } from "@/lib/ledger/voucherFilter";
 import type { AmendLine } from "@/lib/ledger/voucherAmend";
 import type { LedgerVoucherInput } from "@/lib/ledger/types";
+import {
+  fuelFillsOnVoucher,
+  postAccountsFuel,
+  type AccountsFuelFill,
+} from "@/lib/transportFuelRegister.server";
+import { loadTransportDesk } from "@/lib/transportBoardingLog.server";
+import { vehicleFuelOptions } from "@/lib/transport";
+import { isFuelAccount } from "@/lib/fuelExpenseLine";
 
 export const runtime = "nodejs";
 
@@ -125,7 +135,16 @@ export async function GET(req: Request) {
 }
 
 type PostBody =
-  | { action: "post"; voucher: LedgerVoucherInput }
+  | {
+      action: "post";
+      voucher: LedgerVoucherInput;
+      /**
+       * Fuel lines of a multi-line expense voucher, each naming the voucher
+       * line it sits on. Present → the voucher and the fuel register fills
+       * are written together (transport_fuel_fill_post, one transaction).
+       */
+      fuelFills?: AccountsFuelFill[];
+    }
   | { action: "mirror"; voucher: LedgerVoucherInput }
   | { action: "reverse"; voucherId: string; reason?: string; date?: string }
   | { action: "lock"; period: string; status: "open" | "locked" | "closed"; note?: string }
@@ -136,7 +155,7 @@ type PostBody =
     }
   | { action: "close-year"; fyCode: string; surplusAccountCode?: string }
   | { action: "closing-position"; asOn: string }
-  | { action: "day-sheet"; date: string }
+  | { action: "day-sheet"; date?: string; from?: string; to?: string }
   | {
       action: "closing-balances";
       asOn: string;
@@ -215,6 +234,8 @@ type PostBody =
   | { action: "fee-advances" }
   | { action: "release-fee-advances"; academicYearCode: string; date?: string }
   | { action: "find-voucher"; voucherNo: string }
+  | { action: "last-entries" }
+  | { action: "voucher-detail"; voucherId?: string; voucherNo?: string }
   | { action: "vendor-bills"; vendorId?: string }
   | {
       action: "pay-vendor-bill";
@@ -225,6 +246,46 @@ type PostBody =
       note?: string;
       paidOn?: string;
     };
+
+/**
+ * A voucher that carries fuel register fills is voided and entered again,
+ * never amended or re-headed: either would leave Transport → Fuel tied to
+ * money the book no longer says went on fuel. Voiding is fine — the reversal
+ * voids its fills in the same transaction (migration 20261014150000).
+ */
+async function refuseFuelVoucherChange(voucherId: string): Promise<NextResponse | null> {
+  const fills = await fuelFillsOnVoucher(voucherId);
+  if (!fills.length) return null;
+  return NextResponse.json(
+    {
+      ok: false,
+      error: `This voucher carries ${fills.length} fuel fill(s) in Transport → Fuel. Void it and enter the fuel again — the fills follow the void.`,
+    },
+    { status: 409 },
+  );
+}
+
+/**
+ * Fuel without its fill is the drift this closes: money debited to a fuel
+ * head with no vehicle, quantity or rate behind it, which Transport → Fuel
+ * never sees. Every fuel entry form sends the fill (post + fuelFills, or
+ * /api/v1/transport/fuel); everything else that debits a fuel head — the
+ * full Voucher entry screen, Cheques, the desk mirror, a re-head onto fuel —
+ * is refused here with the way in.
+ */
+async function refuseBareFuel(lines: { accountCode: string; debitPaise?: number }[]): Promise<NextResponse | null> {
+  const chart = await ledgerListAccounts();
+  const fuelCodes = new Set(chart.filter((a) => isFuelAccount(a)).map((a) => a.code));
+  const fuelLine = lines.find((l) => fuelCodes.has(l.accountCode) && (l.debitPaise ?? 0) > 0);
+  if (!fuelLine) return null;
+  return NextResponse.json(
+    {
+      ok: false,
+      error: `${fuelLine.accountCode} is a fuel head — enter fuel with its vehicle, quantity and rate (Accounts → Quick or Multi-line expense, or Transport → Fuel) so the fuel register and the book carry the same fill.`,
+    },
+    { status: 422 },
+  );
+}
 
 export async function POST(req: Request) {
   let body: PostBody;
@@ -287,8 +348,16 @@ export async function POST(req: Request) {
     "recent-tags",
     "spend-by-centre",
     "closing-position",
-    // One day only, so the counter may run it without seeing any balance.
+    // Movements over at most a quarter, never a balance, so the counter may
+    // run it without accounts_position.
     "day-sheet",
+    // Dates and voucher numbers, no amounts — the "Entered up to" strip on
+    // the voucher forms. Deliberately not a position action: the office
+    // keying the vouchers is exactly who needs it.
+    "last-entries",
+    // One voucher's own header and lines — the drill-down target from the
+    // day sheet, statements and voucher list. No balance, so not position.
+    "voucher-detail",
   ]);
 
   /**
@@ -360,8 +429,28 @@ export async function POST(req: Request) {
       const res = await ensureLedgerMasters();
       return NextResponse.json(res, { status: res.ok ? 200 : 502 });
     }
-    case "post":
+    case "post": {
+      if (Array.isArray(body.fuelFills) && body.fuelFills.length) {
+        const transport = await loadTransportDesk();
+        const res = await postAccountsFuel({
+          voucher: { ...body.voucher, createdBy: body.voucher.createdBy || actor },
+          fills: body.fuelFills.map((f) => ({ ...f, fillDate: body.voucher.date })),
+          vehicles: transport.vehicles.map((v) => ({ id: v.id, fuels: vehicleFuelOptions(v) })),
+          actor,
+          staffId: (auth.ctx.session.staffId || "").trim(),
+        });
+        return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+      }
+      const bare = await refuseBareFuel(body.voucher?.lines ?? []);
+      if (bare) return bare;
+      const res = await ledgerPost({ ...body.voucher, createdBy: body.voucher.createdBy || actor });
+      return NextResponse.json(res, { status: res.ok ? 200 : 422 });
+    }
     case "mirror": {
+      // The desk mirror is a way into the book too: fuel through it would
+      // be money on 5031 that Transport → Fuel never sees.
+      const bare = await refuseBareFuel(body.voucher?.lines ?? []);
+      if (bare) return bare;
       const res = await ledgerPost({ ...body.voucher, createdBy: body.voucher.createdBy || actor });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
@@ -392,7 +481,8 @@ export async function POST(req: Request) {
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "day-sheet": {
-      const res = await readDaySheet(body.date);
+      // {from, to}; {date} still works for a tab opened before the deploy.
+      const res = await readDaySheet({ date: body.date, from: body.from, to: body.to });
       return NextResponse.json(res, { status: res.ok ? 200 : 422 });
     }
     case "closing-position": {
@@ -533,6 +623,8 @@ export async function POST(req: Request) {
     case "amend-voucher": {
       // Void, then post the corrected voucher. The only way to change a head,
       // a party, an amount or a date on something already in the book.
+      const fuelRefusal = await refuseFuelVoucherChange(String(body.voucherId ?? ""));
+      if (fuelRefusal) return fuelRefusal;
       const res = await ledgerAmendVoucher({
         voucherId: String(body.voucherId ?? ""),
         lines: Array.isArray(body.lines) ? body.lines : [],
@@ -547,6 +639,11 @@ export async function POST(req: Request) {
       // Posts a journal moving one line to another head. Never edits the
       // original: the book is append-only, so the mistake and the correction
       // both stay on the record.
+      const fuelRefusal = await refuseFuelVoucherChange(String(body.voucherId ?? ""));
+      if (fuelRefusal) return fuelRefusal;
+      // Moving money ONTO a fuel head would put fuel in the book with no fill.
+      const ontoFuel = await refuseBareFuel([{ accountCode: String(body.toCode ?? ""), debitPaise: 1 }]);
+      if (ontoFuel) return ontoFuel;
       const res = await ledgerReclassifyHead({
         voucherId: String(body.voucherId ?? ""),
         lineIndex: Number(body.lineIndex ?? -1),
@@ -640,6 +737,14 @@ export async function POST(req: Request) {
         toDate: body.toDate,
       });
       return NextResponse.json({ ok: true, rows });
+    }
+    case "voucher-detail": {
+      const res = await ledgerVoucherDetail({ voucherId: body.voucherId, voucherNo: body.voucherNo });
+      return NextResponse.json(res, { status: res.ok ? 200 : 404 });
+    }
+    case "last-entries": {
+      const res = await ledgerLastEntries();
+      return NextResponse.json(res, { status: res.ok ? 200 : 502 });
     }
     case "find-voucher": {
       // A reversal needs the id behind the number a statement line shows.

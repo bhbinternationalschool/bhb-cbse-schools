@@ -1,5 +1,5 @@
 import type { NumberSeries } from "@/lib/foundationMasters";
-import { loadMasters, saveMasters } from "@/lib/masters";
+import { loadMasters } from "@/lib/masters";
 
 /** Find a series by stable code (e.g. ADMISSION, STAFF_ID). */
 export function findNumberSeries(
@@ -150,22 +150,85 @@ export function advanceMastersSeries(
   return numberSeries.map((s) => (s.id === series.id ? updated : s));
 }
 
-/** Persist counter bump to masters after issuing a number. */
+/**
+ * The number a formatted value carries for this series (its tail after the
+ * prefix), or null when it is not one of the series' numbers.
+ */
+export function seriesNumberOf(
+  series: NumberSeries,
+  academicYearCode: string | undefined,
+  usedFormatted: string,
+): number | null {
+  const prefix = resolveSeriesPrefix(series, academicYearCode);
+  const val = (usedFormatted || "").trim();
+  if (!val.startsWith(prefix)) return null;
+  const n = Number(val.slice(prefix.length));
+  return Number.isInteger(n) && n >= 1 ? n : null;
+}
+
+/**
+ * After issuing a number: move the series past it on the server
+ * (POST /api/data/masters.number-series/bump → masters_series_bump —
+ * data-layer 2.2c). Monotone and without a base, so two desks issuing at
+ * once cannot undo each other; the screens see the new next number at the
+ * next masters answer (the versions poll). Before 2.2c this saved the whole
+ * numberSeries list from the tab's copy through saveMasters.
+ */
 export function persistSeriesUse(
   code: string,
   academicYearCode: string | undefined,
   usedFormatted: string,
 ): void {
   if (typeof window === "undefined" || !usedFormatted?.trim()) return;
-  const masters = loadMasters();
-  const numberSeries = advanceMastersSeries(
-    masters.numberSeries,
-    code,
-    academicYearCode,
-    usedFormatted,
-  );
-  if (numberSeries === masters.numberSeries) return;
-  saveMasters({ ...masters, numberSeries });
+  const series = findNumberSeries(loadMasters().numberSeries, code);
+  if (!series) return;
+  const used = seriesNumberOf(series, academicYearCode, usedFormatted);
+  if (used === null) return;
+  // Already past it as far as this tab knows: nothing to move.
+  if (used + 1 <= peekNextSeriesNumber(series, academicYearCode)) return;
+  const ay = series.resetOnAy && academicYearCode?.trim() ? academicYearCode.trim() : undefined;
+  void bumpSeriesOnServer(series.code || series.id, series.label || code, used, ay);
+}
+
+/**
+ * POST the bump; a failure is retried once (a network blink), and a failure
+ * that stands is SAID on screen — the next number offered may otherwise repeat
+ * one already issued. A refusal (403 not your series, 409 too far ahead) is
+ * not retried.
+ */
+export async function bumpSeriesOnServer(
+  series: string,
+  label: string,
+  used: number,
+  ay: string | undefined,
+  deps: { post?: typeof fetch; say?: (message: string) => void } = {},
+): Promise<boolean> {
+  const post = deps.post ?? fetch;
+  let last = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await post(`/api/data/${encodeURIComponent("masters.number-series")}/bump`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ series, used, ...(ay ? { ay } : {}) }),
+      });
+      if (res.ok) return true;
+      const body = (await res.json().catch(() => null)) as { message?: string } | null;
+      last = body?.message || `HTTP ${res.status}`;
+      if (res.status === 403 || res.status === 409 || res.status === 400 || res.status === 404) break;
+    } catch (e) {
+      last = e instanceof Error ? e.message : String(e);
+    }
+  }
+  const message = `${label}: the next number was not moved past ${used} (${last}). The next number offered may repeat — check it before issuing.`;
+  console.warn(`[number-series] ${message}`);
+  if (deps.say) deps.say(message);
+  else if (typeof window !== "undefined") {
+    void import("@/components/shell/Toast")
+      .then(({ pushToast }) => pushToast({ kind: "error", message, durationMs: 0 }))
+      .catch(() => undefined);
+  }
+  return false;
 }
 
 export function bumpStudentSeriesUses(
@@ -185,4 +248,85 @@ export function bumpStudentSeriesUses(
   if (student.srn) {
     persistSeriesUse("SRN", academicYearCode, student.srn);
   }
+}
+
+/**
+ * The next number to issue from a series, NOT already on record
+ * (POST /api/data/masters.number-series/next — data-layer 2.2c). The server
+ * lifts a counter that is behind the records. Null when it cannot say (no
+ * network, no permission, a series not on record): the caller keeps its own
+ * suggestion.
+ */
+export async function fetchSeriesNext(
+  code: string,
+  academicYearCode: string | undefined,
+  deps: { post?: typeof fetch } = {},
+): Promise<{ next: number; formatted: string; lifted: boolean } | null> {
+  if (typeof window === "undefined" && !deps.post) return null;
+  try {
+    const res = await (deps.post ?? fetch)(`/api/data/${encodeURIComponent("masters.number-series")}/next`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ series: code, ...(academicYearCode ? { ay: academicYearCode } : {}) }),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; next?: number; formatted?: string; lifted?: boolean } | null;
+    if (!body?.ok || typeof body.next !== "number" || typeof body.formatted !== "string") return null;
+    return { next: body.next, formatted: body.formatted, lifted: body.lifted === true };
+  } catch {
+    return null;
+  }
+}
+
+export type IssuedSeriesNumber =
+  | { ok: true; formatted: string; next: number }
+  /** The series is not in Masters: the caller's own built-in numbering applies. */
+  | { ok: false; kind: "not_configured"; message: string }
+  | { ok: false; kind: "failed"; message: string };
+
+/**
+ * The number to issue NOW (data-layer 2.2e: the fee counter's receipt, the
+ * SRN at enrolment) — from POST /api/data/masters.number-series/next, never
+ * from the tab's copy of the counter: the server answers max(counter, highest
+ * on record + 1) and lifts a lagging counter. A failed answer is a refusal to
+ * issue ("failed"), not a licence to guess; "not_configured" (404) means the
+ * school has no such series in Masters.
+ */
+export async function issueSeriesNumber(
+  code: string,
+  academicYearCode: string | undefined,
+  deps: { post?: typeof fetch } = {},
+): Promise<IssuedSeriesNumber> {
+  if (typeof window === "undefined" && !deps.post) {
+    return { ok: false, kind: "failed", message: "numbers are issued from the browser here" };
+  }
+  try {
+    const res = await (deps.post ?? fetch)(`/api/data/${encodeURIComponent("masters.number-series")}/next`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ series: code, ...(academicYearCode ? { ay: academicYearCode } : {}) }),
+    });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean; next?: number; formatted?: string; message?: string } | null;
+    if (res.status === 404 && body?.ok === false) return { ok: false, kind: "not_configured", message: body.message ?? `No ${code} series` };
+    if (!res.ok || !body?.ok || typeof body.next !== "number" || typeof body.formatted !== "string") {
+      return { ok: false, kind: "failed", message: body?.message ?? `HTTP ${res.status}` };
+    }
+    return { ok: true, formatted: body.formatted, next: body.next };
+  } catch (e) {
+    return { ok: false, kind: "failed", message: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * The later of two numbers of one series (same prefix, numeric tail): the
+ * server's answer and what this tab would have offered. The tab may know of a
+ * number it issued a moment ago that the server has not seen yet, so the
+ * answer is never LOWER than the tab's; it is never lower than the server's
+ * either. Different prefixes: the server's (`issued`) wins.
+ */
+export function laterSeriesNumber(issued: string, local: string): string {
+  const m1 = issued.match(/^(.*?)(\d+)$/);
+  const m2 = local.match(/^(.*?)(\d+)$/);
+  if (!m1 || !m2 || m1[1] !== m2[1]) return issued;
+  return Number(m2[2]) > Number(m1[2]) ? local : issued;
 }

@@ -31,6 +31,7 @@ import {
   recoveryMethodLabel,
 } from "@/lib/staffAdvance";
 import { loadSalaryHold } from "@/lib/salaryHold";
+import { isOnPayroll, notOnPayrollLabel } from "@/lib/payrollNotOnPayroll";
 import { loadStatutoryRemit } from "@/lib/statutoryRemit";
 import {
   incrementBatchStatusLabel,
@@ -42,6 +43,9 @@ import {
 } from "@/lib/salarySetup";
 import { loadSalaryAccount, entryTypeLabel } from "@/lib/salaryAccount";
 import type { StaffStream } from "@/lib/foundationMasters";
+import { statutoryCoverFor } from "@/lib/payrollSetupSync";
+import { refuseReportBeforeLoad } from "@/lib/reportDataGuard";
+import { reportDesksFor } from "@/lib/reportDesks";
 
 export type PayrollReportCategory =
   | "payroll"
@@ -384,6 +388,9 @@ export function runPayrollReport(
   id: PayrollReportId,
   filters: PayrollReportFilters = {},
 ): { ok: true; message: string } | { ok: false; error: string } {
+  // Not from a copy this page has not loaded (lib/reportDataGuard).
+  const notLoaded = refuseReportBeforeLoad(reportDesksFor("payroll", id));
+  if (notLoaded) return { ok: false, error: notLoaded };
   const format: PayrollReportFormat = filters.format ?? "excel";
   const def = PAYROLL_REPORTS.find((r) => r.id === id);
   if (!def) return { ok: false, error: "Unknown report" };
@@ -694,6 +701,7 @@ export function runPayrollReport(
         { key: "grossUp", header: "School bears PF/ESIC" },
         { key: "cover", header: "PF/ESIC cover" },
         { key: "from", header: "Effective from" },
+        { key: "payroll", header: "Payroll" },
         { key: "due", header: "Adv outstanding", align: "right" },
       ];
       rows = (masters.staff ?? [])
@@ -721,8 +729,10 @@ export function runPayrollReport(
             basic: money(link?.basicOverride || 0),
             additional: money(link?.additionalAmount || 0),
             grossUp: link?.statutoryGrossUp ? "yes" : "no",
-            cover: link?.statutoryCover || "both",
+            // No salary setup: no PF/ESI liability (14 Oct 2026).
+            cover: statutoryCoverFor(link).noSetup ? "none (no salary setup)" : statutoryCoverFor(link).cover,
             from: link?.effectiveFrom || "",
+            payroll: isOnPayroll(link) ? "On payroll" : notOnPayrollLabel(link),
             due: money(outstandingForStaff(s.id)),
           };
         })

@@ -188,6 +188,7 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "classLabel", label: "Class & section", group: "Student", sample: "Class 5 A" },
   { key: "className", label: "Class name", group: "Student", sample: "Class 5" },
   { key: "schoolName", label: "School name", group: "School", sample: "BHB International School" },
+  { key: "newNumber", label: "Newly added mobile (masked)", group: "Parent", sample: "******3926" },
   { key: "feeDue", label: "Fee amount due", group: "Fees", sample: "₹12,500" },
   { key: "amount", label: "Amount", group: "Fees", sample: "₹5,000" },
   { key: "dueDate", label: "Due date", group: "Fees", sample: "15 Aug 2026" },
@@ -202,6 +203,8 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "relaySender", label: "Office relay: who sent it", group: "School", sample: "Priya Sharma (98765 43210), parent of Aarav Sharma, Class 5 A" },
   { key: "relayCode", label: "Office relay: reference code", group: "School", sample: "K7Q2" },
   { key: "relayMessage", label: "Office relay: the message", group: "School", sample: "I paid the fee yesterday but it still shows due" },
+  { key: "draftId", label: "Office draft: task number", group: "Staff", sample: "42", hint: "The office_tasks id the AI staff room asks the director to approve or reject." },
+  { key: "draftSummary", label: "Office draft: to, subject and text, one line", group: "Staff", sample: "To: Mrs. Sharma | Subject: Re: TC request | Dear Mrs. Sharma, the transfer certificate will be ready on Friday.", hint: "Newlines become ' | ' — Meta refuses a parameter with a line break." },
   { key: "briefDate", label: "Brief date", group: "School", sample: "10 Sep 2026" },
   { key: "collection", label: "Day's collection line", group: "Fees", sample: "₹4,850 in 7 receipts — Cash ₹3,000, UPI ₹1,850" },
   { key: "expenses", label: "Day's expenses line", group: "Fees", sample: "₹1,200 across 3 vouchers" },
@@ -219,6 +222,12 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "weekLabel", label: "Week covered", group: "School", sample: "8–13 Sep" },
   { key: "childSummary", label: "Each child's week", group: "Student", sample: "Aarav (III A) — Present 5 of 6 days · Hindi 18/20  |  Anaya (LKG A) — Present 6 of 6 days", hint: "One line per child from lib/weeklyChildDigest.ts; a family with nothing true to report is not messaged." },
   { key: "registerLink", label: "Registration link", group: "Admissions", sample: "https://school.example/register" },
+  { key: "testDate", label: "Entrance test date", group: "Admissions", sample: "Sat, 14 Nov 2026" },
+  { key: "testTime", label: "Entrance test start time", group: "Admissions", sample: "10:00 AM" },
+  { key: "venue", label: "Entrance test venue", group: "Admissions", sample: "Main building, Room 4" },
+  { key: "rollNo", label: "Entrance test roll no.", group: "Admissions", sample: "014" },
+  { key: "testResult", label: "Entrance test result", group: "Admissions", sample: "Selected — congratulations!" },
+  { key: "nextStep", label: "What the family does next", group: "Admissions", sample: "Please visit the school office to complete the admission formalities." },
   { key: "homeworkTitle", label: "Homework title", group: "Academic", sample: "Exercise 5.2, questions 1–5" },
   { key: "chapterLine", label: "Subject, book, chapter and what it covers", group: "Academic", sample: "Mathematics · Propel Maths Grade 5 · Ch 5 More about Operations on Numbers — DMAS, unitary method", hint: "Resolved from the school's own books by homeworkExpand. One line — Meta refuses a newline inside a variable — and it degrades to subject and book, then to the subject alone, so the line is never a bare dash, never untrue, and never repeats what the greeting already said." },
   { key: "subject", label: "Subject", group: "Academic", sample: "Mathematics" },
@@ -624,6 +633,70 @@ const SEED_DEFS: SeedDef[] = [
     footerHi: "परिवहन कार्यालय · स्वचालित चेतावनी",
   },
 
+  // ── Parent app: a number the school does not have ─────────────
+  //
+  // Somebody asks the parent app for an OTP with a number that is not on
+  // record (lib/waNumberVerify). The school writes to that number once; a
+  // reply starts five questions about the child on WhatsApp, and a full match
+  // links the number. The second template tells the family's REGISTERED
+  // number that a new one was added; the third tells the new number it was
+  // linked when the office approved it more than a day later.
+  {
+    familyKey: "parent_number_check",
+    nameEn: "App login from an unknown number",
+    nameHi: "अनजान नंबर से ऐप लॉग-इन",
+    module: "general",
+    category: "UTILITY",
+    metaName: "bhb_parent_number_check",
+    headerFormat: "TEXT",
+    headerTextEn: "Parent app login",
+    headerTextHi: "पैरेंट ऐप लॉग-इन",
+    bodyEn:
+      "Namaste 🙏\n\nSomeone tried to log in to the {{schoolName}} parent app with this number, but this number is not in the school's records.\n\nIf you are a parent at the school, reply *Yes*. We will ask five short questions about your child and add your number if they match.\n\nIf this was not you, please ignore this message.",
+    bodyHi:
+      "नमस्ते 🙏\n\n{{schoolName}} के पैरेंट ऐप में इस नंबर से लॉग-इन की कोशिश हुई, लेकिन यह नंबर स्कूल के रिकॉर्ड में नहीं है।\n\nअगर आप स्कूल के अभिभावक हैं, तो इस संदेश का जवाब *हाँ* लिखकर दें। हम बच्चे के बारे में पाँच छोटे सवाल पूछेंगे और सही होने पर आपका नंबर जोड़ देंगे।\n\nअगर यह आपने नहीं किया, तो इस संदेश को अनदेखा करें।",
+    footerEn: "School office · reply to this message",
+    footerHi: "स्कूल कार्यालय · इसी संदेश का उत्तर दें",
+    buttons: [{ type: "QUICK_REPLY", text: "Yes, add my number" }],
+    buttonsHi: [{ type: "QUICK_REPLY", text: "हाँ, नंबर जोड़ें" }],
+  },
+  {
+    familyKey: "parent_number_added",
+    nameEn: "New number added to the family",
+    nameHi: "परिवार में नया नंबर जोड़ा गया",
+    module: "general",
+    category: "UTILITY",
+    metaName: "bhb_parent_number_added",
+    headerFormat: "TEXT",
+    headerTextEn: "New number added",
+    headerTextHi: "नया नंबर जोड़ा गया",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nA new number *{{newNumber}}* has been added to your family's {{schoolName}} parent app account ({{childName}}).\n\nIf you do not know about this, please contact the school office straight away.",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n{{schoolName}} के पैरेंट ऐप में आपके परिवार ({{childName}}) के खाते से एक नया नंबर *{{newNumber}}* जोड़ा गया है।\n\nअगर यह आपकी जानकारी में नहीं है, तो तुरंत स्कूल कार्यालय से संपर्क करें।",
+    footerEn: "School office · security notice",
+    footerHi: "स्कूल कार्यालय · सुरक्षा सूचना",
+  },
+  {
+    familyKey: "parent_number_linked",
+    nameEn: "Your number is linked — log in",
+    nameHi: "नंबर जुड़ गया — लॉग-इन करें",
+    module: "general",
+    category: "UTILITY",
+    metaName: "bhb_parent_number_linked",
+    headerFormat: "TEXT",
+    headerTextEn: "Your number is linked",
+    headerTextHi: "आपका नंबर जुड़ गया",
+    bodyEn:
+      "Namaste 🙏\n\nYour number has been added to {{childName}}'s record. You can now log in to the {{schoolName}} parent app with this number.",
+    bodyHi:
+      "नमस्ते 🙏\n\nआपका नंबर {{childName}} के रिकॉर्ड से जोड़ दिया गया है। अब आप इसी नंबर से {{schoolName}} के पैरेंट ऐप में लॉग-इन कर सकते हैं।",
+    footerEn: "School office · parent app",
+    footerHi: "स्कूल कार्यालय · पैरेंट ऐप",
+    buttons: [OPEN_APP_EN],
+    buttonsHi: [OPEN_APP_HI],
+  },
+
   // ── UDISE+ documents ──────────────────────────────────────────
   //
   // The request goes to the family; the photo they send back is read by the
@@ -770,6 +843,43 @@ const SEED_DEFS: SeedDef[] = [
       "Namaste {{guardianName}} ji 🙏\n\nJust checking in on {{childName}}'s admission enquiry at *{{schoolName}}*. 🎒\n\nIs there anything we can help with — the class, fees, transport, or a campus visit?\n\n👉 Reply *YES* and our admissions team will call you back, or reply with your question here.\n\nWe are happy to help. 🙏",
     bodyHi:
       "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* में {{childName}} की प्रवेश पूछताछ के बारे में हाल जानना चाहते हैं। 🎒\n\nक्या किसी बात में मदद चाहिए — कक्षा, शुल्क, परिवहन या कैंपस विज़िट?\n\n👉 *YES* लिखें और हमारी प्रवेश टीम आपको फ़ोन करेगी, या अपना प्रश्न यहीं लिख भेजें।\n\nहमें मदद करके खुशी होगी। 🙏",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  // Admissions → Entrance test (lib/admissionEntranceTest.ts). Neither is
+  // approved on Meta when this ships: the notify step shows the text and
+  // refuses to send until both languages are approved, like every family.
+  {
+    familyKey: "admissions_entrance_invite",
+    nameEn: "Entrance test invitation",
+    nameHi: "प्रवेश परीक्षा सूचना",
+    module: "admissions",
+    category: "UTILITY",
+    metaName: "bhb_entrance_test_invite",
+    headerFormat: "TEXT",
+    headerTextEn: "Admission test",
+    headerTextHi: "प्रवेश परीक्षा",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\n{{childName}}'s admission test for {{className}} at *{{schoolName}}* is fixed:\n\n📅 Date: *{{testDate}}*\n⏰ Time: *{{testTime}}*\n📍 Venue: {{venue}}\n🎫 Roll no: *{{rollNo}}*\n\nPlease arrive 15 minutes early with a pencil, an eraser and this message.\n\nAll the best to your child! 🌼",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* में {{className}} के लिए {{childName}} की प्रवेश परीक्षा तय हो गई है:\n\n📅 तिथि: *{{testDate}}*\n⏰ समय: *{{testTime}}*\n📍 स्थान: {{venue}}\n🎫 रोल नंबर: *{{rollNo}}*\n\nकृपया पेंसिल, रबर और यह संदेश लेकर 15 मिनट पहले पहुँचें।\n\nबच्चे को शुभकामनाएँ! 🌼",
+    footerEn: "Admissions desk · Reply to this message for help",
+    footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
+  },
+  {
+    familyKey: "admissions_entrance_result",
+    nameEn: "Entrance test result",
+    nameHi: "प्रवेश परीक्षा परिणाम",
+    module: "admissions",
+    category: "UTILITY",
+    metaName: "bhb_entrance_test_result",
+    headerFormat: "TEXT",
+    headerTextEn: "Admission test result",
+    headerTextHi: "प्रवेश परीक्षा परिणाम",
+    bodyEn:
+      "Namaste {{guardianName}} ji 🙏\n\nThe result of {{childName}}'s admission test for {{className}} at *{{schoolName}}*:\n\n📋 *{{testResult}}*\n\n{{nextStep}}\n\nFor any question, simply reply to this message. Thank you 🙏",
+    bodyHi:
+      "नमस्ते {{guardianName}} जी 🙏\n\n*{{schoolName}}* में {{className}} के लिए {{childName}} की प्रवेश परीक्षा का परिणाम:\n\n📋 *{{testResult}}*\n\n{{nextStep}}\n\nकोई प्रश्न हो तो इसी संदेश का उत्तर दें। धन्यवाद 🙏",
     footerEn: "Admissions desk · Reply to this message for help",
     footerHi: "प्रवेश कार्यालय · सहायता के लिए इसी संदेश का उत्तर दें",
   },
@@ -1214,6 +1324,36 @@ const SEED_DEFS: SeedDef[] = [
       "📢 *{{schoolName}} की सूचना*\n\n*{{noticeTitle}}*\n\n{{noticeBody}}\n\nकृपया ध्यान से पढ़ें और कोई प्रश्न हो तो इसी संदेश का उत्तर दें। धन्यवाद! 🙏",
     footerEn: "School office",
     footerHi: "विद्यालय कार्यालय",
+  },
+  {
+    /*
+      Sent to the DIRECTOR by the AI staff room (automation/n8n) when a draft
+      reply to a parent or vendor waits for a decision and the director has
+      not written to the school number in 24 hours — the reply-buttons
+      message the room sends inside the window cannot go out then. The two
+      quick replies are sent with payloads "Approve <id>" / "Reject <id>"
+      (dispatch `quickReplyPayloads`), so a tap reaches the room's poller
+      with the draft number even though the label carries none.
+    */
+    familyKey: "staff_office_approval",
+    nameEn: "Office draft needs a decision",
+    nameHi: "कार्यालय ड्राफ्ट पर निर्णय",
+    module: "staff",
+    category: "UTILITY",
+    metaName: "bhb_office_approval",
+    headerFormat: "NONE",
+    bodyEn:
+      "✉️ Draft #{{draftId}} from the school office needs your decision.\n\n{{draftSummary}}\n\nTap a button below to decide.",
+    bodyHi:
+      "✉️ विद्यालय कार्यालय का ड्राफ्ट #{{draftId}} आपके निर्णय की प्रतीक्षा में है।\n\n{{draftSummary}}\n\nनिर्णय के लिए नीचे का बटन दबाएँ।",
+    buttons: [
+      { type: "QUICK_REPLY", text: "✅ Approve" },
+      { type: "QUICK_REPLY", text: "❌ Reject" },
+    ],
+    buttonsHi: [
+      { type: "QUICK_REPLY", text: "✅ स्वीकृत" },
+      { type: "QUICK_REPLY", text: "❌ अस्वीकृत" },
+    ],
   },
   {
     /*

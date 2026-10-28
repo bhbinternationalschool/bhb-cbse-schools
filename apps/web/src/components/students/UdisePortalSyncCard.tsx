@@ -177,6 +177,16 @@ export function UdisePortalSyncCard() {
         for you; where the two disagree, you choose. Nothing changes in the ERP until you press Apply.
       </p>
       {err ? <p className="mt-2 text-xs text-[var(--danger)]">{err}</p> : null}
+      {data && !data.fetchedAt ? (
+        // "Start robot" / "Only send portal list to ERP" fill the working sheet
+        // above, not this card — it needs each child's full record (13 Oct 2026:
+        // the list was sent and this card stayed empty).
+        <p className="mt-2 rounded-lg border border-[var(--warning,#c5a028)] bg-[var(--warning-soft,rgba(197,160,40,0.12))] px-3 py-2 text-xs font-medium text-[var(--brand-deep)]">
+          No child&apos;s details have come from the portal yet. <strong>Only send portal list to ERP</strong> fills the
+          working sheet, not this card. In the robot on UDISE+, press{" "}
+          <strong>Fetch all children&apos;s details to ERP</strong> and wait for &ldquo;✓ Saved … children&rdquo;; then reload this page.
+        </p>
+      ) : null}
 
       {data ? (
         <>

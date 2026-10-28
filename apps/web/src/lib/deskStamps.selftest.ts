@@ -157,6 +157,19 @@ void (async () => {
   }
   assert.ok(/stampsForServerMerge\(stored\.bundle\.seats/.test(read("../app/api/school-data/rte-desk/route.ts")), "RTE function holders write at the stamps just read");
   assert.ok(/runWrite\.landed\.has\(String\(l\.run_id\)\)/.test(read("payrollNormalized.server.ts")), "pay-run lines only under a run that landed");
+
+  // Exams setup (10 Oct 2026): stamped like the rest, and rooms + seating
+  // plans now reach the server and come back (they never did before).
+  const examsServer = read("examsNormalized.server.ts");
+  assert.ok(/writeDeskRows\(\s*sb,\s*tenantId,\s*table,\s*rowsBySlice\[slice\]/.test(examsServer), "exam setup rows written stamped / insert-only");
+  assert.ok(/rooms: \{ table: "exam_desk_rooms", key: "tenant_id,id" \}/.test(examsServer), "rooms use their per-school key");
+  const examsRoute = read("../app/api/school-data/exams-desk/route.ts");
+  assert.ok(/rooms: bundle\.rooms,\s*seating: bundle\.seating/.test(examsRoute), "the load serves rooms and seating");
+  assert.ok(/readStampsParam\(body\.stamps, EXAMS_STAMPED_SLICES\)/.test(examsRoute), "the exams route passes stamps");
+  assert.ok(/stampsForServerMerge\(/.test(examsRoute), "exam function holders write at the stamps just read");
+  const examsClient = read("examsNormalizedClient.ts");
+  assert.ok(/rooms: state\.rooms \?\? \[\]/.test(examsClient) && /seating: state\.seating \?\? \[\]/.test(examsClient), "the save carries rooms and seating");
+  assert.ok(/rooms: body\.rooms \?\? \[\]/.test(examsClient), "the load reads rooms back");
   console.log("  ok  wiring: five desks stamped, function-holder merges stamped, lines under landed parents");
 
   console.log("\nAll desk stamp checks passed.");

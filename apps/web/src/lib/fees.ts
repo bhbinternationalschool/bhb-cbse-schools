@@ -3,6 +3,7 @@
  * Academic + transport + special + store/books − concessions − paid.
  */
 
+import { hydrateOnFirstRead } from "@/lib/deskLazyHydrate";
 import {
   mergeDiscountRulesFromSeed,
   resolvedConcessionGrantsForStudent,
@@ -31,12 +32,12 @@ import {
   resolveStudentFeeGroupId,
   resolveStructureLinesForClass,
   resolveSiblingTierValue,
-  saveMasters,
   shouldBillMidYearLine,
   concessionAmountFromValue,
   type MastersState,
 } from "@/lib/masters";
 import {
+  laterSeriesNumber,
   persistSeriesUse,
   suggestFromSeriesCode,
 } from "@/lib/numberSeries";
@@ -60,7 +61,14 @@ import {
 import {
   computeTransportPeriodDues,
   loadTransport,
+  sessionPeriodKeys,
+  transportPeriodLabel,
 } from "@/lib/transport";
+import {
+  transportAmountByStudentMonth,
+  transportMonthAmount,
+  transportMonthsForStudent,
+} from "@/lib/transportPaidMonths";
 import {
   DEFAULT_FEE_BACKDATE_POLICY,
   backdatePolicyApplies,
@@ -406,6 +414,22 @@ export function voucherLineFromDue(
 }
 
 /**
+ * The order a part payment fills dues in: oldest due date first, then due
+ * key. One comparator, shared by the web counter's `allocateCollectionToDues`
+ * and the staff app (which is sent each due's rank in this order rather than
+ * re-implementing `localeCompare` on a phone). Array sort is stable, so ties
+ * keep the caller's order.
+ */
+export function compareDuesForAllocation(
+  a: Pick<FeeDueLine, "dueOn" | "dueKey">,
+  b: Pick<FeeDueLine, "dueOn" | "dueKey">,
+): number {
+  const byDue = (a.dueOn || "").localeCompare(b.dueOn || "");
+  if (byDue !== 0) return byDue;
+  return a.dueKey.localeCompare(b.dueKey);
+}
+
+/**
  * Spread a collection amount across open due lines (oldest due date first).
  * Used for partial payments when multiple months/heads are selected.
  */
@@ -431,11 +455,7 @@ export function allocateCollectionToDues(
     };
   }
 
-  const sorted = [...open].sort((a, b) => {
-    const byDue = a.dueOn.localeCompare(b.dueOn);
-    if (byDue !== 0) return byDue;
-    return a.dueKey.localeCompare(b.dueKey);
-  });
+  const sorted = [...open].sort(compareDuesForAllocation);
 
   let remain = amountPaise;
   const lines: VoucherLine[] = [];
@@ -1170,6 +1190,8 @@ function persistFeesClient(state: FeesState, opts?: { sync?: boolean }) {
 }
 
 export function loadFees(): FeesState {
+  // Not in the idle sweep any more: the first read on a page loads it.
+  hydrateOnFirstRead("fees", () => import("@/lib/feesPersistence").then((m) => m.ensureFeesHydrated()));
   if (typeof window === "undefined") {
     const mirrored = getSchoolMirrorSync().fees as FeesState | null;
     if (mirrored && Array.isArray(mirrored.vouchers)) {
@@ -2353,8 +2375,15 @@ export function computeStudentDues(
   }
 
   const transport = loadTransport();
+  const studentAy = student.academicYearCode || DEFAULT_AY;
+  // Transport money is matched to the child and the month, not to the
+  // assignment id it was collected under — see lib/transportPaidMonths.ts.
+  // Waivers the same way: a counter discount given on September under the old
+  // stop still discounts September after the stop changes.
+  const transportWaivedByMonth = transportAmountByStudentMonth(waiverMap);
+  const transportMonthsShown = new Set<string>();
   for (const td of computeTransportPeriodDues(student.id, {
-    academicYearCode: student.academicYearCode || DEFAULT_AY,
+    academicYearCode: studentAy,
     asOf,
     includeFuture,
     state: transport,
@@ -2371,7 +2400,10 @@ export function computeStudentDues(
     ) {
       continue;
     }
-    const paid = paidMap.get(td.dueKey) ?? 0;
+    const paid = transportMonthAmount(paidMap, student.id, td.periodKey);
+    const waivedThisMonth =
+      transportWaivedByMonth.get(`${student.id}|${td.periodKey}`) ?? 0;
+    if (waivedThisMonth > 0) waiverMap.set(td.dueKey, waivedThisMonth);
     const transportHeadId =
       masters.feeHeads.find((h) => h.code === "TRANSPORT")?.id ?? "";
     const transportConcession = transportHeadId
@@ -2393,6 +2425,7 @@ export function computeStudentDues(
     }
     if (!includeFuture && isAfterRunningSessionMonth(td.dueOn, asOf)) continue;
 
+    transportMonthsShown.add(td.periodKey);
     lines.push({
       dueKey: td.dueKey,
       kind: "transport",
@@ -2430,6 +2463,88 @@ export function computeStudentDues(
       balancePaise: balance,
       label: `Transport · ${td.periodLabel} · ${td.routeCode}`,
     });
+  }
+
+  // Money taken is never hidden. A transport month with money against it but
+  // no current due — its assignment was closed, or its stop no longer
+  // resolves and it has no fee of its own, so the engine bills it nothing —
+  // used to vanish from the fee card and the counter, because a receipt line
+  // only ever rendered against a computed due (Anvi, Kartik and Kriyansh
+  // Yadav, Apr–Aug 2026, 15 Oct). It is shown from the receipt itself:
+  // what was paid, the month, and the route/stop frozen on the line. It owes
+  // nothing — a fee that cannot be priced today is not invented here; the
+  // roster surfaces that rider as unbilled.
+  if (includePaid) {
+    const sessionMonths = new Set(sessionPeriodKeys(studentAy));
+    const transportHeadId =
+      masters.feeHeads.find((h) => h.code === "TRANSPORT")?.id ?? "";
+    for (const [periodKey, held] of transportMonthsForStudent(paidMap, student.id)) {
+      if (transportMonthsShown.has(periodKey)) continue;
+      if (!sessionMonths.has(periodKey)) continue;
+      if (held.amountPaise <= 0) continue;
+      const calMonth = Number(periodKey.slice(5, 7));
+      const dueOn = dueOnForSessionMonth(studentAy, calMonth, 10);
+      if (!includeFuture && isAfterRunningSessionMonth(dueOn, asOf)) continue;
+      // The latest receipt line for the month supplies the snapshot.
+      const keys = new Set(held.dueKeys);
+      let snap: VoucherLine | null = null;
+      let snapAt = "";
+      for (const v of fees.vouchers) {
+        if (v.voidedAt) continue;
+        for (const l of v.lines) {
+          if (!keys.has(l.dueKey)) continue;
+          const at = v.collectedAt || v.collectionDate || "";
+          if (!snap || at >= snapAt) {
+            snap = l;
+            snapAt = at;
+          }
+        }
+      }
+      const dueKey = snap?.dueKey ?? held.dueKeys[held.dueKeys.length - 1]!;
+      const waived =
+        transportWaivedByMonth.get(`${student.id}|${periodKey}`) ?? 0;
+      if (waived > 0) waiverMap.set(dueKey, waived);
+      const t = snap?.transport ?? null;
+      const label = transportPeriodLabel(periodKey);
+      transportMonthsShown.add(periodKey);
+      lines.push({
+        dueKey,
+        kind: "transport",
+        studentId: student.id,
+        feeHeadId: transportHeadId,
+        feeHeadName: "Transport",
+        installmentId: null,
+        installmentLabel: label,
+        specialFeeId: null,
+        structureLineId: null,
+        storeIssueId: null,
+        storeIssueNo: "",
+        storeItems: [],
+        transport: {
+          assignmentId: t?.assignmentId || dueKey.split(":")[2] || "",
+          routeCode: t?.routeCode ?? "",
+          routeName: t?.routeName ?? "",
+          busNo: t?.busNo ?? "",
+          vehicleReg: t?.vehicleReg ?? "",
+          vehicleId: t?.vehicleId ?? "",
+          vehiclePhotoUrl: t?.vehiclePhotoUrl ?? "",
+          stopName: t?.stopName ?? "",
+          periodLabel: label,
+          periodKey,
+          effectiveFrom: t?.effectiveFrom ?? "",
+          monthlyFeePaise: t?.monthlyFeePaise ?? 0,
+        },
+        dueOn,
+        // Billed = what was settled (paid + any waiver), so the line reads
+        // as exactly settled: nothing owed, nothing refundable invented.
+        billedPaise: held.amountPaise + waived,
+        concessionPaise: 0,
+        concessionDetails: [],
+        paidPaise: held.amountPaise,
+        balancePaise: 0,
+        label: `Transport · ${label}${t?.routeCode ? ` · ${t.routeCode}` : ""} · paid`,
+      });
+    }
   }
 
   for (const sf of masters.specialFees.filter((f) => f.isActive)) {
@@ -3297,6 +3412,21 @@ export function nextReceiptNo(
   return `${series}/${ayCode}/${String(max + 1).padStart(4, "0")}`;
 }
 
+/**
+ * The receipt number to use: the server-issued one (or this copy's suggestion,
+ * when later — this tab may hold a receipt the server has not seen yet), and
+ * never one already on a receipt this copy holds. Exported for its self-test.
+ */
+export function chooseReceiptNo(
+  issued: string | undefined,
+  local: string,
+  fees: Pick<FeesState, "vouchers">,
+): string {
+  const pick = issued?.trim() ? laterSeriesNumber(issued.trim(), local) : local;
+  const taken = new Set(fees.vouchers.map((v) => v.receiptNo));
+  return taken.has(pick) ? local : pick;
+}
+
 export function receiptSeriesOf(receiptNo: string): FeeReceiptSeries | "" {
   if (receiptNo.startsWith("R/")) return "R";
   if (receiptNo.startsWith("F/") || receiptNo.startsWith("REC/")) return "F";
@@ -3364,6 +3494,15 @@ export function collectPayment(input: {
   receiptSeries?: FeeReceiptSeries;
   manualBookSeries?: string;
   manualBookLeaf?: string;
+  /**
+   * The receipt number the SERVER issued for this receipt (data-layer 2.2e:
+   * POST /api/data/masters.number-series/next, or nextSeriesNumberServer on
+   * a server route) — max(the counter, the highest receipt on record + 1).
+   * The receipt takes the later of it and this copy's own suggestion, and
+   * never a number this copy already holds. Absent: this copy's suggestion
+   * (the callers not yet moved — see COMMAND.md 2.2e).
+   */
+  issuedReceiptNo?: string;
   /** Skip the manual-book paper-age soft check when confirmed by the UI. */
   allowBackdate?: boolean;
   /**
@@ -3562,10 +3701,10 @@ export function collectPayment(input: {
 
   const voucher: CollectionVoucher = {
     id: id("rcv"),
-    receiptNo: nextReceiptNo(
+    receiptNo: chooseReceiptNo(
+      input.issuedReceiptNo,
+      nextReceiptNo(fees, input.academicYearCode ?? DEFAULT_AY, input.receiptSeries ?? "F"),
       fees,
-      input.academicYearCode ?? DEFAULT_AY,
-      input.receiptSeries ?? "F",
     ),
     schoolReceiptNo: manualRef,
     source,
@@ -3815,24 +3954,24 @@ export function voidVoucher(voucherId: string): boolean {
  * (`[v:<id>]`, written when the counter's "save for future months" applied).
  * Rejection, not deletion: the grant stays on file with the void note, so
  * Concessions shows why the discount stopped.
+ *
+ * Data-layer 2.2e: done by the SERVER (POST /api/fees/counter-grants,
+ * action revoke) once the void itself is in the database, under the void's
+ * own authority (fees · edit — the clerk who voids need not hold Masters):
+ * exactly the stored grants carrying this receipt's marker, one batch. A
+ * revoke that cannot be done yet is kept and retried, and the clerk is told
+ * (lib/data/client/counterGrantsClient). On the server this does nothing:
+ * the server routes that void a receipt (refunds) revoke through
+ * lib/data/server/mastersLibWrites.server, because a "save" here only ever
+ * changed that process's mirror copy.
  */
 function revokeGrantsFromVoidedReceipt(voucher: CollectionVoucher): void {
-  const masters = loadMasters();
-  const marker = `[v:${voucher.id}]`;
-  const grants = masters.concessionGrants ?? [];
-  let changed = false;
-  const next = grants.map((g) => {
-    if (g.status === "rejected" || !g.reason.includes(marker)) return g;
-    changed = true;
-    return {
-      ...g,
-      status: "rejected" as const,
-      reason: `${g.reason} · auto-revoked — receipt ${voucher.receiptNo} voided ${new Date().toISOString().slice(0, 10)}`,
-    };
-  });
-  if (changed) {
-    void trackServerWork(saveMasters({ ...masters, concessionGrants: next }));
-  }
+  if (typeof window === "undefined") return;
+  void trackServerWork(
+    import("@/lib/counterGrantsClient")
+      .then(({ revokeCounterGrants }) => revokeCounterGrants({ id: voucher.id, receiptNo: voucher.receiptNo }))
+      .catch(() => undefined),
+  );
 }
 
 /**

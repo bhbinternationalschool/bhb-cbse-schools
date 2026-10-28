@@ -3,11 +3,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ATTENDANCE_STATUSES, loadAttendance, type AttendanceStatus } from "@/lib/attendance";
-import { loadMasters, type MastersState } from "@/lib/masters";
-import { hasPermission } from "@/lib/rbac";
+import { hasFeaturePermission } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { loadSis, type SisState } from "@/lib/sis";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   STUDENT_ATT_REPORTS,
   runStudentAttReport,
@@ -21,13 +22,11 @@ import {
   ErpTableShell,
 } from "@/components/ui/erp-roster";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { MonthRangeFilter, useMonthRange, useReportPeriod } from "@/components/ui/month-range-filter";
+import { istTodayIso, reportPeriodPayload } from "@/lib/monthRange";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
-}
-
-function thisMonth() {
-  return todayIso().slice(0, 7);
 }
 
 export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
@@ -43,13 +42,17 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
         : null,
     [teacherMode, my],
   );
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [reportId, setReportId] = useState<StudentAttReportId>("day_wise");
   const [date, setDate] = useState(todayIso);
-  const [fromDate, setFromDate] = useState(() => `${ay.slice(0, 4)}-04-01`);
-  const [toDate, setToDate] = useState(todayIso);
-  const [month, setMonth] = useState(thisMonth);
+  // One period for every report: Month and From/To can never disagree
+  // (lib/monthRange.ts). Opens on the session to date, as before.
+  const period = useMonthRange({
+    session: ay,
+    initial: { from: `${ay.slice(0, 4)}-04-01`, to: istTodayIso() },
+    storageKey: "attendance.studentReports",
+  });
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
   const [studentId, setStudentId] = useState("");
@@ -85,7 +88,6 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
   const previewSort = useTableSort(previewRows, previewColumns, "__report_order__");
 
   useEffect(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
   }, []);
 
@@ -93,11 +95,13 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
     () => STUDENT_ATT_REPORTS.find((r) => r.id === reportId)!,
     [reportId],
   );
+  const periodMode = useReportPeriod(period, def.filters);
 
   // Excel / PDF / the table's own export are downloads; viewing on screen
-  // is not. A teacher holds attendance view/edit but not export.
+  // is not. A teacher holds attendance view/edit but not export. The
+  // module's export, or Attendance → Dashboard & reports with Export.
   const canExport = useMemo(
-    () => hasPermission(session, masters, "attendance", "export"),
+    () => hasFeaturePermission(session, masters, "attendance.reports", "export"),
     [session, masters],
   );
 
@@ -203,10 +207,9 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
   function filterPayload() {
     return {
       academicYearCode: ay,
-      date,
-      fromDate,
-      toDate,
-      month,
+      // A Date-only report reads its own day; every other report reads the
+      // one period, in the shape its filters allow.
+      ...(periodMode === "none" ? { date } : reportPeriodPayload(periodMode, period.range, period.session)),
       classId: classId || undefined,
       sectionId: sectionId || undefined,
       studentId: studentId || undefined,
@@ -272,6 +275,9 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportId, masters, sis, ay, mySections]);
 
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !sis) {
     return <p className="text-sm text-[var(--muted)]">Loading reports…</p>;
   }
@@ -292,7 +298,7 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
             {STUDENT_ATT_REPORTS.map((r) => {
               const active = reportId === r.id;
               return (
-                <li key={r.id}>
+                <li key={r.id} data-report-id={r.id}>
                   <button
                     type="button"
                     onClick={() => setReportId(r.id)}
@@ -332,7 +338,7 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
           ) : null}
 
           <div className="mt-4 flex flex-wrap gap-3">
-            {needs.has("date") ? (
+            {periodMode === "none" && needs.has("date") ? (
               <label className="block text-sm">
                 <span className="mb-1 block text-[11px] text-[var(--muted)]">
                   Date
@@ -345,44 +351,14 @@ export function StudentAttendanceReportsPanel({ ay }: { ay: string }) {
                 />
               </label>
             ) : null}
-            {needs.has("fromTo") ? (
-              <>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    From
-                  </span>
-                  <input
-                    type="date"
-                    className="field !py-1.5"
-                    value={fromDate}
-                    onChange={(e) => setFromDate(e.target.value)}
-                  />
-                </label>
-                <label className="block text-sm">
-                  <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                    To
-                  </span>
-                  <input
-                    type="date"
-                    className="field !py-1.5"
-                    value={toDate}
-                    onChange={(e) => setToDate(e.target.value)}
-                  />
-                </label>
-              </>
-            ) : null}
-            {needs.has("month") ? (
-              <label className="block text-sm">
-                <span className="mb-1 block text-[11px] text-[var(--muted)]">
-                  Month
-                </span>
-                <input
-                  type="month"
-                  className="field !py-1.5"
-                  value={month}
-                  onChange={(e) => setMonth(e.target.value)}
-                />
-              </label>
+            {periodMode !== "none" ? (
+              <MonthRangeFilter
+                period={period}
+                showDay={periodMode === "dayOrMonth"}
+                showMonth={needs.has("month") || periodMode === "range"}
+                showRange={periodMode === "range"}
+                labelClassName="block text-sm"
+              />
             ) : null}
             {needs.has("class") ? (
               <label className="block text-sm min-w-[140px]">

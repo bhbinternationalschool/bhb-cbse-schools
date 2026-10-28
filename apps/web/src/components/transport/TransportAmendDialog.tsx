@@ -1,5 +1,6 @@
 "use client";
 
+import { groupStopsByOrigin } from "@/lib/transportStopOrigin";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { formatInr, type FeeDueLine } from "@/lib/fees";
@@ -65,8 +66,12 @@ export function TransportAmendDialog({
    */
   canEdit: boolean;
   state: TransportState;
-  /** The student's fee lines — the caller has the student and masters to build them. */
-  dues: FeeDueLine[];
+  /**
+   * The student's fee lines — the caller has the student and masters to build
+   * them. null = they could not be read for this role (teaching-scope Masters):
+   * the plan then refuses (PAID_MONTHS_UNKNOWN_FOR_ROLE) and Apply stays off.
+   */
+  dues: FeeDueLine[] | null;
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
@@ -468,12 +473,21 @@ export function TransportAmendDialog({
               onChange={(e) => setStopId(e.target.value)}
             >
               <option value="">Pick a stop…</option>
-              {(route?.stops ?? []).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                  {s.distanceKm > 0 ? ` · ${s.distanceKm} km` : ""}
-                </option>
-              ))}
+              {groupStopsByOrigin(route?.stops ?? []).map((group) => {
+                const options = group.stops.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                    {s.distanceKm > 0 ? ` · ${s.distanceKm} km` : ""}
+                  </option>
+                ));
+                return group.label ? (
+                  <optgroup key={group.origin} label={group.label}>
+                    {options}
+                  </optgroup>
+                ) : (
+                  options
+                );
+              })}
             </select>
           </label>
 

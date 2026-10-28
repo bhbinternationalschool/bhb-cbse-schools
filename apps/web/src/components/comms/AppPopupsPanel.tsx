@@ -5,9 +5,11 @@ import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 const fieldCls = field;
 import type { AadhaarGapCounts, AadhaarScope, AppPopup } from "@/lib/appPopups";
-import { loadMasters } from "@/lib/masters";
+import { useMasters } from "@/lib/data/client/hooks";
+import { QueryError } from "@/components/data/QueryError";
 import { uploadMedia } from "@/lib/mediaUpload";
 import { AppPopupPreview, popupStatus } from "@/components/comms/AppPopupPreview";
+import { AppPopupResponses } from "@/components/comms/AppPopupResponses";
 import { looksHindi, POPUP_CONSENT_MAX, POPUP_TITLE_MAX, popupBodyMax } from "@/lib/appPopupText";
 
 /** The paired fields: English and Hindi of the title, message and consent. */
@@ -92,12 +94,18 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
   const [busy, setBusy] = useState(false);
   /** Which list item's phone preview is open, and the language it shows. */
   const [previewId, setPreviewId] = useState("");
+  const [responsesId, setResponsesId] = useState("");
   const [lang, setLang] = useState<"hi" | "en">("hi");
   /** Fields the AI filled (and nobody has changed since) — only these are refilled. */
   const [aiFilled, setAiFilled] = useState<Set<string>>(new Set());
   const [aiBusy, setAiBusy] = useState("");
   const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
-  const classes = useMemo(() => (loadMasters().classes ?? []).filter((c) => c.isActive !== false), []);
+  // data-layer 2.1g: the class list from the Masters view (versions poll), not a once-at-mount page-copy read.
+  const mastersQ = useMasters();
+  const classes = useMemo(
+    () => (mastersQ.data?.masters.classes ?? []).filter((c) => c.isActive !== false),
+    [mastersQ.data],
+  );
 
   const load = useCallback(async () => {
     try {
@@ -354,7 +362,13 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
             </label>
           </div>
 
-          {draft.targetMode === "classes" ? (
+          {draft.targetMode === "classes" && !mastersQ.data ? (
+            mastersQ.isError ? (
+              <QueryError what="the school's classes" error={mastersQ.error} retry={() => mastersQ.refetch()} />
+            ) : (
+              <p className="text-xs text-[var(--muted)]">Loading classes…</p>
+            )
+          ) : draft.targetMode === "classes" ? (
             <div className="flex flex-wrap gap-2">
               {classes.map((c) => (
                 <label key={c.id} className="flex items-center gap-1 rounded-full border border-[var(--border)] px-2 py-0.5 text-xs">
@@ -555,6 +569,14 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
                   <button type="button" className={btnOutline} onClick={() => setPreviewId(open ? "" : p.id)} aria-expanded={open}>
                     {open ? "Hide preview" : "Preview"}
                   </button>
+                  <button
+                    type="button"
+                    className={btnOutline}
+                    onClick={() => setResponsesId(responsesId === p.id ? "" : p.id)}
+                    aria-expanded={responsesId === p.id}
+                  >
+                    {responsesId === p.id ? "Hide responses" : "Responses"}
+                  </button>
                   {canEdit ? (
                     <>
                       <button type="button" className={btnOutline} onClick={() => setDraft(p)}>
@@ -613,6 +635,12 @@ export function AppPopupsPanel({ canEdit }: { canEdit: boolean }) {
                 <div className="space-y-2 pt-1">
                   <LangSwitch lang={lang} setLang={setLang} />
                   <AppPopupPreview popup={p} lang={lang} />
+                </div>
+              ) : null}
+
+              {responsesId === p.id ? (
+                <div className="pt-1">
+                  <AppPopupResponses popupId={p.id} isAadhaar={p.form === "aadhaar"} canVerify={canEdit} />
                 </div>
               ) : null}
             </li>

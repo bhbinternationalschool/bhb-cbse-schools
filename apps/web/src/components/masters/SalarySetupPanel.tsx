@@ -9,7 +9,9 @@ import {
   type StaffCategory,
   type StaffStream,
 } from "@/lib/foundationMasters";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import type { MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   buildStructureLinesFromPack,
   cloneSalaryStructure,
@@ -53,6 +55,16 @@ import {
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { IncrementPanel } from "@/components/payroll/IncrementPanel";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { NotOnPayrollSwitch } from "@/components/masters/NotOnPayrollSwitch";
+import { recordAudit } from "@/lib/auditClient";
+import { pushToast } from "@/components/shell/Toast";
+import {
+  carryNotOnPayroll,
+  clearSalaryAssignment,
+  hasSalaryAssignment,
+  isOnPayroll,
+  setNotOnPayroll,
+} from "@/lib/payrollNotOnPayroll";
 
 type SalTab = "settings" | "heads" | "structures" | "assign" | "increment";
 
@@ -64,13 +76,14 @@ const HEAD_KINDS: { value: SalaryHeadKind; label: string }[] = [
 
 export function SalarySetupPanel() {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1h: the server's book (statutory setup, designations) + the
+  // access copy's full staff records (salary links) — no mount-time page-copy read.
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [state, setState] = useState<SalarySetupState | null>(null);
   const [tab, setTab] = useState<SalTab>("settings");
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    setMasters(loadMasters());
     setState(loadSalarySetup());
     // Pull the server copy (salary_setup_state) and re-read; the login-time
     // cache wipe means the local copy is empty on a fresh session.
@@ -102,6 +115,16 @@ export function SalarySetupPanel() {
     }
   }
 
+  /** A change already saved and confirmed by the server: show it, no second save. */
+  function showSaved(next: SalarySetupState, msg: string) {
+    setState(next);
+    setNotice(msg);
+    window.setTimeout(() => setNotice(null), 2400);
+  }
+
+  if (!masters && mastersError) {
+    return <QueryError what="the school's statutory setup and staff" error={mastersError} retry={retryMasters} />;
+  }
   if (!state || !masters) {
     return <p className="text-sm text-[var(--muted)]">Loading salary setup…</p>;
   }
@@ -112,6 +135,28 @@ export function SalarySetupPanel() {
         Salary setup is Admin / Principal only. Accounts cannot view or edit
         salary structures (§6i.4).
       </p>
+    );
+  }
+
+  if (mastersScope === "teaching") {
+    // The teaching subset withholds statutoryConfig: every amount below would
+    // be computed from default EPF/ESIC rates, not the school's — refuse.
+    // Deliberately a refusal, not main's silent fallback to default rates: a
+    // salary worked out on rates that are not the school's is wrong money.
+    return (
+      <div
+        role="alert"
+        className="rounded-xl border border-[rgba(180,35,24,0.25)] bg-[rgba(180,35,24,0.06)] px-4 py-3 text-sm text-[var(--brand-deep)]"
+      >
+        <p className="font-semibold">Salary setup needs the Masters · View permission.</p>
+        <p className="mt-1">
+          The school&apos;s EPF and ESIC rates are part of Masters, and your role is not allowed to see Masters, so no
+          salary amount is worked out here — working it out on default rates could give wrong pay.
+        </p>
+        <p className="mt-1">
+          Ask the Principal or Admin to give your role <strong>Masters · View</strong> (Masters → Roles &amp; permissions).
+        </p>
+      </div>
     );
   }
 
@@ -161,7 +206,7 @@ export function SalarySetupPanel() {
         <StructuresPanel state={state} commit={commit} masters={masters} />
       ) : null}
       {tab === "assign" ? (
-        <AssignPanel state={state} commit={commit} masters={masters} />
+        <AssignPanel state={state} commit={commit} showSaved={showSaved} masters={masters} />
       ) : null}
       {tab === "increment" ? <IncrementPanel mode="full" /> : null}
     </div>
@@ -265,6 +310,18 @@ function PayCyclePanel({
             placeholder="Your Union Bank salary a/c"
             onChange={(e) =>
               setForm({ ...form, salaryBankAccountNo: e.target.value })
+            }
+          />
+        </label>
+        <label className="text-[11px] text-[var(--muted)]">
+          Corporate ID (Union Bank salary upload)
+          <input
+            className="field mt-1 !py-1.5"
+            value={form.salaryBankCorporateId}
+            placeholder="As on your Union Bank corporate login"
+            maxLength={32}
+            onChange={(e) =>
+              setForm({ ...form, salaryBankCorporateId: e.target.value })
             }
           />
         </label>
@@ -671,8 +728,9 @@ function StructuresPanel({
                           structures: state.structures.filter(
                             (x) => x.id !== s.id,
                           ),
-                          staffLinks: state.staffLinks.filter(
-                            (l) => l.structureId !== s.id,
+                          staffLinks: clearSalaryAssignment(
+                            state.staffLinks,
+                            (l) => l.structureId === s.id,
                           ),
                         });
                         if (editId === s.id) setEditId(null);
@@ -760,7 +818,7 @@ function StructuresPanel({
             }
           >
             <option value="">Any category</option>
-            {STAFF_CATEGORIES.map((c) => (
+            {STAFF_CATEGORIES.filter((c) => c.value !== "visiting").map((c) => (
               <option key={c.value} value={c.value}>
                 {c.label}
               </option>
@@ -991,12 +1049,15 @@ function StructuresPanel({
 function AssignPanel({
   state,
   commit,
+  showSaved,
   masters,
 }: {
   state: SalarySetupState;
   commit: (s: SalarySetupState, msg?: string) => void;
+  showSaved: (s: SalarySetupState, msg: string) => void;
   masters: MastersState;
 }) {
+  const session = useDemoSession();
   type Draft = {
     structureId: string;
     basicOverride: string;
@@ -1006,8 +1067,10 @@ function AssignPanel({
     statutoryGrossUp: boolean;
   };
 
+  // Visiting staff are paid per period / hour / day from Staff → Visiting
+  // pay — they never get a structure, PF or ESIC here.
   const roster = (masters.staff ?? [])
-    .filter((s) => s.status === "active")
+    .filter((s) => s.status === "active" && s.category !== "visiting")
     .sort((a, b) => a.empCode.localeCompare(b.empCode));
 
   // Sorting the setup list by what is SAVED is how the office finds who has
@@ -1018,7 +1081,7 @@ function AssignPanel({
     roster,
     {
       staff: (s) => s.fullName,
-      saved: (s) => (state.staffLinks.some((l) => l.staffId === s.id) ? 1 : 0),
+      saved: (s) => (hasSalaryAssignment(state.staffLinks.find((l) => l.staffId === s.id)) ? 1 : 0),
       structure: (s) => {
         const link = state.staffLinks.find((l) => l.staffId === s.id);
         return state.structures.find((x) => x.id === link?.structureId)?.name ?? "";
@@ -1032,7 +1095,9 @@ function AssignPanel({
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
 
   function savedDraft(staffId: string): Draft {
-    const link = state.staffLinks.find((l) => l.staffId === staffId);
+    // A link carrying only the "not on payroll" switch is no assignment.
+    const found = state.staffLinks.find((l) => l.staffId === staffId);
+    const link = hasSalaryAssignment(found) ? found : undefined;
     return {
       structureId: link?.structureId || "",
       basicOverride:
@@ -1085,7 +1150,7 @@ function AssignPanel({
       commit(
         {
           ...state,
-          staffLinks: state.staffLinks.filter((l) => l.staffId !== staffId),
+          staffLinks: clearSalaryAssignment(state.staffLinks, (l) => l.staffId === staffId),
         },
         "Assignment cleared — using auto structure",
       );
@@ -1105,6 +1170,7 @@ function AssignPanel({
       effectiveFrom:
         existing?.effectiveFrom || new Date().toISOString().slice(0, 10),
       salaryAccountNote: existing?.salaryAccountNote || "",
+      ...carryNotOnPayroll(existing),
     };
     commit(
       {
@@ -1117,6 +1183,54 @@ function AssignPanel({
       "Staff salary assignment saved",
     );
     cancelDraft(staffId);
+  }
+
+  /** The "Not on payroll" switch — saved at once, and audited. */
+  const [switchBusy, setSwitchBusy] = useState(false);
+
+  /**
+   * The "Not on payroll" switch — saved at once and confirmed by the server.
+   * Audited only after a confirmed save: a refused save (no payroll edit,
+   * changed on another device) says so and records nothing.
+   */
+  async function setPayrollSwitch(staffId: string, on: boolean, reason: string) {
+    if (switchBusy) return;
+    const staff = roster.find((s) => s.id === staffId);
+    const r = setNotOnPayroll(state.staffLinks, staffId, {
+      on,
+      reason,
+      by: session.fullName,
+      at: new Date().toISOString(),
+    });
+    const next = { ...state, staffLinks: r.links };
+    setSwitchBusy(true);
+    try {
+      const { saveSalarySetupConfirmed } = await import("@/lib/salarySetupPersistence");
+      const saved = await saveSalarySetupConfirmed(next, state);
+      if (!saved.ok) {
+        pushToast({ kind: "error", message: saved.error, durationMs: 0 });
+        return;
+      }
+      showSaved(
+        next,
+        on
+          ? `${staff?.fullName ?? "Staff"} marked not on payroll — left out of new salary runs`
+          : `${staff?.fullName ?? "Staff"} is back on payroll`,
+      );
+      recordAudit({
+        module: "masters",
+        action: "update",
+        entityType: "salary_payroll_switch",
+        entityId: staffId,
+        summary: `${staff?.fullName ?? staffId} (${staff?.empCode ?? ""}): ${
+          on ? `not on payroll${reason ? ` — ${reason}` : ""}` : "back on payroll"
+        }`,
+        before: r.before,
+        after: r.after,
+      });
+    } finally {
+      setSwitchBusy(false);
+    }
   }
 
   const dirtyCount = roster.filter((s) => isDirty(s.id)).length;
@@ -1137,7 +1251,11 @@ function AssignPanel({
         <strong className="text-[var(--brand-deep)]">School pays the PF/ESIC cut</strong>{" "}
         when the staff member is to take home the agreed figure — the amount is
         worked out from that month&rsquo;s own deductions, so it never goes stale when
-        the basic changes.
+        the basic changes.{" "}
+        <strong className="text-[var(--brand-deep)]">Not on payroll</strong>{" "}
+        (owner, trustee, honorary) leaves someone out of every new salary run
+        while they stay active for attendance, the staff app and roles — it is
+        saved at once, no Assign needed.
         {dirtyCount > 0 ? (
           <span className="ml-1 font-semibold text-[var(--warning)]">
             · {dirtyCount} unsaved row{dirtyCount > 1 ? "s" : ""}
@@ -1145,7 +1263,7 @@ function AssignPanel({
         ) : null}
       </p>
       <div className="overflow-x-auto">
-        <ErpTable minWidth="min-w-[860px]">
+        <ErpTable minWidth="min-w-[980px]">
           <ErpTableHead>
             <tr className="text-[11px] text-[var(--muted)]">
               <ErpSortTh sort={salarySort} field="staff">Staff</ErpSortTh>
@@ -1156,6 +1274,12 @@ function AssignPanel({
                 Additional ₹ / month
               </th>
               <th className="px-3 py-2 font-medium">PF / ESIC</th>
+              <th
+                className="px-3 py-2 font-medium"
+                title="Not on payroll: left out of every new salary run; still active for attendance, the staff app and roles"
+              >
+                Payroll
+              </th>
               <th className="px-3 py-2 font-medium">Action</th>
             </tr>
           </ErpTableHead>
@@ -1181,8 +1305,8 @@ function AssignPanel({
                     draft.statutoryGrossUp,
                   )
                 : null;
-              const savedLabel = link
-                ? state.structures.find((x) => x.id === link.structureId)
+              const savedLabel = hasSalaryAssignment(link)
+                ? state.structures.find((x) => x.id === link!.structureId)
                     ?.name ?? "Assigned"
                 : "Auto (by stream)";
               // What is actually saved for this staff (not the unsaved draft):
@@ -1213,7 +1337,13 @@ function AssignPanel({
               return (
                 <tr
                   key={s.id}
-                  className={dirty ? "bg-[rgba(197,160,40,0.08)]" : ""}
+                  className={
+                    dirty
+                      ? "bg-[rgba(197,160,40,0.08)]"
+                      : isOnPayroll(link)
+                        ? ""
+                        : "opacity-70"
+                  }
                 >
                   <td className="px-3 py-2">
                     <div className="font-semibold text-[var(--brand-deep)]">
@@ -1355,6 +1485,14 @@ function AssignPanel({
                         </option>
                       ))}
                     </select>
+                  </td>
+                  <td className="px-3 py-2">
+                    <NotOnPayrollSwitch
+                      link={link}
+                      staffName={s.fullName}
+                      disabled={switchBusy}
+                      onChange={(on, reason) => void setPayrollSwitch(s.id, on, reason)}
+                    />
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-1.5">

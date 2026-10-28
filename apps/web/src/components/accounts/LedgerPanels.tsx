@@ -21,7 +21,7 @@
  * imply "checked and nil".
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BookOpenCheck,
@@ -31,6 +31,15 @@ import {
 } from "lucide-react";
 import { VoucherBrowserPanel } from "@/components/accounts/VoucherBrowserPanel";
 import { formatInr } from "@/lib/fees";
+import { hideCancelledLines, type StatementLineLike } from "@/lib/ledger/cancelledPairs";
+import { statementDrillTarget, type StatementTarget } from "@/lib/ledger/drillDown";
+import {
+  failedLabel,
+  isFailedState,
+  summariseSettlements,
+  type RetriedAs,
+} from "@/lib/ledger/pgSettlementStatus";
+import { VoucherDetailDialog, rowOpenProps } from "@/components/accounts/VoucherDetailDialog";
 import {
   ErpTable,
   ErpTableBody,
@@ -830,7 +839,18 @@ type ReportSection = {
 
 type ReportKind = "tb" | "ie" | "bs" | "rp" | "statement" | "capack";
 
-function SectionTable({ sections, totalLabel, totalPaise }: { sections: ReportSection[]; totalLabel: string; totalPaise: number }) {
+function SectionTable({
+  sections,
+  totalLabel,
+  totalPaise,
+  drill,
+}: {
+  sections: ReportSection[];
+  totalLabel: string;
+  totalPaise: number;
+  /** The statement a line opens, or null when the line is not one account. */
+  drill?: (code: string) => (() => void) | null;
+}) {
   return (
     <div className="space-y-3">
       {sections.map((s) => (
@@ -838,13 +858,16 @@ function SectionTable({ sections, totalLabel, totalPaise }: { sections: ReportSe
           <p className="text-[11px] font-bold uppercase tracking-wide text-[var(--muted)]">{s.title}</p>
           <ErpTable minWidth="min-w-0" className="text-sm">
             <ErpTableBody>
-              {s.lines.map((l) => (
-                <tr key={l.code}>
+              {s.lines.map((l) => {
+                const open = drill?.(l.code) ?? null;
+                return (
+                <tr key={l.code} {...(open ? rowOpenProps(open, `Open the statement of ${l.code} ${l.name}`) : {})}>
                   <td className="py-1 font-mono text-xs text-[var(--muted)]">{l.code}</td>
                   <td className="py-1">{l.name}</td>
                   <td className="py-1 text-right tabular-nums">{formatInr(l.amountPaise)}</td>
                 </tr>
-              ))}
+                );
+              })}
               <tr>
                 <td colSpan={2} className="py-1 text-right text-xs font-bold">{s.title}</td>
                 <td className="py-1 text-right font-bold tabular-nums">{formatInr(s.totalPaise)}</td>
@@ -873,6 +896,14 @@ export function LedgerReportsPanel() {
   // kind switch) is a crash, not a curiosity — this gate closes it.
   const [dataKind, setDataKind] = useState<ReportKind | null>(null);
   const [accounts, setAccounts] = useState<{ code: string; name: string }[]>([]);
+  // A reversed voucher and its reversal net to nothing; listing both buried
+  // Salary & Wages 2026-27 under 422 lines of the 13 Oct clean-up. Hidden by
+  // default, one click away, and never touching the opening or closing.
+  const [hideCancelled, setHideCancelled] = useState(true);
+  // Drill-down: a report line opens its account's statement for the same
+  // dates; a statement line opens its voucher.
+  const [drillNonce, setDrillNonce] = useState(0);
+  const [openVoucher, setOpenVoucher] = useState<string | null>(null);
 
   useEffect(() => {
     void fetch("/api/ledger", { cache: "no-store" })
@@ -916,11 +947,48 @@ export function LedgerReportsPanel() {
 
   useEffect(() => {
     void run();
-    // Deliberate: re-run only on demand or when the report kind changes.
+    // Deliberate: re-run only on demand, when the report kind changes, or on
+    // a drill-down (which sets kind, code and dates in one render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind]);
+  }, [kind, drillNonce]);
+
+  const knownCodes = useMemo(() => new Set(accounts.map((a) => a.code)), [accounts]);
+  const drill = useCallback(
+    (code: string): (() => void) | null => {
+      const t: StatementTarget | null = statementDrillTarget({ code, knownCodes, from, to });
+      if (!t) return null;
+      return () => {
+        setCode(t.code);
+        setFrom(t.from);
+        setTo(t.to);
+        setKind("statement");
+        setDrillNonce((n) => n + 1);
+      };
+    },
+    [knownCodes, from, to],
+  );
 
   const report = (data?.report ?? null) as Record<string, unknown> | null;
+
+  // The statement as shown: with the cancelled pairs taken out the running
+  // balance is recomputed from the opening, so it still ends on the closing.
+  const statement = useMemo(() => {
+    if (dataKind !== "statement" || !Array.isArray(data?.rows)) return null;
+    type Row = StatementLineLike & {
+      date: string;
+      narration: string;
+      partyName: string;
+    };
+    const all = data.rows as Row[];
+    const openingPaise = Number(data.openingPaise ?? 0);
+    const closingPaise = Number(data.closingPaise ?? 0);
+    const debitNormal = data.debitNormal !== false;
+    if (!hideCancelled) {
+      return { rows: all, hiddenCount: 0, openingPaise, closingPaise, total: all.length };
+    }
+    const shown = hideCancelledLines(all, { openingPaise, debitNormal });
+    return { ...shown, openingPaise, total: all.length };
+  }, [data, dataKind, hideCancelled]);
 
   return (
     <div className="mt-4 space-y-4">
@@ -1002,8 +1070,13 @@ export function LedgerReportsPanel() {
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {(report.rows as Record<string, number | string>[]).map((r) => (
-                  <tr key={String(r.code)}>
+                {(report.rows as Record<string, number | string>[]).map((r) => {
+                  const open = drill(String(r.code));
+                  return (
+                  <tr
+                    key={String(r.code)}
+                    {...(open ? rowOpenProps(open, `Open the statement of ${r.code} ${r.name}`) : {})}
+                  >
                     <td className="py-1 font-mono text-xs">{r.code}</td>
                     <td className="py-1">{r.name}</td>
                     <td className="py-1 text-right tabular-nums">{formatInr(Number(r.openingPaise))}</td>
@@ -1012,7 +1085,8 @@ export function LedgerReportsPanel() {
                     <td className="py-1 text-right tabular-nums">{formatInr(Number(r.closingDebitPaise))}</td>
                     <td className="py-1 text-right tabular-nums">{formatInr(Number(r.closingCreditPaise))}</td>
                   </tr>
-                ))}
+                  );
+                })}
                 {(() => {
                   const t = report.totals as Record<string, number>;
                   return (
@@ -1047,11 +1121,13 @@ export function LedgerReportsPanel() {
             <SectionTable
               sections={report.income as ReportSection[]}
               totalLabel="Total income"
+              drill={drill}
               totalPaise={Number(report.totalIncomePaise)}
             />
             <SectionTable
               sections={report.expenditure as ReportSection[]}
               totalLabel="Total expenditure"
+              drill={drill}
               totalPaise={Number(report.totalExpenditurePaise)}
             />
           </div>
@@ -1087,11 +1163,13 @@ export function LedgerReportsPanel() {
             <SectionTable
               sections={report.liabilities as ReportSection[]}
               totalLabel="Corpus & liabilities"
+              drill={drill}
               totalPaise={Number(report.totalLiabilitiesPaise)}
             />
             <SectionTable
               sections={report.assets as ReportSection[]}
               totalLabel="Assets"
+              drill={drill}
               totalPaise={Number(report.totalAssetsPaise)}
             />
           </div>
@@ -1116,16 +1194,21 @@ export function LedgerReportsPanel() {
           <p className="mt-1 text-xs text-[var(--muted)]">
             Opening cash {formatInr(Number(report.openingCashPaise))} → closing{" "}
             {formatInr(Number(report.closingCashPaise))} · true cash basis, contras excluded
+            {Number(data?.cancelledVouchersLeftOut ?? 0) > 0
+              ? ` · ${Number(data?.cancelledVouchersLeftOut)} cancelled voucher(s) left out (reversed pairs net to zero)`
+              : ""}
           </p>
           <div className="mt-3 grid gap-4 lg:grid-cols-2">
             <SectionTable
               sections={report.receipts as ReportSection[]}
               totalLabel="Total receipts"
+              drill={drill}
               totalPaise={Number(report.totalReceiptsPaise)}
             />
             <SectionTable
               sections={report.payments as ReportSection[]}
               totalLabel="Total payments"
+              drill={drill}
               totalPaise={Number(report.totalPaymentsPaise)}
             />
           </div>
@@ -1133,11 +1216,35 @@ export function LedgerReportsPanel() {
       ) : null}
 
       {/* Account statement */}
-      {kind === "statement" && dataKind === "statement" && data?.rows ? (
+      {kind === "statement" && statement ? (
         <section className={CARD}>
-          <h4 className="text-sm font-bold text-[var(--brand-deep)]">
-            Statement · account {code} · {from} → {to}
-          </h4>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <h4 className="text-sm font-bold text-[var(--brand-deep)]">
+              Statement · account {code} · {from} → {to}
+            </h4>
+            <label className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--brand-deep)]">
+              <input
+                type="checkbox"
+                checked={hideCancelled}
+                onChange={(e) => setHideCancelled(e.target.checked)}
+              />
+              Hide cancelled entries (reversed + their reversals)
+            </label>
+          </div>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            Opening {formatInr(statement.openingPaise)} → closing{" "}
+            {formatInr(statement.closingPaise)} · {statement.rows.length} of {statement.total} line(s)
+            {hideCancelled && statement.hiddenCount > 0
+              ? ` · ${statement.hiddenCount} cancelled line(s) hidden`
+              : ""}
+          </p>
+          {hideCancelled && statement.hiddenCount > 0 ? (
+            <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+              Each hidden voucher was cancelled by a reversal in the same period;
+              the pair nets to zero, so the opening and closing are the same
+              either way and the running balance is worked over the lines shown.
+            </p>
+          ) : null}
           <div className="mt-2 overflow-x-auto">
             <ErpTable minWidth="min-w-[44rem]">
               <ErpTableHead>
@@ -1152,10 +1259,23 @@ export function LedgerReportsPanel() {
                 </tr>
               </ErpTableHead>
               <ErpTableBody>
-                {(data.rows as Record<string, unknown>[]).map((r, i) => (
-                  <tr key={i}>
+                {(statement.rows as unknown as Record<string, unknown>[]).map((r, i) => (
+                  <tr
+                    key={i}
+                    {...rowOpenProps(
+                      () => setOpenVoucher(String(r.voucherNo)),
+                      `Open voucher ${String(r.voucherNo)}`,
+                    )}
+                  >
                     <td className="py-1">{String(r.date)}</td>
-                    <td className="py-1 font-mono text-xs">{String(r.voucherNo)}</td>
+                    <td className="py-1 font-mono text-xs">
+                      {String(r.voucherNo)}
+                      {r.cancelledPair ? (
+                        <span className="ml-1 rounded bg-[var(--warning-soft)] px-1 font-sans text-[10px] font-bold text-[var(--muted)]">
+                          cancelled
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="py-1 text-xs text-[var(--muted)]">{String(r.narration)}</td>
                     <td className="py-1 text-xs">{String(r.partyName) || "—"}</td>
                     <td className="py-1 text-right tabular-nums">
@@ -1172,8 +1292,12 @@ export function LedgerReportsPanel() {
               </ErpTableBody>
             </ErpTable>
           </div>
-          {(data.rows as unknown[]).length === 0 ? (
-            <p className="mt-2 text-sm text-[var(--muted)]">No movement on this account in the period.</p>
+          {statement.rows.length === 0 ? (
+            <p className="mt-2 text-sm text-[var(--muted)]">
+              {statement.total > 0
+                ? "Every line in the period was cancelled — untick the box to see them."
+                : "No movement on this account in the period."}
+            </p>
           ) : null}
         </section>
       ) : null}
@@ -1241,6 +1365,10 @@ export function LedgerReportsPanel() {
             </div>
           ) : null}
         </section>
+      ) : null}
+
+      {openVoucher ? (
+        <VoucherDetailDialog target={{ voucherNo: openVoucher }} onClose={() => setOpenVoucher(null)} />
       ) : null}
     </div>
   );
@@ -1521,6 +1649,9 @@ type SettlementRow = {
   voucherNo: string;
   reconState: string;
   postError: string;
+  paymentFrom?: string;
+  paymentTill?: string;
+  retriedAs?: RetriedAs | null;
 };
 
 type SettlementBoard = {
@@ -1575,6 +1706,17 @@ const SETTLEMENT_STATES: Record<
   events_disagree: {
     label: "Breakdown does not add up",
     hint: "The events do not sum to the net settled — a page of them is missing",
+    tone: "bad",
+  },
+  // The label for `failed` is built per row (failedLabel): it names the retry.
+  failed: {
+    label: "Failed",
+    hint: "The bank refused this transfer. Its money is paid by the retry, so it is not counted in the totals",
+    tone: "wait",
+  },
+  failed_posted: {
+    label: "Failed but in the book",
+    hint: "The gateway says this transfer failed, yet the book has a voucher for it — check the bank statement and reverse the voucher",
     tone: "bad",
   },
 };
@@ -1650,14 +1792,8 @@ export function GatewaySettlementPanel() {
   };
 
   const rows = board?.rows ?? [];
-  const totals = rows.reduce(
-    (acc, r) => ({
-      gross: acc.gross + r.paymentAmountPaise,
-      fee: acc.fee + r.feePaise,
-      net: acc.net + r.amountSettledPaise,
-    }),
-    { gross: 0, fee: 0, net: 0 },
-  );
+  // Failed attempts are left out: their money is the retry's money.
+  const totals = summariseSettlements(rows);
 
   return (
     <section className={`${CARD} mt-4`}>
@@ -1755,7 +1891,10 @@ export function GatewaySettlementPanel() {
             <Tile
               label="Gross collected"
               value={formatInr(totals.gross)}
-              hint={`${rows.length} settlement(s) in this window`}
+              hint={
+                `${totals.counted} settlement(s) in this window` +
+                (totals.failed ? ` · ${totals.failed} failed attempt(s) not counted` : "")
+              }
             />
             <Tile
               label="Gateway fee + GST"
@@ -1794,12 +1933,21 @@ export function GatewaySettlementPanel() {
                 </ErpTableHead>
                 <ErpTableBody>
                   {rows.map((r) => {
-                    const st =
+                    const base =
                       SETTLEMENT_STATES[r.reconState] ?? {
                         label: r.reconState,
                         hint: "",
                         tone: "bad" as const,
                       };
+                    const failed = isFailedState(r.reconState);
+                    const st =
+                      r.reconState === "failed"
+                        ? { ...base, label: failedLabel(r.retriedAs) }
+                        : base;
+                    // Shown, greyed and struck through, never summed.
+                    const amt = failed
+                      ? "text-[var(--muted)] line-through"
+                      : "";
                     return (
                       <tr
                         key={r.cfSettlementId}
@@ -1809,17 +1957,17 @@ export function GatewaySettlementPanel() {
                         <td className="px-2 py-1.5 font-mono text-[11px]">
                           {r.utr || (
                             <span className="text-[var(--muted)]">
-                              not issued yet
+                              {failed ? "none — transfer failed" : "not issued yet"}
                             </span>
                           )}
                         </td>
-                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">
+                        <td className={`px-2 py-1.5 text-right text-xs tabular-nums ${amt}`}>
                           {formatInr(r.paymentAmountPaise)}
                         </td>
-                        <td className="px-2 py-1.5 text-right text-xs tabular-nums">
+                        <td className={`px-2 py-1.5 text-right text-xs tabular-nums ${amt}`}>
                           {formatInr(r.feePaise)}
                         </td>
-                        <td className="px-2 py-1.5 text-right text-xs font-semibold tabular-nums">
+                        <td className={`px-2 py-1.5 text-right text-xs tabular-nums ${failed ? amt : "font-semibold"}`}>
                           {formatInr(r.amountSettledPaise)}
                         </td>
                         <td className="px-2 py-1.5 text-right text-xs tabular-nums">

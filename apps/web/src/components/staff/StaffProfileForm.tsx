@@ -1,7 +1,7 @@
 "use client";
 
 import { schoolCrestUrl, schoolPrintName } from "@/lib/schoolIdentity";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { IfscCheck } from "@/components/ui/open-lookup-fields";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -20,7 +20,8 @@ import {
   staffQrPayload,
   type StaffRecord,
 } from "@/lib/foundationMasters";
-import { loadMasters, saveMasters, type MastersState } from "@/lib/masters";
+import { loadMasters, type MastersState } from "@/lib/masters";
+import { useStaffBookWrites } from "@/lib/data/client/staffBookWrites";
 import { persistSeriesUse, suggestFromSeriesCode } from "@/lib/numberSeries";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import { StaffImageField } from "@/components/staff/StaffImageField";
@@ -29,11 +30,30 @@ import { StaffDutiesPanel } from "@/components/staff/StaffDutiesPanel";
 import { StaffAgreementPanel } from "@/components/staff/StaffAgreementPanel";
 import { StaffMessageTimelinePanel } from "@/components/staff/StaffMessageTimelinePanel";
 import { RemoveControl } from "@/components/masters/RemoveControl";
+import { pushToast } from "@/components/shell/Toast";
+import { useDemoSession } from "@/components/shell/SessionContext";
+import { hasPermission, loadRbac } from "@/lib/rbac";
+import { staffSensitiveAuthority } from "@/lib/staffProtectedFields";
+import { StaffSensitiveDetailsPanel } from "@/components/staff/StaffSensitiveDetailsPanel";
+
+const SENSITIVE_LOCKED =
+  "Bank, UPI, Aadhaar, PAN and pay are entered by the accountant or the owner (Bank, ID & pay details) — shown here, not editable for your role.";
+import {
+  VISITING_PAY_BASES,
+  normalizeVisitingPay,
+  visitingSetupProblems,
+  type VisitingPayProfile,
+} from "@/lib/visitingPay";
+import {
+  CustomFieldsSection,
+  type CustomFieldsHandle,
+} from "@/components/custom-fields/CustomFieldsSection";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import {
   checkStaffRemoval,
   removeStaff,
   validateStaffProfile,
+  defaultStaffLoginUsername,
   type StaffFieldErrors,
 } from "@/lib/staffResolve";
 
@@ -65,6 +85,7 @@ type Tab =
   | "login"
   | "bank"
   | "statutory"
+  | "more"
   | "idcard";
 
 const TABS: {
@@ -90,6 +111,7 @@ const TABS: {
   { id: "login", label: "Login", tone: "slate" },
   { id: "bank", label: "Bank", tone: "green" },
   { id: "statutory", label: "PF & ESIC", tone: "amber" },
+  { id: "more", label: "More details", tone: "teal" },
   { id: "idcard", label: "ID / QR", tone: "rose" },
 ];
 
@@ -99,14 +121,22 @@ type Props =
 
 export function StaffProfileForm(props: Props) {
   const router = useRouter();
+  const session = useDemoSession();
   const [masters, setMasters] = useState<MastersState | null>(null);
   const [tab, setTab] = useState<Tab>("basic");
   const [draft, setDraft] = useState<StaffRecord | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<StaffFieldErrors>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const staffWrites = useStaffBookWrites();
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [sameAddress, setSameAddress] = useState(false);
+  /**
+   * "More details" (Masters → Custom fields). Saved on their own through
+   * /api/custom-fields/values after the profile — never inside it.
+   */
+  const customFieldsRef = useRef<CustomFieldsHandle>(null);
 
   useEffect(() => {
     const m = loadMasters();
@@ -149,7 +179,10 @@ export function StaffProfileForm(props: Props) {
       setMasters(next);
       if (props.mode === "edit") {
         const existing = next.staff.find((s) => s.id === props.staffId);
-        if (existing) setDraft(normalizeStaffRecord(existing));
+        if (existing) {
+          setError(null);
+          setDraft(normalizeStaffRecord(existing));
+        }
       }
     })();
   }, [props]);
@@ -171,13 +204,42 @@ export function StaffProfileForm(props: Props) {
     };
   }, [draft?.id, draft?.empCode, draft?.qrPayload]);
 
+  // Bank, UPI, Aadhaar, PAN and pay: the owner or the bank & pay details
+  // function only (director, 20–21 Oct 2026). For everyone else those inputs
+  // are shown but locked — typed data is never silently dropped by a save.
+  const canSensitive = useMemo(
+    () => !!masters && staffSensitiveAuthority(session, masters, loadRbac()) !== null,
+    [session, masters],
+  );
+  const canEditStaff = !!masters && hasPermission(session, masters, "staff", "edit");
+
   function patch(p: Partial<StaffRecord>) {
     setDraft((prev) => (prev ? { ...prev, ...p } : prev));
   }
 
+  // Visiting staff are paid per period / hour / day (Staff → Visiting pay):
+  // no PF & ESIC tab, no basic pay — a rate and a TDS tick instead.
+  const isVisiting = draft?.category === "visiting";
+  const tabs = useMemo(
+    () => (isVisiting ? TABS.filter((t) => t.id !== "statutory") : TABS),
+    [isVisiting],
+  );
+  useEffect(() => {
+    if (isVisiting && tab === "statutory") setTab("employment");
+  }, [isVisiting, tab]);
+  const visitingPay: VisitingPayProfile = normalizeVisitingPay(draft?.visitingPay);
+  const visitingWarnings = draft && isVisiting ? visitingSetupProblems(draft) : null;
+  function patchVisiting(p: Partial<VisitingPayProfile>) {
+    setDraft((prev) =>
+      prev ? { ...prev, visitingPay: { ...normalizeVisitingPay(prev.visitingPay), ...p } } : prev,
+    );
+  }
+
   function save() {
     if (!masters || !draft) return;
-    const validation = validateStaffProfile(draft);
+    // Locked Aadhaar / PAN / IFSC are not checked for a user who cannot edit
+    // them — a malformed stored value would otherwise be a dead end.
+    const validation = validateStaffProfile(draft, { sensitive: canSensitive });
     if (Object.keys(validation).length > 0) {
       setFieldErrors(validation);
       setError("Fix the highlighted fields before saving");
@@ -204,6 +266,12 @@ export function StaffProfileForm(props: Props) {
       setTab("basic");
       return;
     }
+    const customProblems = customFieldsRef.current?.validate(props.mode === "create") ?? [];
+    if (customProblems.length) {
+      setError(`More details: ${customProblems.join("; ")}`);
+      setTab("more");
+      return;
+    }
 
     const row = normalizeStaffRecord({
       ...draft,
@@ -213,57 +281,113 @@ export function StaffProfileForm(props: Props) {
         ? draft.addressCurrent
         : draft.addressPermanent,
       qrPayload: staffQrPayload(code, draft.id),
-      loginUsername:
-        draft.loginUsername.trim() ||
-        code.toLowerCase().replace(/[^a-z0-9._-]/g, ""),
+      loginUsername: draft.loginUsername.trim() || defaultStaffLoginUsername(code),
     });
+    void writeRecord(row, props.mode === "create" ? "Staff created" : "Staff updated", { create: props.mode === "create" });
+  }
 
-    const staff =
-      props.mode === "create"
-        ? [...masters.staff, row]
-        : masters.staff.map((s) => (s.id === row.id ? row : s));
-    const next = { ...masters, staff };
-    saveMasters(next);
-    if (props.mode === "create" && row.empCode) {
-      persistSeriesUse("STAFF_ID", undefined, row.empCode);
-      setMasters(loadMasters());
-    } else {
-      setMasters(next);
-    }
-    setDraft(row);
+  /**
+   * The record as the form loaded it (the page copy) → `row`, written as the
+   * fields that changed, on the record as stored now (data-layer 2.2d: never
+   * the whole-book Masters save, which refused every staff save of a user
+   * without Masters · edit while this form said "Staff updated"). The notice
+   * is said only after the server confirmed; a refusal says why and keeps
+   * what was typed (a field someone else changed first shows their value).
+   */
+  async function writeRecord(
+    row: StaffRecord | null,
+    okMessage: string,
+    opts: { create?: boolean; removeId?: string; keepDraft?: boolean } = {},
+  ): Promise<boolean> {
+    if (!masters) return false;
+    const shownStaff = masters.staff;
+    const nextStaff = opts.removeId
+      ? shownStaff.filter((s) => s.id !== opts.removeId)
+      : opts.create
+        ? [...shownStaff, row!]
+        : shownStaff.map((s) => (s.id === row!.id ? row! : s));
+    setSaving(true);
     setError(null);
-    setNotice(props.mode === "create" ? "Staff created" : "Staff updated");
-    window.setTimeout(() => setNotice(null), 2000);
-    if (props.mode === "create") {
-      router.push(`/staff/${row.id}/edit`);
-      router.refresh();
+    setNotice("Saving…");
+    const r = await staffWrites.commit({ staff: shownStaff }, { staff: nextStaff });
+    setSaving(false);
+    const fresh = loadMasters();
+    setMasters(fresh);
+    if (!r.ok) {
+      setNotice(null);
+      setError(r.message);
+      // A field someone else changed first: the form shows the stored value
+      // there (the rest of what was typed stays).
+      const clash = r.conflicts?.find((c) => c.id === (row?.id ?? opts.removeId));
+      if (clash && row) {
+        const stored = fresh.staff.find((s) => s.id === row.id);
+        if (stored) {
+          const back: Record<string, unknown> = {};
+          for (const f of clash.fields) {
+            const k = f.startsWith("docs.") ? "docs" : f;
+            if (k in stored) back[k] = (stored as unknown as Record<string, unknown>)[k];
+          }
+          setDraft((d) => (d ? normalizeStaffRecord({ ...d, ...back }) : d));
+        }
+      }
+      return false;
     }
+    if (opts.removeId) return true;
+    if (opts.create && row?.empCode) persistSeriesUse("STAFF_ID", undefined, row.empCode);
+    const saved = row ? fresh.staff.find((s) => s.id === row.id) : undefined;
+    if (row && !opts.keepDraft) setDraft(saved ? normalizeStaffRecord(saved) : row);
+    setNotice(r.unchanged ? "Nothing changed" : okMessage);
+    window.setTimeout(() => setNotice(null), 2500);
+    if (!row) return true;
+    const leave = () => {
+      if (opts.create) {
+        router.push(`/staff/${row.id}/edit`);
+        router.refresh();
+      }
+    };
+    const custom = customFieldsRef.current;
+    if (custom?.isDirty()) {
+      // The profile is saved; the extra fields go on their own. A new
+      // profile always moves on to its edit page (staying would invite a
+      // second create); a failure is named in a toast.
+      void custom.saveFor(row.id).then((cr) => {
+        if (cr.message) {
+          pushToast({ kind: cr.ok ? "success" : "error", message: cr.message, durationMs: cr.ok ? 3000 : 12000 });
+        }
+        if (!cr.ok && !opts.create) setTab("more");
+        leave();
+      });
+      return true;
+    }
+    leave();
+    return true;
   }
 
   function setActiveStatus(status: "active" | "inactive") {
-    if (!masters || !draft || props.mode !== "edit") return;
-    const row = normalizeStaffRecord({ ...draft, status });
-    const next = {
-      ...masters,
-      staff: masters.staff.map((s) => (s.id === row.id ? row : s)),
-    };
-    saveMasters(next);
-    setMasters(next);
-    setDraft(row);
-    setNotice(status === "active" ? "Staff activated" : "Staff inactivated");
-    window.setTimeout(() => setNotice(null), 2000);
+    if (!masters || !draft || props.mode !== "edit" || saving) return;
+    const current = masters.staff.find((s) => s.id === draft.id);
+    if (!current) return;
+    // Only the status: anything else typed in the form stays unsaved.
+    const row = normalizeStaffRecord({ ...current, status });
+    void writeRecord(row, status === "active" ? "Staff activated" : "Staff inactivated", { keepDraft: true }).then((ok) => {
+      if (ok) setDraft((d) => (d ? { ...d, status } : d));
+    });
   }
 
   function onRemove() {
-    if (!masters || !draft || props.mode !== "edit") return;
+    if (!masters || !draft || props.mode !== "edit" || saving) return;
     const result = removeStaff(masters, draft.id);
     if (!result.ok) {
       setError(result.reason);
       return;
     }
-    saveMasters(result.state);
-    router.push("/staff");
-    router.refresh();
+    // A SOFT remove (hidden everywhere, restorable from Staff → Roster →
+    // Removed staff); the roster opens only once the server confirmed it.
+    void writeRecord(null, "Staff removed", { removeId: draft.id }).then((ok) => {
+      if (!ok) return;
+      router.push("/staff");
+      router.refresh();
+    });
   }
 
   const depName = useMemo(() => {
@@ -277,6 +401,12 @@ export function StaffProfileForm(props: Props) {
       masters.designations.find((d) => d.id === draft.designationId)?.name ?? ""
     );
   }, [masters, draft?.designationId]);
+
+  // The accountant (bank & pay details function, no staff · edit) edits ONLY
+  // those fields, through the sensitive route — not the whole profile.
+  if (props.mode === "edit" && masters && !canEditStaff && canSensitive) {
+    return <StaffSensitiveDetailsPanel staffId={props.staffId} />;
+  }
 
   if (!masters || !draft) {
     return (
@@ -310,7 +440,7 @@ export function StaffProfileForm(props: Props) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {notice ? (
-            <span className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]">
+            <span role="status" data-testid="staff-save-notice" className="rounded-lg bg-[rgba(197,160,40,0.18)] px-3 py-1.5 text-xs font-medium text-[var(--brand-deep)]">
               {notice}
             </span>
           ) : null}
@@ -341,7 +471,8 @@ export function StaffProfileForm(props: Props) {
           </Link>
           <button
             type="button"
-            className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white"
+            className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+            disabled={saving}
             onClick={save}
           >
             Save profile
@@ -350,7 +481,7 @@ export function StaffProfileForm(props: Props) {
       </div>
 
       {error ? (
-        <p className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
+        <p role="alert" data-testid="staff-save-error" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-sm font-medium text-[var(--danger)]">
           {error}
         </p>
       ) : null}
@@ -359,7 +490,7 @@ export function StaffProfileForm(props: Props) {
         aria-label="Staff profile sections"
         value={tab}
         onChange={(id) => setTab(id as Tab)}
-        items={TABS}
+        items={tabs}
       />
 
       <div className="mt-5 space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm">
@@ -718,6 +849,74 @@ export function StaffProfileForm(props: Props) {
                 ))}
               </select>
             </label>
+            {isVisiting ? (
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 sm:col-span-2 lg:col-span-3">
+                <p className="text-xs font-semibold text-[var(--brand-deep)]">
+                  Visiting pay — not on payroll (no salary structure, PF or ESIC)
+                </p>
+                <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+                  Each month Staff → Visiting pay counts their work from this basis, the office approves the
+                  sheet, and they are paid by Cashfree to the bank / UPI on the Bank tab, or in cash.
+                </p>
+                <div className="mt-2 grid gap-3 sm:grid-cols-3">
+                  <label className={labelCls}>
+                    Paid
+                    <select
+                      className={field}
+                      value={visitingPay.basis}
+                      disabled={!canSensitive}
+                      onChange={(e) => patchVisiting({ basis: e.target.value as VisitingPayProfile["basis"] })}
+                    >
+                      <option value="">Choose…</option>
+                      {VISITING_PAY_BASES.map((b) => (
+                        <option key={b.value} value={b.value}>
+                          {b.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={labelCls}>
+                    Rate (₹ per{" "}
+                    {visitingPay.basis === "per_hour" ? "hour" : visitingPay.basis === "per_day" ? "day" : "period"})
+                    <input
+                      className={field}
+                      value={visitingPay.rateRupees}
+                      disabled={!canSensitive}
+                      onChange={(e) => patchVisiting({ rateRupees: e.target.value })}
+                      inputMode="decimal"
+                      placeholder="e.g. 250"
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 self-end pb-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={visitingPay.tds194j}
+                      disabled={!canSensitive}
+                      onChange={(e) => patchVisiting({ tds194j: e.target.checked })}
+                    />
+                    Deduct TDS (194J)
+                  </label>
+                </div>
+                <label className={`${labelCls} mt-2 block sm:max-w-xs`}>
+                  PAN
+                  <input
+                    className={field}
+                    value={draft.panNo}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
+                    onChange={(e) => patch({ panNo: e.target.value.toUpperCase() })}
+                    placeholder="AAAAA9999A"
+                  />
+                </label>
+                {visitingWarnings && (visitingWarnings.errors.length || visitingWarnings.warnings.length) ? (
+                  <ul className="mt-2 space-y-0.5 text-[11px] text-[var(--warning)]">
+                    {[...visitingWarnings.errors, ...visitingWarnings.warnings].map((w) => (
+                      <li key={w}>• {w}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
             <label className={labelCls}>
               Job type
               <select
@@ -843,15 +1042,19 @@ export function StaffProfileForm(props: Props) {
                 onChange={(e) => patch({ staffAddedOn: e.target.value })}
               />
             </label>
-            <label className={labelCls}>
-              Basic pay (₹)
-              <input
-                className={field}
-                value={draft.basicPay}
-                onChange={(e) => patch({ basicPay: e.target.value })}
-                inputMode="decimal"
-              />
-            </label>
+            {isVisiting ? null : (
+              <label className={labelCls}>
+                Basic pay (₹)
+                <input
+                  className={field}
+                  value={draft.basicPay}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
+                  onChange={(e) => patch({ basicPay: e.target.value })}
+                  inputMode="decimal"
+                />
+              </label>
+            )}
             <label className={labelCls}>
               Experience (years)
               <input
@@ -949,6 +1152,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.aadhaarNo}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ aadhaarNo: e.target.value })}
                 maxLength={12}
               />
@@ -963,6 +1168,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.panNo}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ panNo: e.target.value.toUpperCase() })}
                 maxLength={10}
               />
@@ -1085,11 +1292,18 @@ export function StaffProfileForm(props: Props) {
 
         {tab === "bank" ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {!canSensitive ? (
+              <p className="sm:col-span-2 lg:col-span-3 rounded-lg bg-[var(--warn-soft,#fff7e6)] px-3 py-2 text-xs text-[var(--muted)]" data-testid="sensitive-locked">
+                {SENSITIVE_LOCKED}
+              </p>
+            ) : null}
             <label className={labelCls}>
               Account holder name
               <input
                 className={field}
                 value={draft.bankAccountName}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ bankAccountName: e.target.value })}
               />
             </label>
@@ -1098,6 +1312,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.bankName}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ bankName: e.target.value })}
               />
             </label>
@@ -1106,6 +1322,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.bankBranch}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ bankBranch: e.target.value })}
               />
             </label>
@@ -1114,6 +1332,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.bankAccountNo}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ bankAccountNo: e.target.value })}
               />
             </label>
@@ -1122,6 +1342,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.bankIfsc}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) =>
                   patch({ bankIfsc: e.target.value.toUpperCase() })
                 }
@@ -1142,6 +1364,8 @@ export function StaffProfileForm(props: Props) {
               <input
                 className={field}
                 value={draft.upiId}
+                disabled={!canSensitive}
+                title={canSensitive ? undefined : SENSITIVE_LOCKED}
                 onChange={(e) => patch({ upiId: e.target.value })}
               />
             </label>
@@ -1193,6 +1417,20 @@ export function StaffProfileForm(props: Props) {
             </label>
           </div>
         ) : null}
+
+        {/* Mounted on every tab (hidden off its own) so what is typed here
+            survives moving between tabs until Save. */}
+        <div hidden={tab !== "more"}>
+          <CustomFieldsSection
+            ref={customFieldsRef}
+            entity="staff"
+            mode={props.mode}
+            entityId={draft.id}
+            // View-only staff see the values but get no Save (the server
+            // refuses their write anyway: staff · edit).
+            readOnly={!hasPermission(session, masters, "staff", "edit")}
+          />
+        </div>
 
         {tab === "idcard" ? (
           <div className="space-y-4">
@@ -1325,8 +1563,8 @@ export function StaffProfileForm(props: Props) {
           className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
           disabled={tab === "basic"}
           onClick={() => {
-            const i = TABS.findIndex((t) => t.id === tab);
-            if (i > 0) setTab(TABS[i - 1]!.id);
+            const i = tabs.findIndex((t) => t.id === tab);
+            if (i > 0) setTab(tabs[i - 1]!.id);
           }}
         >
           Previous
@@ -1334,7 +1572,8 @@ export function StaffProfileForm(props: Props) {
         <div className="flex gap-2">
           <button
             type="button"
-            className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white"
+            className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+            disabled={saving}
             onClick={save}
           >
             Save profile
@@ -1344,8 +1583,8 @@ export function StaffProfileForm(props: Props) {
             className="rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)] disabled:opacity-40"
             disabled={tab === "idcard"}
             onClick={() => {
-              const i = TABS.findIndex((t) => t.id === tab);
-              if (i < TABS.length - 1) setTab(TABS[i + 1]!.id);
+              const i = tabs.findIndex((t) => t.id === tab);
+              if (i < tabs.length - 1) setTab(tabs[i + 1]!.id);
             }}
           >
             Next

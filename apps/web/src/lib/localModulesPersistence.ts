@@ -11,8 +11,11 @@
  */
 
 import { emptyModuleRequestsState } from "@/lib/moduleRequests";
+import { emptyWaVerifyState } from "@/lib/waNumberVerify";
 import { emptyAppPopupsState } from "@/lib/appPopups";
 import { emptyParentLinkState } from "@/lib/parentNumberLink";
+import { emptyStaffBroadcastLog } from "@/lib/staffBroadcastLog";
+import { emptyStudentDocTypesState } from "@/lib/studentDocTypes";
 import {
   createModuleStatePersistence,
   type ModuleStatePersistence,
@@ -138,6 +141,29 @@ const registry: Record<ModuleStateKey, ModuleStatePersistence<any>> = {
     key: "parent_linked_mobiles",
     isEmpty: () => true,
     loadLocal: emptyParentLinkState,
+    writeLocalRaw: () => undefined,
+  }),
+  // Written only by the server (unknown numbers asked about their child on
+  // WhatsApp — lib/waNumberVerify).
+  parent_wa_verify: createModuleStatePersistence({
+    key: "parent_wa_verify",
+    isEmpty: () => true,
+    loadLocal: emptyWaVerifyState,
+    writeLocalRaw: () => undefined,
+  }),
+  // Written only by the server (each live send of /api/v1/staff/broadcast).
+  staff_broadcasts: createModuleStatePersistence({
+    key: "staff_broadcasts",
+    isEmpty: () => true,
+    loadLocal: emptyStaffBroadcastLog,
+    writeLocalRaw: () => undefined,
+  }),
+  // Written only by the server (the staff app's document verification:
+  // custom document types and documents filed off the child's slots).
+  student_doc_types: createModuleStatePersistence({
+    key: "student_doc_types",
+    isEmpty: () => true,
+    loadLocal: emptyStudentDocTypesState,
     writeLocalRaw: () => undefined,
   }),
   // Written only by the server (Comms → App pop-ups saves through its route).

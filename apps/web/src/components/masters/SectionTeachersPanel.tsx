@@ -17,9 +17,9 @@ import { useDemoSession } from "@/components/shell/SessionContext";
  * path already existed — StaffDutiesPanel lets office assign a teacher's
  * classes/subjects from that teacher's own profile, one teacher at a time.
  * This is the other direction: pick a section, see and set who teaches it,
- * without opening each teacher individually. Same underlying arrays, same
- * commit(MastersState) -> saveMasters path StaffProfileForm already uses —
- * no new save mechanism.
+ * without opening each teacher individually. Same underlying arrays. Since
+ * data-layer 2.2c the workspace's commit sends only the link changes, laid
+ * on each member's record as stored (sis.staff) — never the roster.
  *
  * A section has at most one class teacher and, per subject, at most one
  * subject teacher — so every set-call here first strips any existing link
@@ -167,6 +167,7 @@ export function SectionTeachersPanel({
         </p>
         <select
           className="field !py-1.5"
+          aria-label={`Class teacher of ${className}-${sectionName}`}
           value={currentClassTeacher?.id ?? ""}
           onChange={(e) => setClassTeacher(e.target.value)}
         >
@@ -207,6 +208,7 @@ export function SectionTeachersPanel({
                   </span>
                   <select
                     className="field !py-1 text-xs"
+                    aria-label={`${o.subject.code} teacher of ${className}-${sectionName}`}
                     value={current?.id ?? ""}
                     onChange={(e) =>
                       setSubjectTeacher(o.subject.id, e.target.value)

@@ -1,5 +1,14 @@
 # Deploy on merge — ship from your phone
 
+> **Status, 13 Oct 2026: NOT SET UP YET.** Nothing below happens today. The
+> trigger, its service account (`bhb-autodeploy`), the `school-erp-deploy-env`
+> secret and the `bhb-github` connection do not exist (`gcloud builds triggers
+> list` is empty). Until `scripts/setup-deploy-on-merge.sh` is run by the
+> director, **merging does not deploy**: production changes only when someone
+> runs `scripts/deploy-online.sh`. Check what is live with
+> `curl -s https://bhbinternational.school/api/app-version` (its `commit`).
+> See `docs/data-layer-rebuild/COMMAND.md` step 0.3.
+
 **What changes:** when a pull request is merged into `main` — from the GitHub
 app on your phone, or by telling Claude "merge" — Google Cloud Build deploys
 it to bhbinternational.school by itself, in about 10 minutes. No laptop, no

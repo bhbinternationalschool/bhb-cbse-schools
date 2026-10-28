@@ -32,10 +32,10 @@ import {
 import {
   STUDENT_TYPES,
   currentAcademicYearCode,
-  loadMasters,
   type FeeStudentType,
-  type MastersState,
 } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   BLOOD_GROUPS,
   PEN_STATUSES,
@@ -97,6 +97,11 @@ import { ErpTableShell } from "@/components/ui/erp-roster";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonModulePage } from "@/components/ui/skeleton";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
+import {
+  CustomExportToggle,
+  studentAliasIndex,
+  useCustomFieldExport,
+} from "@/components/custom-fields/useCustomFieldExport";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { BirthdaysPanel } from "@/components/students/BirthdaysPanel";
 import { canSeeModuleTab, canWriteModuleTab, visibleModuleTabs } from "@/lib/rbac";
@@ -152,7 +157,9 @@ export function StudentsWorkspace() {
     () => new Set(teacherMode ? myTeaching.teaching.map((t) => t.classId) : []),
     [teacherMode, myTeaching],
   );
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  /** A teacher's Masters carry no fee lists: withheld, not "none" (lib/mastersTeachingSubset). */
+  const feesWithheld = mastersScope === "teaching";
   const [state, setState] = useState<SisState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -225,9 +232,7 @@ export function StudentsWorkspace() {
   }, [shownTabs, mainTab]);
 
   useEffect(() => {
-    const m = loadMasters();
     const s = loadSis();
-    setMasters(m);
     setState(s);
     setSelectedId(s.students[0]?.id ?? "");
     try {
@@ -646,7 +651,7 @@ export function StudentsWorkspace() {
     if (categoryFilter) {
       predicates.push((s) => s.category === categoryFilter);
     }
-    if (feeGroupFilter) {
+    if (feeGroupFilter && !feesWithheld) {
       predicates.push((s) => s.feeGroupId === feeGroupFilter);
     }
     if (campusFilter) {
@@ -708,6 +713,7 @@ export function StudentsWorkspace() {
     genderFilter,
     categoryFilter,
     feeGroupFilter,
+    feesWithheld,
     campusFilter,
     penStatusFilter,
     bloodFilter,
@@ -782,10 +788,25 @@ export function StudentsWorkspace() {
   const rosterKeys = useMemo(() => filtered.map((s) => s.id), [filtered]);
   const rosterSelection = useRowSelection(rosterKeys);
 
+  // Optional "+ More details" columns (Masters → Custom fields).
+  const customExport = useCustomFieldExport("student");
+  const { cells: customCells, columns: customColumns } = customExport;
+  const customAliasOf = useMemo(
+    () => studentAliasIndex(state?.students ?? []),
+    [state],
+  );
+  const exportColumns = useMemo(
+    () => [...STUDENT_REGISTER_EXPORT_COLUMNS, ...customColumns],
+    [customColumns],
+  );
+
   const exportRows = useMemo(() => {
     if (!masters || !state) return [];
-    return filtered.map((s) => studentToRegisterExportRow(s, state, masters));
-  }, [filtered, masters, state]);
+    return filtered.map((s) => ({
+      ...studentToRegisterExportRow(s, state, masters),
+      ...customCells(customAliasOf(s.id)),
+    }));
+  }, [filtered, masters, state, customCells, customAliasOf]);
 
   const exportFilterNote = useMemo(() => {
     if (!masters) return describeFilters([]);
@@ -860,6 +881,14 @@ export function StudentsWorkspace() {
     [householdPanel],
   );
 
+  // A failed Masters read is a failure on screen — never an empty school (R6).
+  if (mastersError) {
+    return (
+      <ErpWorkspaceShell title="Students" icon={<GraduationCap className="size-6" aria-hidden />}>
+        <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />
+      </ErpWorkspaceShell>
+    );
+  }
   if (!state || !masters) {
     return <SkeletonModulePage />;
   }
@@ -898,6 +927,7 @@ export function StudentsWorkspace() {
   }
   function feeGroupName(id: string | null) {
     if (!id) return "—";
+    if (feesWithheld) return "Not shown to your role";
     return m.feeGroups.find((g) => g.id === id)?.name ?? "—";
   }
 
@@ -1479,12 +1509,13 @@ export function StudentsWorkspace() {
               {sortOrder === "asc" ? "↑ Asc" : "↓ Desc"}
             </button>
           </div>
+          <CustomExportToggle state={customExport} />
           <ExportMenu
             title="Student register (full form)"
             subtitle={`${TENANT.shortName} · ${headerAy}`}
             filterNote={exportFilterNote}
             fileBaseName="students_full_register"
-            columns={STUDENT_REGISTER_EXPORT_COLUMNS}
+            columns={exportColumns}
             rows={() => exportRows}
             onMessage={(msg) => {
               setNotice(msg);
@@ -1537,21 +1568,24 @@ export function StudentsWorkspace() {
               </option>
             ))}
           </select>
-          <select
-            className="field max-w-[12rem]"
-            value={feeGroupFilter}
-            onChange={(e) => setFeeGroupFilter(e.target.value)}
-            aria-label="Fee group"
-          >
-            <option value="">All fee groups</option>
-            {m.feeGroups
-              .filter((g) => g.isActive)
-              .map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.code} · {g.studentType}
-                </option>
-              ))}
-          </select>
+          {/* A teacher is not sent the fee groups — no filter, rather than an empty one. */}
+          {feesWithheld ? null : (
+            <select
+              className="field max-w-[12rem]"
+              value={feeGroupFilter}
+              onChange={(e) => setFeeGroupFilter(e.target.value)}
+              aria-label="Fee group"
+            >
+              <option value="">All fee groups</option>
+              {m.feeGroups
+                .filter((g) => g.isActive)
+                .map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.code} · {g.studentType}
+                  </option>
+                ))}
+            </select>
+          )}
           <select
             className="field max-w-[10rem]"
             value={campusFilter}
@@ -2055,6 +2089,7 @@ export function StudentsWorkspace() {
                 student={ps}
                 sis={sis}
                 masters={m}
+                feesWithheld={feesWithheld}
                 classLabel={classSectionOf(ps)}
                 feeGroupLabel={feeGroupName(ps.feeGroupId)}
                 onClose={() => setProfileId("")}

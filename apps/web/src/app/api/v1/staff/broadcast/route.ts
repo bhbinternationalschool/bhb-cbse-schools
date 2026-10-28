@@ -17,8 +17,20 @@
  * require borrowing a module grant that doesn't actually describe this
  * action.
  */
+/*
+ * 13 Oct 2026 (staff app "Message my classes"):
+ *   - GET returns the sections this person may message (the same
+ *     staffAllowedSections rule POST enforces, so the app can never offer a
+ *     class the send would refuse), how many families each reaches, and
+ *     their own recent LIVE sends.
+ *   - POST also takes `sectionIds` (several of MY sections at once). Every
+ *     one is checked; families in two of them are messaged once.
+ *   - Every live send is logged (lib/staffBroadcastLog) — there was no
+ *     record of what a teacher sent before.
+ * No approval step and no rate limit exist here; nothing below adds one.
+ */
 import { NextResponse } from "next/server";
-import { ApiError } from "@/lib/api/v1/errors";
+import { ApiError, apiErr, apiOk } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { chatSelfFromSession } from "@/lib/erpChat";
 import { staffAllowedSections } from "@/lib/erpChatAccess";
@@ -30,6 +42,8 @@ import { loadSisForStaff } from "@/lib/sis";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
 import { POST as dispatchPost } from "@/app/api/wa/dispatch/route";
 import { sendPushToSubjects } from "@/lib/webPush.server";
+import { appendStaffBroadcast, readStaffBroadcastLog } from "@/lib/staffBroadcastLog.server";
+import { broadcastsBy } from "@/lib/staffBroadcastLog";
 
 export const runtime = "nodejs";
 
@@ -45,12 +59,54 @@ type BroadcastTemplate = {
 type StaffBroadcastBody = {
   audience?: Audience;
   sectionId?: string;
+  /** Several of the caller's own sections in one send (app, 13 Oct 2026). */
+  sectionIds?: string[];
   body?: string;
   template?: BroadcastTemplate;
   dryRun?: boolean;
 };
 
 const CHUNK_SIZE = 100;
+/** More sections than any teacher teaches; a guard against a runaway list. */
+const MAX_SECTIONS = 40;
+
+/**
+ * GET /api/v1/staff/broadcast — the sections I may message, the families
+ * each reaches, and what I sent (newest first). `sent` is null when the
+ * log could not be read — unknown, not "nothing sent".
+ */
+export async function GET(req: Request) {
+  try {
+    const ctx = await resolveApiAuth(req);
+    if (ctx.session.persona !== "staff") {
+      throw new ApiError("forbidden", "Staff session required", 403);
+    }
+    await Promise.all([ensureSisHydratedServer(), ensureSchoolMirrorHydrated()]);
+    const sis = loadSisForStaff();
+    const actor = chatSelfFromSession(ctx.session, ctx.masters, sis);
+    if (!actor || actor.kind !== "staff" || !actor.staffId) {
+      throw new ApiError("bad_request", "Could not resolve your staff record", 400);
+    }
+    const selfStaff = ctx.masters.staff?.find((s) => s.id === actor.staffId);
+    const ay = ctx.session.academicYearCode;
+    const sections = staffAllowedSections(selfStaff, ctx.masters, ay, actor.roleCodes).map(
+      (s) => ({
+        sectionId: s.sectionId,
+        classId: s.classId,
+        label: s.label,
+        families: listSectionParentContacts(s.sectionId, ay, sis).length,
+      }),
+    );
+    const log = await readStaffBroadcastLog();
+    return apiOk({
+      staffId: actor.staffId,
+      sections,
+      sent: log ? broadcastsBy(log, actor.staffId, 50) : null,
+    });
+  } catch (e) {
+    return apiErr(e);
+  }
+}
 
 export async function POST(req: Request) {
   let ctx;
@@ -109,6 +165,9 @@ export async function POST(req: Request) {
   /** Push subjects mirroring the WA audience (staff ids / household ids). */
   let pushSubjectType: "staff" | "parent" = "staff";
   let pushSubjectIds: string[] = [];
+  let sectionIds: string[] = [];
+  let sectionLabels: string[] = [];
+  let families = 0;
 
   if (audience === "leadership") {
     const seen = new Set<string>();
@@ -121,11 +180,27 @@ export async function POST(req: Request) {
       pushSubjectIds.push(s.id);
     }
     numbers = Array.from(seen);
+    families = pushSubjectIds.length;
   } else {
-    const sectionId = body?.sectionId?.trim();
-    if (!sectionId) {
+    const requested = Array.from(
+      new Set(
+        [
+          ...(Array.isArray(body?.sectionIds) ? body.sectionIds : []),
+          body?.sectionId,
+        ]
+          .map((v) => (typeof v === "string" ? v.trim() : ""))
+          .filter(Boolean),
+      ),
+    );
+    if (!requested.length) {
       return NextResponse.json(
         { error: "sectionId is required for class_parents" },
+        { status: 400 },
+      );
+    }
+    if (requested.length > MAX_SECTIONS) {
+      return NextResponse.json(
+        { error: `At most ${MAX_SECTIONS} sections in one message` },
         { status: 400 },
       );
     }
@@ -135,17 +210,26 @@ export async function POST(req: Request) {
       ctx.session.academicYearCode,
       actor.roleCodes,
     );
-    if (!allowed.some((s) => s.sectionId === sectionId)) {
+    const allowedById = new Map(allowed.map((s) => [s.sectionId, s]));
+    if (requested.some((id) => !allowedById.has(id))) {
       return NextResponse.json(
         { error: "You are not a teacher for that class/section" },
         { status: 403 },
       );
     }
-    const contacts = listSectionParentContacts(
-      sectionId,
-      ctx.session.academicYearCode,
-      loadSisForStaff(),
-    );
+    sectionIds = requested;
+    sectionLabels = requested.map((id) => allowedById.get(id)?.label || id);
+    // A family with children in two of these sections hears once.
+    const sis = loadSisForStaff();
+    const byFamily = new Map<string, { householdId: string; mobile: string }>();
+    for (const id of requested) {
+      for (const c of listSectionParentContacts(id, ctx.session.academicYearCode, sis)) {
+        const key = c.householdId || c.mobile;
+        if (key && !byFamily.has(key)) byFamily.set(key, c);
+      }
+    }
+    const contacts = [...byFamily.values()];
+    families = contacts.length;
     numbers = Array.from(new Set(contacts.map((c) => c.mobile).filter(Boolean)));
     pushSubjectType = "parent";
     pushSubjectIds = contacts.map((c) => c.householdId).filter(Boolean);
@@ -159,7 +243,7 @@ export async function POST(req: Request) {
       title: `${ctx.session.fullName}${pushSubjectType === "parent" ? " (class teacher)" : ""}`,
       body: text.length > 200 ? `${text.slice(0, 197)}…` : text,
       url: "/notices",
-      data: { kind: "broadcast" },
+      data: { kind: "broadcast", fullText: text.slice(0, 3000), sender: ctx.session.fullName || "" },
     }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
   }
 
@@ -172,12 +256,37 @@ export async function POST(req: Request) {
   }
   numbers = kept;
 
+  // Live sends only — a dry run is a preview, not something that went out.
+  const logSend = async (sent: number, failed: number) => {
+    if (dryRun) return;
+    await appendStaffBroadcast({
+      id: `sb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      at: new Date().toISOString(),
+      staffId: actor.staffId || "",
+      staffName: selfStaff?.fullName || ctx.session.fullName || "",
+      audience,
+      sectionIds,
+      sectionLabels,
+      body: template ? "" : text.slice(0, 3000),
+      templateName: template?.name || "",
+      families,
+      recipientCount: numbers.length,
+      skippedOptOut,
+      sent,
+      failed,
+      pushSent: push.sent,
+    }).catch(() => false);
+  };
+
   if (numbers.length === 0) {
+    await logSend(0, 0);
     return NextResponse.json({
       ok: true,
       mode: dryRun ? "dry_run" : "live",
       recipientCount: 0,
+      families,
       skippedOptOut,
+      push,
       results: [],
     });
   }
@@ -219,10 +328,13 @@ export async function POST(req: Request) {
     failed += json.failed ?? 0;
   }
 
+  await logSend(sent, failed);
+
   return NextResponse.json({
     ok: true,
     mode: dryRun ? "dry_run" : "live",
     recipientCount: numbers.length,
+    families,
     skippedOptOut,
     sent,
     failed,

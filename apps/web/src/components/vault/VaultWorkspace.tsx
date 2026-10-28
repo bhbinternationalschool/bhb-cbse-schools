@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { useModuleTabQuery } from "@/lib/useModuleTabQuery";
+import { visibleModuleTabs } from "@/lib/rbac";
+import { useDemoSession } from "@/components/shell/SessionContext";
 import {
   composeWhatsAppVaultExpiryDigest,
   deleteVaultDocument,
@@ -107,6 +110,20 @@ export function VaultWorkspace() {
     "add",
     "reports",
   ]);
+  const session = useDemoSession();
+  // Every vault tab is the whole-module grant's (one register — see
+  // rbacFeatureCatalog/store.ts); the list still goes through the gate so a
+  // future vault function opens exactly its tab.
+  // Decided from the loaded roles + roster (assignments count), never before.
+  const access = useAccessData();
+  const shownTabs = useMemo(
+    () =>
+      access.ready
+        ? visibleModuleTabs(TABS, session, access.masters, "vault", access.rbac ?? undefined)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
+  );
   const [state, setState] = useState<VaultState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -248,7 +265,7 @@ export function VaultWorkspace() {
       }
     >
       <ModuleTabs
-        items={TABS.map((t) =>
+        items={shownTabs.map((t) =>
           t.id === "alerts"
             ? { ...t, badge: alerts.length || undefined }
             : t,

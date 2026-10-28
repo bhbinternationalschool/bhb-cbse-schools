@@ -5,10 +5,13 @@ import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/dictate_field.dart";
 import "../../core/i18n/locale_controller.dart";
+import "student_contact_sheet.dart";
 
-/// Actions on one student from the roster: a discipline note (merit or
-/// demerit) or a sick-room visit. Both land on the desk's discipline /
-/// health modules and can push the parent.
+/// Actions on one student from the roster: call or message the family
+/// (request mr_mv9ze8pqksu2 — the message is previewed and sent only on
+/// Send), a discipline note (merit or demerit) or a sick-room visit. The
+/// notes land on the desk's discipline / health modules and can push the
+/// parent.
 Future<void> showStudentNoteSheet(
   BuildContext context, {
   required ApiClient api,
@@ -31,6 +34,48 @@ Future<void> showStudentNoteSheet(
             Text(student.fullName, style: AppText.titleMediumInk),
             Text(classLabel, style: AppText.bodySmallMuted),
             const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: const ValueKey("student-call"),
+                    icon: const Icon(Icons.call_outlined, size: 18),
+                    label: Text(context.l10n.scCallFamily),
+                    onPressed: () {
+                      final nav = Navigator.of(context);
+                      final outer = nav.context;
+                      nav.pop();
+                      callStudentFamily(
+                        outer,
+                        api: api,
+                        studentId: student.id,
+                        studentName: student.fullName,
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: const ValueKey("student-message"),
+                    icon: const Icon(Icons.chat_outlined, size: 18),
+                    label: Text(context.l10n.scMessageFamily),
+                    onPressed: () {
+                      final nav = Navigator.of(context);
+                      final outer = nav.context;
+                      nav.pop();
+                      messageStudentFamily(
+                        outer,
+                        api: api,
+                        studentId: student.id,
+                        studentName: student.fullName,
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
             ListTile(
               leading: Icon(
                 Icons.star_outline,

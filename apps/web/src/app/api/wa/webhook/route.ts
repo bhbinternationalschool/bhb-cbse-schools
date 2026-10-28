@@ -30,6 +30,7 @@ import {
 import { recordInboundMedia } from "@/lib/waInboundMedia.server";
 import { findHouseholdByWaMobile } from "@/lib/waSisBotServer";
 import { sendWhatsAppText, waNormalizeLocal10 } from "@/lib/waSend";
+import { looksLikeOfficeApprovalReply } from "@/lib/waOfficeApproval";
 import {
   parseComplaintFlowResponse,
   parseComplaintFlowToken,
@@ -175,12 +176,15 @@ export async function POST(req: Request) {
     // relay answers and documents included (wa_messages; the chat view).
     {
       const { logWaInbound } = await import("@/lib/waMessageLog.server");
+      // A tapped button is logged as its label (what the person saw), with
+      // the id or payload beside it; the office poller reads either.
       await logWaInbound({
         from: msg.fromWaId,
-        text: msg.text || msg.mediaNote || (msg.location ? `📍 ${msg.location.name || ""} ${msg.location.lat},${msg.location.lng}`.trim() : ""),
+        text: msg.buttonTitle || msg.text || msg.mediaNote || (msg.location ? `📍 ${msg.location.name || ""} ${msg.location.lat},${msg.location.lng}`.trim() : ""),
         waMessageId: msg.waMessageId,
         replyToWaMessageId: (msg as { replyToWaMessageId?: string }).replyToWaMessageId,
-        kind: msg.media ? msg.media.mediaType : msg.location ? "location" : "text",
+        kind: msg.buttonId ? "button" : msg.media ? msg.media.mediaType : msg.location ? "location" : "text",
+        buttonId: msg.buttonId,
       });
     }
 
@@ -262,6 +266,32 @@ export async function POST(req: Request) {
         }
       } catch (e) {
         console.error("[wa/webhook] staff leave decision failed", msg.waMessageId, e);
+      }
+    }
+
+    // "APPROVE 9" / "REJECT 12" — the director answering a draft the n8n
+    // office (automation/n8n) sent for approval. Ahead of the relay and of
+    // every lookup: on 22 Oct 2026 the command desk read "APPROVE 9" as a
+    // student search and answered "I couldn't find an active student
+    // matching 'approve class 9'". Only acknowledged here; the office poller
+    // reads the same wa_messages row and owns approval_state. Anyone who is
+    // not staff falls through untouched.
+    if (looksLikeOfficeApprovalReply(msg.text || "")) {
+      try {
+        const { handleOfficeApprovalReply } = await import("@/lib/waOfficeApproval.server");
+        const decision = await handleOfficeApprovalReply({ fromWaId: msg.fromWaId, text: msg.text });
+        if (decision.handled) {
+          results.push({
+            audience: "office_approval_reply",
+            from: msg.fromWaId,
+            escalate: false,
+            replied: true,
+            stub: false,
+          });
+          continue;
+        }
+      } catch (e) {
+        console.error("[wa/webhook] office approval reply failed", msg.waMessageId, e);
       }
     }
 
@@ -453,6 +483,29 @@ export async function POST(req: Request) {
         continue;
       }
     }
+    // A number that tried to log in to the parent app, answering the school's
+    // questions about the child (lib/waNumberVerify). Only numbers with a live
+    // conversation are handled; everything else falls through untouched.
+    if ((msg.text || "").trim()) {
+      try {
+        const { tryWaNumberVerify } = await import("@/lib/waNumberVerify.server");
+        const v = await tryWaNumberVerify({ fromWaId: msg.fromWaId, text: msg.text });
+        if (v.handled) {
+          results.push({
+            audience: `number_verify_${v.outcome ?? "handled"}`,
+            from: msg.fromWaId,
+            escalate: false,
+            replied: true,
+            stub: false,
+            error: v.error,
+          });
+          continue;
+        }
+      } catch (e) {
+        console.error("[wa/webhook] number verify failed", msg.waMessageId, e);
+      }
+    }
+
     // A family we asked "where does your child wait?" answering that question.
     //
     // Before the ordinary bot, and gated on an OPEN request for this
@@ -528,6 +581,65 @@ export async function POST(req: Request) {
             }
           : null,
     };
+
+    // A photo from a member of staff who records payments, who is NOT also a
+    // parent here (that case is read in the family-document path above): a
+    // UPI payment screenshot to fill the UTR on a salary, advance or voucher
+    // (lib/waUpiProof.server). It used to reach the screenshot reader only
+    // from a number that was also a household, so the director's own
+    // screenshot (15 Oct 2026, staff-only number) got the staff bot's
+    // "I can't read a photo". Reading takes a few seconds, so it runs after
+    // the response like the family path; a photo that is not a payment goes
+    // on to the staff bot exactly as before.
+    if (msg.media?.mediaType === "image") {
+      const { isPayingStaffNumber } = await import("@/lib/waUpiProof.server");
+      if (await isPayingStaffNumber(msg.fromWaId)) {
+        const media = msg.media;
+        void trackServerWork((async () => {
+          try {
+            const { handleStaffUpiScreenshot, sendUpiProofReply } = await import("@/lib/waUpiProof.server");
+            const upi = await handleStaffUpiScreenshot({
+              fromWaId: msg.fromWaId,
+              mediaId: media.mediaId,
+              mimeType: media.mimeType,
+              waMessageId: msg.waMessageId,
+            });
+            if (upi.handled) {
+              await sendUpiProofReply(msg.fromWaId, upi.reply);
+              return;
+            }
+          } catch (e) {
+            // Fall through: the staff bot still answers the photo.
+            console.error("[wa/webhook] staff UPI screenshot failed", msg.waMessageId, e);
+          }
+          try {
+            const sr = await handleWaUnifiedInbound(dispatch);
+            if (sr.escalate) {
+              await relayEscalation({
+                fromWaId: msg.fromWaId,
+                text: msg.text,
+                waMessageId: msg.waMessageId,
+                profileName: msg.profileName,
+                audience: sr.audience,
+                reason: sr.relayReason,
+                mediaNote: msg.mediaNote ?? null,
+                media: { mediaId: media.mediaId, mimeType: media.mimeType, filename: media.filename },
+              });
+            }
+          } catch (e) {
+            console.error("[wa/webhook] staff photo processing failed", msg.waMessageId, e);
+          }
+        })());
+        results.push({
+          audience: "staff_photo_deferred",
+          from: msg.fromWaId,
+          escalate: false,
+          replied: false,
+          stub: false,
+        });
+        continue;
+      }
+    }
 
     if (isVoiceNote) {
       void trackServerWork((async () => {

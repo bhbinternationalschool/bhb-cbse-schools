@@ -1,9 +1,15 @@
+import "dart:typed_data";
+
 import "package:flutter/material.dart";
+import "package:pdfx/pdfx.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/guide/screen_guides.dart";
 import "../../core/theme/app_theme.dart";
 import "../modules/module_shell.dart";
 import "../../core/i18n/locale_controller.dart";
+import "my_attendance_calendar_screen.dart" show fullMonthLabel;
+import "staff_pay_overview_screens.dart";
 
 String rupees(double v) {
   final whole = v.round().abs();
@@ -42,8 +48,50 @@ String monthLabel(String ym) {
   return m >= 1 && m <= 12 ? "${names[m - 1]} ${parts[0]}" : ym;
 }
 
-/// The staff member's own payslips — one per approved / posted / paid
-/// payroll run. A month still in draft shows as "being prepared".
+/// The academic year (April–March) a payslip month falls in:
+/// "2026-09" → "2026-27", "2027-02" → "2026-27".
+String payslipAcademicYear(String ym) {
+  final p = ym.split("-");
+  final y = int.tryParse(p.first);
+  final m = p.length > 1 ? int.tryParse(p[1]) : null;
+  if (y == null || m == null) return "";
+  final start = m >= 4 ? y : y - 1;
+  return "$start-${((start + 1) % 100).toString().padLeft(2, "0")}";
+}
+
+/// The words on a payslip's status chip: "Paid · 5 Oct 2026 · Bank transfer"
+/// once paid, else that it is posted / approved and the payment is pending.
+String payslipStatusText(Payslip s, {bool hindi = false}) {
+  if (s.status == "paid") {
+    return [
+      hindi ? "भुगतान हो गया" : "Paid",
+      if (s.paymentDate.isNotEmpty) formatDateLabel(s.paymentDate),
+      if (s.paymentModeLabel.isNotEmpty) s.paymentModeLabel,
+    ].join(" · ");
+  }
+  final stage = s.status == "posted"
+      ? (hindi ? "पोस्ट हुई" : "Posted")
+      : (hindi ? "स्वीकृत" : "Approved");
+  return hindi ? "$stage — भुगतान बाकी" : "$stage — payment pending";
+}
+
+/// Slips (newest first, as the server sends them) under their academic
+/// year, newest year first.
+List<(String, List<Payslip>)> groupPayslipsByYear(List<Payslip> slips) {
+  final sorted = [...slips]..sort((a, b) => b.month.compareTo(a.month));
+  final out = <(String, List<Payslip>)>[];
+  for (final s in sorted) {
+    final ay = payslipAcademicYear(s.month);
+    if (out.isEmpty || out.last.$1 != ay) out.add((ay, []));
+    out.last.$2.add(s);
+  }
+  return out;
+}
+
+/// The staff member's own payslips — one per month (the server keeps the
+/// best of paid / posted / approved), headed by the month, under its
+/// academic year. A month still in draft shows as "being prepared".
+/// Director, 13 Oct 2026: "show staff their monthwise paid payslip".
 class PayslipsScreen extends StatelessWidget {
   const PayslipsScreen({super.key, required this.api});
 
@@ -51,9 +99,10 @@ class PayslipsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hindi = Localizations.localeOf(context).languageCode == "hi";
     return ModuleShell<PayslipList>(
       guideId: "payslips",
-      title: "Payslips",
+      title: hindi ? "वेतन पर्ची" : "Payslips",
       load: api.fetchPayslips,
       emptyIcon: Icons.receipt_long_outlined,
       emptyText: context.l10n.noPayslipHasBeenReleasedYet,
@@ -62,6 +111,13 @@ class PayslipsScreen extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
+          // Management only: everyone's payslips (the server gates it too).
+          ManagementEntryCard(
+            api: api,
+            feature: kStaffPayslipsAllFeature,
+            label: context.l10n.pmStaffPayslipsTitle,
+            open: () => StaffPayrollOverviewScreen(api: api),
+          ),
           if (p.preparing > 0)
             Card(
               color: ModuleTone.amber.background,
@@ -82,7 +138,19 @@ class PayslipsScreen extends StatelessWidget {
                 ),
               ),
             ),
-          for (final s in p.slips) _SlipCard(s: s),
+          for (final (year, slips) in groupPayslipsByYear(p.slips)) ...[
+            if (year.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 12, 4, 6),
+                child: Text(
+                  hindi ? "सत्र $year" : "Academic year $year",
+                  style: AppText.labelLargeMuted.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            for (final s in slips) _SlipCard(s: s, api: api),
+          ],
         ],
       ),
     );
@@ -90,49 +158,69 @@ class PayslipsScreen extends StatelessWidget {
 }
 
 class _SlipCard extends StatelessWidget {
-  const _SlipCard({required this.s});
+  const _SlipCard({required this.s, required this.api});
 
   final Payslip s;
+  final ApiClient api;
 
   @override
   Widget build(BuildContext context) {
-    final tone = switch (s.status) {
-      "paid" => ModuleTone.green,
-      "posted" => ModuleTone.teal,
-      _ => ModuleTone.blue,
-    };
+    final hindi = Localizations.localeOf(context).languageCode == "hi";
+    final paid = s.status == "paid";
+    final tone = paid ? ModuleTone.green : ModuleTone.amber;
     return Card(
       child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 14),
+        tilePadding: const EdgeInsets.fromLTRB(14, 6, 10, 6),
         title: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Text(
-                monthLabel(s.month),
-                style: AppText.bodyLargeInk.copyWith(
-                  fontWeight: FontWeight.w600,
+                fullMonthLabel(s.month, hindi: hindi),
+                style: AppText.titleSmallInk.copyWith(
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
-            Text(
-              rupees(s.amountPayable),
-              style: AppText.titleSmall.copyWith(
-                color: tone.foreground,
-                fontWeight: FontWeight.w700,
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  rupees(s.amountPayable),
+                  style: AppText.titleMedium.copyWith(
+                    color: tone.foreground,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                Text(
+                  paid
+                      ? (hindi ? "मिला" : "Net paid")
+                      : (hindi ? "देय" : "Net payable"),
+                  style: AppText.labelSmallMuted,
+                ),
+              ],
             ),
           ],
         ),
-        subtitle: Text(
-          "${switch (s.status) {
-            "paid" => "Paid",
-            "posted" => "Released",
-            _ => "Approved",
-          }}"
-          "${s.paymentDate.isNotEmpty ? " · ${formatDateLabel(s.paymentDate)}" : ""}"
-          "${s.paymentModeLabel.isNotEmpty ? " · ${s.paymentModeLabel}" : ""}"
-          "${s.onHold ? " · on hold" : ""}",
-          style: AppText.bodySmallMuted,
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: [
+              _Chip(
+                text: payslipStatusText(s, hindi: hindi),
+                tone: tone,
+                icon: paid ? Icons.check_circle : Icons.schedule,
+              ),
+              if (s.onHold)
+                _Chip(
+                  text: hindi ? "रोकी गई" : "On hold",
+                  tone: ModuleTone.coral,
+                  icon: Icons.pause_circle_outline,
+                ),
+            ],
+          ),
         ),
         childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
         children: [
@@ -157,7 +245,11 @@ class _SlipCard extends StatelessWidget {
           const Divider(height: 18),
           _Row("Net pay", rupees(s.netPay), bold: true),
           if (s.amountPayable != s.netPay)
-            _Row("Paid this month", rupees(s.amountPayable), bold: true),
+            _Row(
+              paid ? "Paid this month" : "Payable this month",
+              rupees(s.amountPayable),
+              bold: true,
+            ),
           if (s.holdNote.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
@@ -166,6 +258,19 @@ class _SlipCard extends StatelessWidget {
                 style: AppText.bodySmall.copyWith(color: AppColors.warning),
               ),
             ),
+          // The printed slip, on the letterhead — only when the server
+          // offers it (an older server sends no pdfUrl).
+          if (s.pdfUrl.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: () => openPayslipPdf(context, api, s),
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+                label: const Text("Payslip PDF · वेतन पर्ची PDF"),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -173,6 +278,39 @@ class _SlipCard extends StatelessWidget {
 
   String _n(double v) =>
       v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
+}
+
+class _Chip extends StatelessWidget {
+  const _Chip({required this.text, required this.tone, required this.icon});
+
+  final String text;
+  final ModuleTone tone;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: tone.background,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: tone.foreground),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            text,
+            style: AppText.labelSmall.copyWith(
+              color: tone.foreground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _Row extends StatelessWidget {
@@ -195,6 +333,103 @@ class _Row extends StatelessWidget {
           Text(value, style: style.copyWith(color: AppColors.ink)),
         ],
       ),
+    );
+  }
+}
+
+/// Fetch my payslip PDF for the month (with the session) and show it.
+Future<void> openPayslipPdf(
+  BuildContext context,
+  ApiClient api,
+  Payslip s,
+) async {
+  final hindi = Localizations.localeOf(context).languageCode == "hi";
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => AlertDialog(
+      content: Row(
+        children: [
+          const SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              hindi ? "वेतन पर्ची ला रहे हैं…" : "Fetching your payslip…",
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+  try {
+    final bytes = await api.fetchPayslipPdf(s.pdfUrl);
+    if (!context.mounted) return;
+    Navigator.of(context).pop();
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PayslipPdfScreen(
+          title: fullMonthLabel(s.month, hindi: hindi),
+          bytes: Uint8List.fromList(bytes),
+        ),
+      ),
+    );
+  } on ApiException catch (e) {
+    if (!context.mounted) return;
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(e.message)));
+  } catch (_) {
+    if (!context.mounted) return;
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          hindi
+              ? "वेतन पर्ची नहीं आ सकी — इंटरनेट देखें और फिर कोशिश करें।"
+              : "Could not fetch the payslip — check the connection and try again.",
+        ),
+      ),
+    );
+  }
+}
+
+/// The month's payslip as the school prints it, in the app. Pinch to zoom.
+class PayslipPdfScreen extends StatefulWidget {
+  const PayslipPdfScreen({super.key, required this.title, required this.bytes});
+
+  final String title;
+  final Uint8List bytes;
+
+  @override
+  State<PayslipPdfScreen> createState() => _PayslipPdfScreenState();
+}
+
+class _PayslipPdfScreenState extends State<PayslipPdfScreen> {
+  late final PdfControllerPinch _controller = PdfControllerPinch(
+    document: PdfDocument.openData(widget.bytes),
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Payslip · ${widget.title}", style: AppText.titleMedium),
+        actions: const [
+          ScreenGuideButton(guideId: "payslip-pdf", screenLabel: "payslip-pdf"),
+        ],
+      ),
+      body: PdfViewPinch(controller: _controller),
     );
   }
 }

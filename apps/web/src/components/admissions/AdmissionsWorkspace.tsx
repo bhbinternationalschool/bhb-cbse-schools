@@ -1,6 +1,8 @@
 "use client";
 
+import { issueSeriesNumber } from "@/lib/numberSeries";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { DraftDateInput } from "@/components/ui/draft-inputs";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import Link from "next/link";
 import { UserPlus } from "lucide-react";
@@ -58,7 +60,10 @@ import {
   type GuardianRelation,
   type TransportInterest,
 } from "@/lib/admissions";
-import { listSessionYearOptions, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { listSessionYearOptions, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { withheldFeeGroupRefusal } from "@/components/admissions/withheldFeeGroup";
 import { admissionDocumentHref, buildAdmissionDocumentDetails, pendingDocumentsForLead } from "@/lib/admissionDocumentLinks";
 import { leadConversionLikelihood } from "@/lib/admissionsAi";
 import { pushToast } from "@/components/shell/Toast";
@@ -139,6 +144,8 @@ import { LEAD_CONCERNS, PREVIOUS_BOARDS } from "@/lib/admissionsEnquiryForm";
 import { AdmissionReportsPanel } from "@/components/admissions/AdmissionReportsPanel";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
+import { EntranceTestPanel } from "@/components/admissions/EntranceTestPanel";
+import { LeadEntranceTestBadge } from "@/components/admissions/LeadEntranceTestBadge";
 
 type AdmTab =
   | "dashboard"
@@ -147,6 +154,7 @@ type AdmTab =
   | "leads"
   | "import"
   | "registration"
+  | "entrance"
   | "rte"
   | "campaigns"
   | "crm_chat"
@@ -166,6 +174,7 @@ const ADM_TABS: (ModuleTabItem & { id: AdmTab })[] = [
   { id: "leads", label: "Lead details (CRM)", tone: "navy" },
   { id: "import", label: "Upload leads", tone: "amber" },
   { id: "registration", label: "Registration", tone: "green" },
+  { id: "entrance", label: "Entrance test", tone: "violet" },
   { id: "rte", label: "RTE / EWS", tone: "sky" },
   { id: "campaigns", label: "WA campaigns", tone: "teal" },
   { id: "crm_chat", label: "CRM parent chat", tone: "navy" },
@@ -186,9 +195,12 @@ type EnquiryStep = "household" | "children";
 export function AdmissionsWorkspace() {
   const session = useDemoSession();
   const sessionReadOnly = useSessionReadOnly();
-  const [masters, setMasters] = useState<MastersState | null>(() =>
-    typeof window !== "undefined" ? loadMasters() : null,
-  );
+  // data-layer 2.1g: the server's book + the access copy's staff side (the
+  // permission helpers resolve the signed-in person through it); kept fresh
+  // by the versions poll — no mount-time page-copy read.
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  /** Teaching subset: fee groups are WITHHELD, not none (never enrol on "no group"). */
+  const feesWithheld = mastersScope === "teaching";
   const [state, setState] = useState<AdmissionsState | null>(() =>
     typeof window !== "undefined" ? loadAdmissions() : null,
   );
@@ -201,6 +213,8 @@ export function AdmissionsWorkspace() {
   const [showWaCheck, setShowWaCheck] = useState(false);
   const [tab, setTab] = useState<AdmTab>("dashboard");
   const [enquiryStep, setEnquiryStep] = useState<EnquiryStep>("household");
+  /** Entrance test sitting to open first — set by a lead's badge link. */
+  const [entranceFocus, setEntranceFocus] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -212,6 +226,7 @@ export function AdmissionsWorkspace() {
       "leads",
       "import",
       "registration",
+      "entrance",
       "rte",
       "campaigns",
       "crm_chat",
@@ -298,7 +313,6 @@ export function AdmissionsWorkspace() {
   ]);
 
   useEffect(() => {
-    setMasters(loadMasters());
     const adm = loadAdmissions();
     setState(adm);
     const sisNow = loadSis();
@@ -450,6 +464,7 @@ export function AdmissionsWorkspace() {
       !canBrowseLeadLists &&
       (tab === "leads" ||
         tab === "registration" ||
+        tab === "entrance" ||
         tab === "rte" ||
         tab === "import" ||
         tab === "campaigns" ||
@@ -757,10 +772,23 @@ export function AdmissionsWorkspace() {
     openLead(leadId);
   }
 
-  function doAdmitLead(leadId: string) {
+  async function doAdmitLead(leadId: string) {
     if (!masters) return;
     const cur = loadAdmissions();
-    const r = enrollLead(cur, leadId, session.fullName, masters);
+    const refusal = withheldFeeGroupRefusal(feesWithheld, cur.leads.find((l) => l.id === leadId));
+    if (refusal) {
+      setNotice(refusal);
+      window.setTimeout(() => setNotice(null), 3200);
+      return;
+    }
+    // The SRN from the server (data-layer 2.2e): max(the SRN counter, the
+    // highest SRN on record + 1) — never this tab's copy alone.
+    const srnIssued = await issueSeriesNumber("SRN", undefined);
+    if (!srnIssued.ok && srnIssued.kind === "failed") {
+      setNotice(`Not sent — the server did not give the next SRN (${srnIssued.message}). Try again.`);
+      return;
+    }
+    const r = enrollLead(cur, leadId, session.fullName, masters, { srn: srnIssued.ok ? srnIssued.formatted : undefined });
     if (!r.ok) {
       setNotice(r.reason);
       window.setTimeout(() => setNotice(null), 3200);
@@ -846,7 +874,7 @@ export function AdmissionsWorkspace() {
       onOpenStudent: (id: string) => setProfileStudentId(id),
       onRegister: doRegisterLead,
       onVerifyDocs: doVerifyDocsLead,
-      onAdmitToSis: doAdmitLead,
+      onAdmitToSis: (leadId: string) => void doAdmitLead(leadId),
       onAssignMe: doAssignMeLead,
       onMarkLost: doMarkLostLead,
       onVerifyWithSis: doVerifySuspectedWithSis,
@@ -910,9 +938,21 @@ export function AdmissionsWorkspace() {
     commit(r.state, "Documents verified");
   }
 
-  function doEnroll() {
+  async function doEnroll() {
     if (!state || !selected || !masters) return;
-    const r = enrollLead(state, selected.id, session.fullName, masters);
+    const refusal = withheldFeeGroupRefusal(feesWithheld, selected);
+    if (refusal) {
+      setNotice(refusal);
+      return;
+    }
+    // The SRN from the server (data-layer 2.2e): max(the SRN counter, the
+    // highest SRN on record + 1) — never this tab's copy alone.
+    const srnIssued = await issueSeriesNumber("SRN", undefined);
+    if (!srnIssued.ok && srnIssued.kind === "failed") {
+      setNotice(`Not sent — the server did not give the next SRN (${srnIssued.message}). Try again.`);
+      return;
+    }
+    const r = enrollLead(state, selected.id, session.fullName, masters, { srn: srnIssued.ok ? srnIssued.formatted : undefined });
     if (!r.ok) {
       setNotice(r.reason);
       return;
@@ -1133,6 +1173,9 @@ export function AdmissionsWorkspace() {
     openLead(r.lead.id);
   }
 
+  if (!masters && mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!state || !masters) {
     return <p className="text-sm text-[var(--muted)]">Loading admissions…</p>;
   }
@@ -1220,6 +1263,7 @@ export function AdmissionsWorkspace() {
             !canBrowseLeadLists &&
             (next === "leads" ||
               next === "registration" ||
+              next === "entrance" ||
               next === "rte" ||
               next === "import" ||
               next === "campaigns" ||
@@ -2050,6 +2094,15 @@ export function AdmissionsWorkspace() {
               onCall={() => setFollowUpFor({ lead: selected, channel: "call" })}
               onWhatsApp={() => setFollowUpFor({ lead: selected, channel: "whatsapp" })}
             />
+            {tabItems.some((t) => t.id === "entrance") ? (
+              <LeadEntranceTestBadge
+                leadId={selected.id}
+                onOpen={(sessionId) => {
+                  setEntranceFocus(sessionId);
+                  setTab("entrance");
+                }}
+              />
+            ) : null}
             <LeadDetail
               key={selected.id}
               lead={selected}
@@ -2063,7 +2116,7 @@ export function AdmissionsWorkspace() {
               onPatch={patchSelected}
               onRegister={doRegister}
               onVerify={doVerify}
-              onEnroll={doEnroll}
+              onEnroll={() => void doEnroll()}
               onLost={doLost}
               onOpenLead={openLead}
               onOpenStudent={(id) => setProfileStudentId(id)}
@@ -2082,11 +2135,24 @@ export function AdmissionsWorkspace() {
         <AdmissionRegistrationPanel
           state={state}
           masters={masters}
+          feesWithheld={feesWithheld}
           sis={sis}
           by={session.fullName}
           canEdit={canWriteTab("registration")}
           onCommit={commit}
           onOpenCrmLead={(id) => openLead(id)}
+        />
+      ) : null}
+
+      {tab === "entrance" && masters ? (
+        <EntranceTestPanel
+          classes={classes}
+          academicYearCode={session.academicYearCode || ""}
+          canCreate={!sessionReadOnly && canWriteModuleTab(session, masters, "admissions", "entrance", "create")}
+          canEdit={!sessionReadOnly && canWriteModuleTab(session, masters, "admissions", "entrance", "edit")}
+          canDelete={!sessionReadOnly && canWriteModuleTab(session, masters, "admissions", "entrance", "delete")}
+          focusSessionId={entranceFocus}
+          onOpenLead={(id) => openLead(id)}
         />
       ) : null}
 
@@ -2241,13 +2307,12 @@ export function AdmissionsWorkspace() {
                     Source: Walk-in
                   </span>
                   <Field label="Lead / enquiry date *">
-                    <input
-                      type="date"
+                    {/* Empty means today; a draft box so a half-typed date
+                        does not snap back to today mid-year. */}
+                    <DraftDateInput
                       className={inp}
                       value={draft.leadDate || todayYmd()}
-                      onChange={(e) =>
-                        setDraft((d) => ({ ...d, leadDate: e.target.value }))
-                      }
+                      onCommit={(v) => setDraft((d) => ({ ...d, leadDate: v }))}
                     />
                   </Field>
                 </div>
@@ -2598,14 +2663,16 @@ export function AdmissionsWorkspace() {
               masters.classes.find((c) => c.id === ps.classId)?.name || "—";
             const sec =
               masters.sections.find((s) => s.id === ps.sectionId)?.name || "";
-            const feeGroupLabel =
-              masters.feeGroups?.find((g) => g.id === ps.feeGroupId)?.name ||
-              "—";
+            const feeGroupLabel = feesWithheld
+              ? "Not shown to your role"
+              : masters.feeGroups?.find((g) => g.id === ps.feeGroupId)?.name ||
+                "—";
             return (
               <StudentProfileModal
                 student={ps}
                 sis={sis}
                 masters={masters}
+                feesWithheld={feesWithheld}
                 classLabel={sec ? `${cls} · ${sec}` : cls}
                 feeGroupLabel={feeGroupLabel}
                 onClose={() => setProfileStudentId("")}
@@ -3084,11 +3151,11 @@ function LeadDetail({
         {canEdit && !locked ? (
           <div className="mt-3 grid gap-2 border-t border-[var(--border)] pt-3 sm:grid-cols-2">
             <Field label="Lead / enquiry date">
-              <input
-                type="date"
+              {/* Saves the lead — only a whole date (never 0002-…). */}
+              <DraftDateInput
                 className={inp}
                 value={(lead.leadDate || "").slice(0, 10)}
-                onChange={(e) => onPatch({ leadDate: e.target.value })}
+                onCommit={(v) => onPatch({ leadDate: v })}
               />
             </Field>
             <Field label="Academic session (AY)">
@@ -3689,12 +3756,11 @@ function LeadDetail({
             />
           </Field>
           <Field label="DOB">
-            <input
-              type="date"
+            <DraftDateInput
               className={inp}
               disabled={locked || !canEdit}
               value={lead.dob}
-              onChange={(e) => onPatch({ dob: e.target.value })}
+              onCommit={(v) => onPatch({ dob: v })}
             />
           </Field>
           <Field label="Class sought">
@@ -3764,12 +3830,11 @@ function LeadDetail({
             </select>
           </Field>
           <Field label="Admission date">
-            <input
-              type="date"
+            <DraftDateInput
               className={inp}
               disabled={locked || !canEdit}
               value={lead.admissionDate}
-              onChange={(e) => onPatch({ admissionDate: e.target.value })}
+              onCommit={(v) => onPatch({ admissionDate: v })}
             />
           </Field>
           <Field label="Medium">
@@ -4071,3 +4136,4 @@ function LeadDetail({
     </div>
   );
 }
+

@@ -21,8 +21,29 @@ import {
   type ClassDay,
   type StudentDaysSummary,
 } from "@/lib/studentWorkingDays";
+import { sectionKey } from "@/lib/staffTeachingScope";
 
 export const MONTH_STATUSES: AttendanceStatus[] = ["P", "A", "L", "HD", "LE"];
+
+/**
+ * Who may fill a section's month register — the web panel and the staff
+ * app read the same answer (GET canEdit) and POST refuses everyone else:
+ * attendance·edit AND (the office / leadership, or the section's class
+ * teacher). A subject teacher marks a day from the daily register; today's
+ * cover (substitute / co-ordinator) opens the daily register for today only
+ * (lib/attendanceCover), never a month of someone else's class.
+ *
+ * Until 20 Oct 2026 GET said canEdit without looking at attendance·edit, so
+ * a view-only leadership login was offered edit boxes that POST refused.
+ */
+export function monthRegisterCanEdit(
+  input: { unrestricted: boolean; classTeacherOf: ReadonlySet<string>; canEditAttendance: boolean },
+  classId: string,
+  sectionId: string,
+): boolean {
+  if (!input.canEditAttendance) return false;
+  return input.unrestricted || input.classTeacherOf.has(sectionKey(classId, sectionId));
+}
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export type MonthDay = ClassDay & {

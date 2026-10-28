@@ -9,7 +9,10 @@ import { field } from "@/components/ui/erp-ui";
 import { ExportMenu, type RowAction } from "@/components/ui/erp-grid";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { openWaMe } from "@/lib/waMe";
-import { DEFAULT_AY, loadMasters, type MastersState, currentAcademicYearCode} from "@/lib/masters";
+import { DEFAULT_AY, type MastersState, currentAcademicYearCode } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { classSectionLabel } from "@/lib/timetable";
 import { loadSis, type SisState, type SisStudent, studentsInSession} from "@/lib/sis";
 import { dutyStaffLabel, loadDutyRoster, type DutyRosterState } from "@/lib/dutyRoster";
@@ -25,6 +28,7 @@ import {
   markGatePassPickedUp,
   notifyGatePassParent,
   onGateDutyNow,
+  peopleCountOf,
   saveVisitors,
   upsertGatePass,
   visitorPurposeLabel,
@@ -34,6 +38,7 @@ import {
   type VisitorPurpose,
   type VisitorState,
 } from "@/lib/visitors";
+import { cleanIndianMobile, cleanPeopleCount } from "@/lib/staffScanReading";
 import { VisitorPassSheet, printVisitorPass } from "@/components/visitors/VisitorPassSheet";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { GateQrPanel } from "@/components/visitors/GateQrPanel";
@@ -57,8 +62,8 @@ const TABS_HI: ModuleTabItem[] = [
 const LANG_KEY = "bhb_visitor_desk_lang";
 /** Register/gate labels in Hindi for a gateman who does not read English. */
 const T = {
-  en: { checkIn: "Check in visitor", name: "Visitor name", mobile: "Mobile", purpose: "Purpose", meet: "Person to meet", idProof: "ID proof note", checkInBtn: "Check in", onCampus: "on campus", out: "out", inWord: "in", checkOut: "Check out", checkedOut: "Checked out", printPass: "Print pass", del: "Delete", noVisitors: "No visitors logged yet.", gateQr: "Gate QR", langToggle: "हिन्दी", live: "Live — refreshes every 20 s", meeting: "meeting" },
-  hi: { checkIn: "विज़िटर चेक-इन", name: "विज़िटर का नाम", mobile: "मोबाइल", purpose: "उद्देश्य", meet: "किससे मिलना है", idProof: "पहचान पत्र नोट", checkInBtn: "चेक-इन", onCampus: "परिसर में", out: "बाहर", inWord: "अंदर", checkOut: "चेक-आउट", checkedOut: "चेक-आउट हो गया", printPass: "पास प्रिंट", del: "हटाएँ", noVisitors: "अभी कोई विज़िटर दर्ज नहीं।", gateQr: "गेट QR", langToggle: "English", live: "लाइव — हर 20 सेकंड रिफ्रेश", meeting: "मिलना" },
+  en: { checkIn: "Check in visitor", name: "Visitor name", mobile: "Mobile", purpose: "Purpose", meet: "Person to meet", idProof: "ID proof note", people: "People", vehicle: "Vehicle no.", checkInBtn: "Check in", onCampus: "on campus", out: "out", inWord: "in", checkOut: "Check out", checkedOut: "Checked out", printPass: "Print pass", del: "Delete", noVisitors: "No visitors logged yet.", gateQr: "Gate QR", langToggle: "हिन्दी", live: "Live — refreshes every 20 s", meeting: "meeting" },
+  hi: { checkIn: "विज़िटर चेक-इन", name: "विज़िटर का नाम", mobile: "मोबाइल", purpose: "उद्देश्य", meet: "किससे मिलना है", idProof: "पहचान पत्र नोट", people: "लोग", vehicle: "वाहन नंबर", checkInBtn: "चेक-इन", onCampus: "परिसर में", out: "बाहर", inWord: "अंदर", checkOut: "चेक-आउट", checkedOut: "चेक-आउट हो गया", printPass: "पास प्रिंट", del: "हटाएँ", noVisitors: "अभी कोई विज़िटर दर्ज नहीं।", gateQr: "गेट QR", langToggle: "English", live: "लाइव — हर 20 सेकंड रिफ्रेश", meeting: "मिलना" },
 } as const;
 
 function todayIso() {
@@ -68,12 +73,16 @@ function todayIso() {
 function StudentPicker({
   sis,
   masters,
+  sessionYear,
   value,
   onPick,
   onClear,
 }: {
   sis: SisState | null;
+  /** null while the masters view has not answered: the picker still works, class names show "…". */
   masters: MastersState | null;
+  /** The signed-in session's year — the search's year until Masters answers. */
+  sessionYear: string;
   value: SisStudent | null;
   onPick: (s: SisStudent) => void;
   onClear: () => void;
@@ -86,17 +95,17 @@ function StudentPicker({
       // One row per child, this session. SIS keeps a row per child per
       // year and marks them all active, so the same name appeared several
       // times and, in a capped list, pushed real matches off the end.
-    return studentsInSession(sis, currentAcademicYearCode(masters))
+    return studentsInSession(sis, masters ? currentAcademicYearCode(masters) : sessionYear)
       .filter((s) => s.fullName.toLowerCase().includes(q) || s.admissionNo.toLowerCase().includes(q))
       .slice(0, 15);
-  }, [sis, query]);
+  }, [sis, query, masters, sessionYear]);
 
   if (value) {
     return (
       <div className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2">
         <span className="text-sm font-semibold">
           {value.fullName}
-          {masters ? ` · ${classSectionLabel(masters, value.classId, value.sectionId)}` : ""}
+          {` · ${masters ? classSectionLabel(masters, value.classId, value.sectionId) : "…"}`}
         </span>
         <button type="button" className="text-xs font-semibold text-[var(--brand-deep)] underline" onClick={onClear}>
           Change
@@ -141,7 +150,9 @@ export function VisitorsWorkspace() {
   const readOnly = useSessionReadOnly();
   const ay = session.academicYearCode || DEFAULT_AY;
   const [tab, setTab] = useState<Tab>("register");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the staff roster (gate duty, the
+  // permission checks), kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [sis, setSis] = useState<SisState | null>(null);
   const [dutyRoster, setDutyRoster] = useState<DutyRosterState | null>(null);
   const [state, setState] = useState<VisitorState>(emptyVisitorState());
@@ -193,30 +204,32 @@ export function VisitorsWorkspace() {
     };
   }, [tab]);
   useEffect(() => {
-    setMasters(loadMasters());
     setSis(loadSis());
     setDutyRoster(loadDutyRoster());
     setState(loadVisitors());
     void (async () => {
-      const [{ ensureMastersHydrated }, { ensureSisHydrated }, { withHydrationSlot }] =
+      const [{ ensureSisHydrated }, { withHydrationSlot }] =
         await Promise.all([
-          import("@/lib/mastersPersistence"),
           import("@/lib/sisPersistence"),
           import("@/lib/deskHydrateGuard"),
         ]);
-      await Promise.all([
-        withHydrationSlot(() => ensureMastersHydrated()),
-        withHydrationSlot(() => ensureSisHydrated()),
-      ]);
-      setMasters(loadMasters());
+      await withHydrationSlot(() => ensureSisHydrated());
       setSis(loadSis());
     })();
   }, []);
 
   // Someone holding only some Visitors functions sees only their tabs.
+  // Decided from the access copy (roles + staff roster — the same staff side
+  // useScreenMasters adds to the book), so the gate is usable while the
+  // masters view is loading or has failed (2.1i review: the gate must work).
+  const access = useAccessData();
   const shownTabs = useMemo(
-    () => visibleModuleTabs(lang === "hi" ? TABS_HI : TABS_EN, session, masters, "visitors"),
-    [lang, session, masters],
+    () =>
+      access.ready
+        ? visibleModuleTabs(lang === "hi" ? TABS_HI : TABS_EN, session, access.masters, "visitors", access.rbac ?? undefined)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [lang, session, access.ready, access.version],
   );
   useEffect(() => {
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
@@ -227,11 +240,13 @@ export function VisitorsWorkspace() {
    * The register saves the whole visitors book, which needs edit (module
    * grant or the "Gate register" function) — saveVisitors and the server
    * both refuse less. Without it the buttons are off rather than letting a
-   * check-in look saved on this screen and never reach the server. Until
-   * masters load, only the session's own read-only state decides.
+   * check-in look saved on this screen and never reach the server. Off
+   * until the access copy (roles + roster) is known.
    */
   const locked =
-    readOnly || (masters !== null && !canWriteModuleTab(session, masters, "visitors", tab));
+    readOnly ||
+    !access.ready ||
+    !canWriteModuleTab(session, access.masters, "visitors", tab, "edit", access.rbac ?? undefined);
 
   function flash(msg: string) {
     setNotice(msg);
@@ -249,6 +264,8 @@ export function VisitorsWorkspace() {
   const [regPurpose, setRegPurpose] = useState<VisitorPurpose>("meeting");
   const [regPersonToMeet, setRegPersonToMeet] = useState("");
   const [regIdProof, setRegIdProof] = useState("");
+  const [regPeople, setRegPeople] = useState("1");
+  const [regVehicle, setRegVehicle] = useState("");
 
   function resetRegForm() {
     setRegName("");
@@ -256,6 +273,8 @@ export function VisitorsWorkspace() {
     setRegPurpose("meeting");
     setRegPersonToMeet("");
     setRegIdProof("");
+    setRegPeople("1");
+    setRegVehicle("");
   }
 
   function onCheckIn() {
@@ -263,10 +282,22 @@ export function VisitorsWorkspace() {
       setError("Visitor name is required.");
       return;
     }
+    const mobile = cleanIndianMobile(regMobile);
+    if (!mobile.ok) {
+      setError(mobile.error);
+      return;
+    }
+    const people = cleanPeopleCount(regPeople);
+    if (!people.ok) {
+      setError(people.error);
+      return;
+    }
     const { state: withEntry, entry } = checkInVisitor(state, {
       visitorName: regName,
-      mobile: regMobile,
+      mobile: mobile.mobile,
       purpose: regPurpose,
+      peopleCount: people.count,
+      vehicleNo: regVehicle,
       personToMeet: regPersonToMeet,
       idProofNote: regIdProof,
       createdBy: session.staffId || session.fullName || "",
@@ -425,6 +456,8 @@ export function VisitorsWorkspace() {
     },
     { key: "meet", header: L.meet, value: (v) => v.personToMeet || "—" },
     { key: "mobile", header: L.mobile, value: (v) => v.mobile || "—" },
+    { key: "people", header: L.people, sortable: true, value: (v) => peopleCountOf(v.peopleCount) },
+    { key: "vehicle", header: L.vehicle, value: (v) => v.vehicleNo || "—" },
     {
       key: "in", header: L.inWord, sortable: true,
       value: (v) => v.inTime,
@@ -548,6 +581,12 @@ export function VisitorsWorkspace() {
         </button>
       </div>
 
+      {/* The register, passes and QR work without Masters; only class /
+          section names and the duty roster's names need it ("…" until then). */}
+      {mastersError ? (
+        <QueryError compact what="class, section and staff names" error={mastersError} retry={retryMasters} />
+      ) : null}
+
       {tab === "gateqr" ? <GateQrPanel lang={lang} /> : null}
 
       {tab === "register" ? (
@@ -576,6 +615,16 @@ export function VisitorsWorkspace() {
               <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.meet}</span>
               <input className={field} value={regPersonToMeet} onChange={(e) => setRegPersonToMeet(e.target.value)} />
             </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-sm">
+                <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.people}</span>
+                <input className={field} type="number" min={1} max={99} step={1} inputMode="numeric" value={regPeople} onChange={(e) => setRegPeople(e.target.value)} />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.vehicle}</span>
+                <input className={field} placeholder="UP 32 AB 1234" value={regVehicle} onChange={(e) => setRegVehicle(e.target.value)} />
+              </label>
+            </div>
             <label className="block text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">{L.idProof}</span>
               <input className={field} placeholder="e.g. Aadhaar last 4 digits" value={regIdProof} onChange={(e) => setRegIdProof(e.target.value)} />
@@ -602,6 +651,8 @@ export function VisitorsWorkspace() {
                   { key: "mobile", header: "Mobile" },
                   { key: "purpose", header: "Purpose" },
                   { key: "meet", header: "To meet", width: 1.4 },
+                  { key: "people", header: "People" },
+                  { key: "vehicle", header: "Vehicle" },
                   { key: "in", header: "In" },
                   { key: "out", header: "Out" },
                   { key: "source", header: "Source" },
@@ -613,6 +664,8 @@ export function VisitorsWorkspace() {
                     mobile: v.mobile || "",
                     purpose: visitorPurposeLabel(v.purpose),
                     meet: v.personToMeet || "",
+                    people: String(peopleCountOf(v.peopleCount)),
+                    vehicle: v.vehicleNo || "",
                     in: new Date(v.inTime).toLocaleString("en-IN"),
                     out: v.outTime ? new Date(v.outTime).toLocaleString("en-IN") : "",
                     source: v.source || "desk",
@@ -668,7 +721,7 @@ export function VisitorsWorkspace() {
             <p className="text-sm font-bold">Log early-pickup gate pass</p>
             <label className="block text-sm">
               <span className="mb-1 block text-[11px] text-[var(--muted)]">Student</span>
-              <StudentPicker sis={sis} masters={masters} value={gpStudent} onPick={setGpStudent} onClear={() => setGpStudent(null)} />
+              <StudentPicker sis={sis} masters={masters} sessionYear={ay} value={gpStudent} onPick={setGpStudent} onClear={() => setGpStudent(null)} />
             </label>
             <div className="grid grid-cols-2 gap-3">
               <label className="block text-sm">
@@ -722,7 +775,7 @@ export function VisitorsWorkspace() {
             <ul className="space-y-2">
               {todayDutyAssignments.map((a) => (
                 <li key={a.id} className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 text-sm">
-                  <span className="font-semibold">{masters ? dutyStaffLabel(masters, a.staffId) : a.staffId}</span>
+                  <span className="font-semibold">{masters ? dutyStaffLabel(masters, a.staffId) : "…"}</span>
                   {a.note ? <span className="ml-2 text-[var(--muted)]">{a.note}</span> : null}
                 </li>
               ))}

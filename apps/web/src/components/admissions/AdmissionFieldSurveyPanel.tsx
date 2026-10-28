@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
+import { DraftDateInput } from "@/components/ui/draft-inputs";
 import {
   GUARDIAN_RELATIONS,
   addGuardian,
@@ -32,10 +33,9 @@ import {
   ensureSurveyMasters,
   flushOfflineSurveyQueue,
   loadOfflineQueue,
+  offlineItemIsMine,
   removeOfflineItem,
-  setSurveyBeatActive,
   surveyAgentProductivity,
-  upsertSurveyBeat,
   type SurveyOfflineDraft,
 } from "@/lib/fieldSurvey";
 import { SurveyAgentWaInbox } from "@/components/admissions/SurveyAgentWaInbox";
@@ -48,6 +48,7 @@ import {
 } from "@/components/masters/MastersLayout";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
 import { AdmissionSurveyTeamPanel } from "@/components/admissions/AdmissionSurveyTeamPanel";
+import { SurveyBeatsCard, useSurveyTeam } from "@/components/admissions/SurveyTeamCard";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
@@ -173,9 +174,21 @@ export function AdmissionFieldSurveyPanel({
     [masters],
   );
   const feeHeads = useMemo(() => registrationFeeHeads(masters), [masters]);
+  // The beats as the server stores them (admission_survey_beats, read through
+  // the query kernel — a beat added on another screen or by the team leader's
+  // phone shows here within one versions poll). The desk copy only stands in
+  // until that first read lands.
+  const teamQuery = useSurveyTeam();
+  const surveyBeats = useMemo<AdmissionsState["surveyBeats"]>(
+    () =>
+      teamQuery.data
+        ? teamQuery.data.beats.map((b) => ({ id: b.id, code: b.code, name: b.name, area: b.area, targetHouseholds: b.targetHouseholds, isActive: b.isActive, note: b.note, createdAt: b.createdAt }))
+        : state.surveyBeats,
+    [teamQuery.data, state.surveyBeats],
+  );
   const activeBeats = useMemo(
-    () => state.surveyBeats.filter((b) => b.isActive),
-    [state.surveyBeats],
+    () => surveyBeats.filter((b) => b.isActive),
+    [surveyBeats],
   );
 
   const [beatFilter, setBeatFilter] = useState<string>("all");
@@ -207,10 +220,6 @@ export function AdmissionFieldSurveyPanel({
   const [feeHeadId, setFeeHeadId] = useState("");
   const [feeAmount, setFeeAmount] = useState("500");
 
-  const [beatName, setBeatName] = useState("");
-  const [beatArea, setBeatArea] = useState("");
-  const [beatTarget, setBeatTarget] = useState("50");
-  const [editBeatId, setEditBeatId] = useState("");
   const [surveyStep, setSurveyStep] = useState<SurveyStep>("team");
 
   const surveyUrl = useMemo(
@@ -308,7 +317,7 @@ export function AdmissionFieldSurveyPanel({
     {
       lead: (l) => l.enquiryNo,
       beat: (l) =>
-        state.surveyBeats.find((b) => b.id === l.surveyBeatId)?.name ||
+        surveyBeats.find((b) => b.id === l.surveyBeatId)?.name ||
         (l.campaignNote || "").trim() ||
         (l.locality || "").trim() ||
         null,
@@ -588,25 +597,7 @@ export function AdmissionFieldSurveyPanel({
     onCommit(checkOutSurveyAgent(state, by), `${by} checked out`);
   }
 
-  function onSaveBeat() {
-    if (!canEdit || !beatName.trim()) return;
-    const next = upsertSurveyBeat(state, {
-      id: editBeatId || undefined,
-      name: beatName.trim(),
-      area: beatArea.trim(),
-      targetHouseholds: Math.round(Number(beatTarget) || 0),
-    });
-    onCommit(
-      next,
-      editBeatId
-        ? `Beat updated: ${beatName.trim()}`
-        : `Beat added: ${beatName.trim()}`,
-    );
-    setBeatName("");
-    setBeatArea("");
-    setBeatTarget("50");
-    setEditBeatId("");
-  }
+
 
   function onBulkPush() {
     if (!canEdit || openSelectedIds.length === 0) return;
@@ -853,109 +844,44 @@ export function AdmissionFieldSurveyPanel({
         </MastersWorkCard>
       </div>
 
-      <MastersWorkCard
-        title="Beat / cluster master"
-        hint="Areas + household targets · progress from survey captures"
-      >
-        {canEdit ? (
-          <div className="mb-3 grid gap-2 sm:grid-cols-4">
-            <input
-              className={inp}
-              placeholder="Beat name *"
-              value={beatName}
-              onChange={(e) => setBeatName(e.target.value)}
-            />
-            <input
-              className={inp}
-              placeholder="Area / cluster"
-              value={beatArea}
-              onChange={(e) => setBeatArea(e.target.value)}
-            />
-            <input
-              className={inp}
-              type="number"
-              min={0}
-              placeholder="Target HH"
-              value={beatTarget}
-              onChange={(e) => setBeatTarget(e.target.value)}
-            />
-            <button
-              type="button"
-              className="rounded-lg bg-[var(--brand-deep)] px-3 py-2 text-[12px] font-semibold text-white"
-              onClick={onSaveBeat}
-            >
-              {editBeatId ? "Update beat" : "Add beat"}
-            </button>
-          </div>
-        ) : null}
-        <div className="flex flex-wrap gap-2">
+      <SurveyBeatsCard progress={(id) => beatProgress(state, id)} />
+      {surveyBeats.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2" aria-label="Show leads by beat">
+          <span className="text-[11px] text-[var(--muted)]">Leads by beat:</span>
           <button
             type="button"
             onClick={() => setBeatFilter("all")}
             className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-              beatFilter === "all"
-                ? "bg-[var(--brand-deep)] text-white"
-                : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
+              beatFilter === "all" ? "bg-[var(--brand-deep)] text-white" : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)]"
             }`}
           >
             All
           </button>
-          {state.surveyBeats.map((b) => {
+          {surveyBeats.map((b) => {
             const prog = beatProgress(state, b.id);
             return (
-              <div key={b.id} className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setBeatFilter(b.id);
-                    setBeatId(b.id);
-                  }}
-                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                    beatFilter === b.id
-                      ? "bg-[var(--tone-brick-solid)] text-white"
-                      : b.isActive
-                        ? "bg-[rgba(180,83,9,0.12)] text-[#9a3412]"
-                        : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)] line-through"
-                  }`}
-                  title={`${b.area || "—"} · ${prog.captured}/${prog.target} (${prog.pct}%)`}
-                >
-                  {b.code} {b.name} · {prog.captured}/{prog.target || "—"}
-                </button>
-                {canEdit ? (
-                  <>
-                    <button
-                      type="button"
-                      className="text-[10px] text-[var(--muted)] underline"
-                      onClick={() => {
-                        setEditBeatId(b.id);
-                        setBeatName(b.name);
-                        setBeatArea(b.area);
-                        setBeatTarget(String(b.targetHouseholds));
-                      }}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="text-[10px] text-[var(--muted)] underline"
-                      onClick={() =>
-                        onCommit(
-                          setSurveyBeatActive(state, b.id, !b.isActive),
-                          b.isActive
-                            ? `Deactivated ${b.name}`
-                            : `Activated ${b.name}`,
-                        )
-                      }
-                    >
-                      {b.isActive ? "Off" : "On"}
-                    </button>
-                  </>
-                ) : null}
-              </div>
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => {
+                  setBeatFilter(b.id);
+                  if (b.isActive) setBeatId(b.id);
+                }}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                  beatFilter === b.id
+                    ? "bg-[var(--tone-brick-solid)] text-white"
+                    : b.isActive
+                      ? "bg-[rgba(180,83,9,0.12)] text-[#9a3412]"
+                      : "bg-[rgba(32,48,80,0.06)] text-[var(--muted)] line-through"
+                }`}
+                title={`${b.area || "—"} · ${prog.captured}/${b.targetHouseholds}`}
+              >
+                {b.code} {b.name} · {prog.captured}/{b.targetHouseholds || "—"}
+              </button>
             );
           })}
         </div>
-      </MastersWorkCard>
+      ) : null}
       </div>
 
       <div className={surveyStep === "household" || surveyStep === "children" ? "space-y-4" : "hidden"}>
@@ -981,13 +907,12 @@ export function AdmissionFieldSurveyPanel({
                 Source: Field survey
               </span>
               <Field label="Lead / enquiry date *">
-                <input
-                  type="date"
+                {/* Empty means today; a draft box so a half-typed date does
+                    not snap back to today between the digits of the year. */}
+                <DraftDateInput
                   className={inp}
                   value={draft.leadDate || todayYmd()}
-                  onChange={(e) =>
-                    setDraft((d) => ({ ...d, leadDate: e.target.value }))
-                  }
+                  onCommit={(v) => setDraft((d) => ({ ...d, leadDate: v }))}
                 />
               </Field>
               <Field label="Beat *">
@@ -1415,27 +1340,36 @@ export function AdmissionFieldSurveyPanel({
           hint="Stored on this device · flush when connection returns"
         >
           <ul className="mb-3 space-y-1 text-[12px]">
-            {offlineQueue.map((q) => (
-              <li
-                key={q.id}
-                className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.06)] py-1.5"
-              >
-                <span>
-                  <span className="font-medium">{q.childName}</span>
-                  {" · "}
-                  {q.beatName || "—"} · {q.mobile}
-                </span>
-                {canEdit ? (
-                  <button
-                    type="button"
-                    className="text-[10px] text-[#9a3412] underline"
-                    onClick={() => setOfflineQueue(removeOfflineItem(q.id))}
-                  >
-                    Discard
-                  </button>
-                ) : null}
-              </li>
-            ))}
+            {offlineQueue.map((q) =>
+              !offlineItemIsMine(q, by) ? (
+                <li
+                  key={q.id}
+                  className="border-b border-[rgba(32,48,80,0.06)] py-1.5 text-[var(--muted)]"
+                >
+                  Waiting to upload by {q.by}
+                </li>
+              ) : (
+                <li
+                  key={q.id}
+                  className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(32,48,80,0.06)] py-1.5"
+                >
+                  <span>
+                    <span className="font-medium">{q.childName}</span>
+                    {" · "}
+                    {q.beatName || "—"} · {q.mobile}
+                  </span>
+                  {canEdit ? (
+                    <button
+                      type="button"
+                      className="text-[10px] text-[#9a3412] underline"
+                      onClick={() => setOfflineQueue(removeOfflineItem(q.id))}
+                    >
+                      Discard
+                    </button>
+                  ) : null}
+                </li>
+              ),
+            )}
           </ul>
           {canEdit ? (
             <button
@@ -1526,7 +1460,7 @@ export function AdmissionFieldSurveyPanel({
             <ErpTableBody hoverable>
               {leadSort.rows.map((l) => {
                 const beatLabel =
-                  state.surveyBeats.find((b) => b.id === l.surveyBeatId)
+                  surveyBeats.find((b) => b.id === l.surveyBeatId)
                     ?.name ||
                   (l.campaignNote || "").trim() ||
                   (l.locality || "").trim() ||

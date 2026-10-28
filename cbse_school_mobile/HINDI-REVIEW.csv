@@ -665,3 +665,56 @@ modComplaintsSending,"Modules (fees, homework, PTM…)",Sending…,भेजा 
 modComplaintsSendToSchool,"Modules (fees, homework, PTM…)",Send to the school,स्कूल को भेजें
 modDiaryLabel,"Modules (fees, homework, PTM…)",Diary,डायरी
 homeNewCount,Home,{count} new,{count} नए
+homeModuleGames,Learning games (parent),Games,खेल
+gamesTitle,Learning games (parent),Learning games,सीखने के खेल
+gamesPlayedToday,Learning games (parent),Played today: {played} of {cap} min,आज खेला: {cap} में से {played} मिनट
+gamesTimeLeft,Learning games (parent),{minutes} min left today,आज {minutes} मिनट बाकी
+gamesStarsToday,Learning games (parent),Stars today,आज के तारे
+gamesStarsWeek,Learning games (parent),This week,इस सप्ताह
+gamesStarsTotal,Learning games (parent),All time,कुल
+gamesLast7Days,Learning games (parent),Last 7 days,पिछले 7 दिन
+gamesDayMinutes,Learning games (parent),{minutes} min,{minutes} मिनट
+gamesCompetitions,Learning games (parent),Competitions,प्रतियोगिताएँ
+gamesPlay,Learning games (parent),Play,खेलें
+gamesPlayed,Learning games (parent),Played,खेल लिया
+gamesOpensAt,Learning games (parent),Opens {time},{time} पर खुलेगी
+gamesClosesAt,Learning games (parent),Open till {time},{time} तक खुली
+gamesLeaderboard,Learning games (parent),Leaderboard,लीडरबोर्ड
+gamesPractice,Learning games (parent),Practice,अभ्यास
+gamesNumberDash,Learning games (parent),Number dash,नंबर दौड़
+gamesNumberDashBlurb,Learning games (parent),As many as you can in 60 seconds,60 सेकंड में जितने हो सकें
+gamesCounting,Learning games (parent),Count the pictures,चित्र गिनो
+gamesCountingBlurb,Learning games (parent),How many can you see?,कितने दिख रहे हैं?
+gamesQuestions,Learning games (parent),{count} questions,{count} प्रश्न
+gamesWholeSubject,Learning games (parent),Whole subject,पूरा विषय
+gamesNoQuizYet,Learning games (parent),No quizzes for this class yet — the teachers are adding questions.,इस कक्षा के लिए अभी प्रश्नोत्तरी नहीं है — शिक्षक प्रश्न जोड़ रहे हैं।
+gamesRefusedNight,Learning games (parent),Games rest at night — come back in the morning.,रात में खेल बंद रहते हैं — सुबह फिर आइए।
+gamesRefusedSchoolHours,Learning games (parent),It is school time. Practice opens after school; a competition your teacher starts can be played now.,अभी स्कूल का समय है। अभ्यास स्कूल के बाद खुलेगा; शिक्षक की प्रतियोगिता अभी खेली जा सकती है।
+gamesRefusedDailyCap,Learning games (parent),Today's game time is used up. See you tomorrow!,आज के खेल का समय पूरा हुआ। कल फिर मिलेंगे!
+gamesRefusedDisabled,Learning games (parent),Games are switched off by the school.,स्कूल ने खेल अभी बंद रखे हैं।
+gamesRefusedClosed,Learning games (parent),This competition is not open now.,यह प्रतियोगिता अभी खुली नहीं है।
+gamesRefusedAlreadyPlayed,Learning games (parent),You have already played this competition.,यह प्रतियोगिता आप खेल चुके हैं।
+gamesRefusedAlreadyPlaying,Learning games (parent),A game is already being played on another phone.,किसी दूसरे फ़ोन पर पहले से खेल चल रहा है।
+gamesQuestionOf,Learning games (parent),Question {n} of {total},प्रश्न {n} / {total}
+gamesSecondsLeft,Learning games (parent),{seconds}s,{seconds} से.
+gamesRight,Learning games (parent),Right!,सही!
+gamesWrong,Learning games (parent),Not quite,थोड़ा चूक गए
+gamesAnswerSaved,Learning games (parent),Answer saved,उत्तर दर्ज हुआ
+gamesTimeUp,Learning games (parent),Time's up!,समय पूरा!
+gamesResultTitle,Learning games (parent),Well played!,बहुत बढ़िया!
+gamesResultScore,Learning games (parent),{correct} of {total} right,{total} में से {correct} सही
+gamesStarsEarned,Learning games (parent),{stars} stars,{stars} तारे
+gamesReview,Learning games (parent),Answers,उत्तर
+gamesDone,Learning games (parent),Done,हो गया
+gamesYourAnswer,Learning games (parent),Your answer: {answer},आपका उत्तर: {answer}
+gamesNotAnswered,Learning games (parent),Not answered,उत्तर नहीं दिया
+gamesRightAnswer,Learning games (parent),Right answer: {answer},सही उत्तर: {answer}
+gamesAnswersAfterClose,Learning games (parent),The right answers appear when the competition closes ({time}).,सही उत्तर प्रतियोगिता बंद होने पर ({time}) दिखेंगे।
+gamesClassBoard,Learning games (parent),{label} this week,इस सप्ताह {label}
+gamesSchoolBoard,Learning games (parent),Whole school this week,इस सप्ताह पूरा विद्यालय
+gamesRightPerPlayer,Learning games (parent),{avg} right per player,प्रति खिलाड़ी {avg} सही
+gamesPlayersCount,Learning games (parent),{count} played,{count} ने खेला
+gamesNobodyYet,Learning games (parent),Nobody has finished yet.,अभी किसी ने पूरा नहीं किया।
+gamesPlayingNow,Learning games (parent),{count} playing now,{count} अभी खेल रहे हैं
+gamesHealthyNote,Learning games (parent),Stars are for learning. Games rest during school hours and after 9 pm.,तारे सीखने के लिए हैं। स्कूल के समय और रात 9 बजे के बाद खेल बंद रहते हैं।
+gamesSeeLeaderboard,Learning games (parent),See the leaderboard,लीडरबोर्ड देखें

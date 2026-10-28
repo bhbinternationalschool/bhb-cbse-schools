@@ -20,8 +20,14 @@
     <!-- Dictating lesson plan notes (speech_to_text). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
 
-    <!-- Photographing a textbook contents page (image_picker). The camera
-         is optional so the app still installs on camera-less devices. -->
+    <!-- The camera: photographing a textbook contents page (image_picker),
+         the gate QR (mobile_scanner), and "Scan page" on the homework form
+         (cunning_document_scanner — ML Kit's scanner needs no permission,
+         but its fallback camera on phones without Play services does).
+         Declared here, not only inherited from a plugin, so the staff app
+         keeps it if a plugin stops asking. The camera is optional so the app
+         still installs on camera-less devices. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
 
     <queries>

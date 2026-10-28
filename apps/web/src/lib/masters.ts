@@ -1,4 +1,3 @@
-import { assertModulePermission, holdsMastersFeatureWrite } from "@/lib/rbacGuard";
 import type { FoundationSlice } from "@/lib/foundationMasters";
 import {
   ensureFoundationOnMasters,
@@ -24,14 +23,13 @@ import {
 } from "@/lib/ncfCartSeed";
 import {
   getSchoolMirrorSync,
-  scheduleClientSchoolMirrorSync,
   setMirrorSlice,
 } from "@/lib/schoolDataMirror";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
-import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
+import { rowFingerprint } from "@/lib/sliceRevClient";
 import { resolveAcademicYear, fallbackAcademicYear } from "@/lib/academicYearResolve";
-import { trackServerWork } from "@/lib/serverWork";
+import { STAFF_OWNED_MASTERS_SLICES, staffReadFromDbEnabled } from "@/lib/staffDbConfig";
 
 export type Campus = {
   id: string;
@@ -1632,9 +1630,8 @@ export function ensureStudentClassLinks(masters: MastersState): MastersState {
       ),
   );
   if (valid.length === students.length) return masters;
-  const next = { ...masters, students: valid };
-  if (typeof window !== "undefined") saveMasters(next);
-  return next;
+  // A read never saves (data-layer 2.2f): the filtered copy is returned only.
+  return { ...masters, students: valid };
 }
 
 /** Resolve who is covered by a special fee assignment */
@@ -1920,7 +1917,23 @@ function ensureFeeSetupInner(state: MastersState): MastersState {
   if (mastersLooksUnhydrated(state) && isSupabaseConfigured()) return state;
 
   let next = { ...state, version: 2 as const };
-  if (!next.feeGroups?.length || !next.feeStructureLines?.length) {
+  // A missing fee structure is filled from the demo school ONLY in demo mode.
+  //
+  // On a real tenant this replaced the whole copy — staff, students,
+  // departments, designations, school timing, profile, holidays, academic
+  // years — with defaultMasters(), keeping only campuses/classes/sections/fee
+  // heads. A teacher's phone gets a reduced Masters with no fees at all
+  // (masters-desk teachingOnly, PR #336), so EVERY loadMasters() for a
+  // teacher returned staff: [] and students: [] (13 Oct 2026, found by the
+  // data-layer gate): pickers showed no staff, holidays/timing showed demo
+  // values, and syncSisIntoMasters kept re-writing the student projection and
+  // re-firing 'bhb-masters-updated' until /students died with React #185
+  // ("Maximum update depth exceeded"). On a tenant, absent fees stay absent
+  // — the same rule NEVER_SEEDED_ON_TENANT applies to the other lists.
+  if (
+    (!next.feeGroups?.length || !next.feeStructureLines?.length) &&
+    !isSupabaseConfigured()
+  ) {
     const full = defaultMasters();
     next = {
       ...full,
@@ -2059,6 +2072,69 @@ export function loadMasters(): MastersState {
 }
 
 /**
+ * loadMasters()'s read-time normalisation applied to a book already in hand
+ * (data-layer 2.1h): the Masters editor reads the server's answer through
+ * useScreenMasters and must hand its panels the same shape loadMasters gave
+ * them — so the whole-book save (unchanged until 2.2) sends what it sent
+ * before. Pure: nothing is stored, no event.
+ *
+ * Deterministic: the same book always normalises to the same ids. The
+ * normalisation fills gaps (a class of the standard list the school lacks,
+ * a fee group of the 2026-27 structures, a seed department…) and every filler
+ * gets an id from `Math.random` — in this file, foundationMasters and the four
+ * feeStructure*202627 builders. loadMasters ran it once per mount; this runs
+ * on every answer of the masters view, so with fresh random ids a refetch of
+ * an unchanged book would hand the panels new ids each time (an open editor
+ * row loses its row; a commit saves ids no earlier answer had). So the call
+ * runs with Math.random replaced by a generator seeded from the book's own
+ * content: one book, one set of ids; another book, another sequence (no reuse
+ * of an id an earlier answer minted for something else). The function is
+ * synchronous, so nothing else can draw from the seeded generator, and the
+ * real Math.random is restored in `finally`.
+ */
+export function normalizeMastersRead(state: MastersState): MastersState {
+  const real = Math.random;
+  Math.random = seededRandom(rowFingerprint(state));
+  try {
+    return normalizeMastersStaffRoster(migrateDemoStaffToTeacherRoster(ensureFeeSetup(state)));
+  } finally {
+    Math.random = real;
+  }
+}
+
+/** mulberry32: a small, fast, well-spread generator in [0, 1) from a 32-bit seed. */
+function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * This tab's page-memory Masters copy exactly as stored — without the
+ * read-time normalisation loadMasters applies (which can mint ids for
+ * missing fee heads on every read). Null when the tab holds none yet, when
+ * it is unreadable, or outside a browser. For the data-layer 2.1 bridge
+ * (lib/data/client/mastersBridge), which must replace the stored copy's
+ * book and nothing else.
+ */
+export function readMastersPageCopyRaw(): MastersState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = readCache(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as MastersState | null;
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A real tenant gets an empty shell, never generated demo masters: the ids in
  * defaultMasters() are freshly random, so anything saved against them dangles.
  * Applies on both sides — the server has the same NEXT_PUBLIC_SUPABASE_* env
@@ -2066,124 +2142,6 @@ export function loadMasters(): MastersState {
  */
 function shouldSeedEmptyMastersShell(): boolean {
   return isSupabaseConfigured();
-}
-
-/**
- * Save masters and report whether the write actually reached the database.
- *
- * Returns the real outcome so a caller can stop assuming success. Callers
- * that ignore the promise behave exactly as before. `blocked` means the
- * write never left the browser (RBAC or a closed session) — previously
- * indistinguishable from a successful save, so the UI reported "saved"
- * either way.
- */
-export function saveMasters(
-  state: MastersState,
-): Promise<MastersSaveOutcome> {
-  // Someone holding only a FUNCTION of Masters (a teacher's Class
-  // subjects) may push too: the server lifts in only the slices those
-  // functions own and refuses any row outside them (mastersChangeAuth).
-  if (!holdsMastersFeatureWrite() && !assertModulePermission("masters", "edit", "saveMasters")) {
-    return Promise.resolve({ ok: false, reason: "blocked" });
-  }
-  return persistMastersClient(state);
-}
-
-export type MastersSaveOutcome =
-  | { ok: true; reason?: "unchanged" }
-  | { ok: false; reason: string };
-
-/** System imports (fee discounts seed) — bypass RBAC / closed-session guards. */
-export function persistMastersSystemImport(
-  state: MastersState,
-): Promise<MastersSaveOutcome> {
-  if (typeof window === "undefined") {
-    setMirrorSlice("masters", state);
-    return Promise.resolve({ ok: true });
-  }
-  return persistMastersClient(state);
-}
-
-async function persistMastersClient(
-  state: MastersState,
-): Promise<MastersSaveOutcome> {
-  if (typeof window === "undefined") {
-    setMirrorSlice("masters", state);
-    void trackServerWork(import("@/lib/staffPersistence").then(({ scheduleStaffSync }) => {
-      scheduleStaffSync(state);
-    }));
-    return { ok: true };
-  }
-  // Same protection as writeMastersLocalRaw: a save that would leave the
-  // browser with no classes (or a foreign id generation) keeps the stored
-  // classes. The server refuses such a push anyway; this keeps the browser
-  // from displaying — and re-pushing — the empty copy in the meantime.
-  {
-    const rawPrev = readCache(STORAGE_KEY);
-    if (rawPrev) {
-      try {
-        const stored = JSON.parse(rawPrev) as Partial<MastersState>;
-        const storedIds = (stored.classes ?? []).map((c) => c.id);
-        const incomingIds = (state.classes ?? []).map((c) => c.id);
-        if (storedIds.length > 0) {
-          const verdict = guardMastersOverwrite(storedIds, incomingIds);
-          if (!verdict.allow) {
-            console.warn(`[masters] save kept stored classes — ${verdict.message}`);
-            state = {
-              ...state,
-              classes: stored.classes ?? [],
-              sections: stored.sections ?? state.sections,
-              classSubjects: stored.classSubjects ?? state.classSubjects,
-              subjects: stored.subjects ?? state.subjects,
-            };
-          }
-        }
-      } catch {
-        /* unreadable cache — proceed with the incoming state */
-      }
-    }
-  }
-  const serialized = JSON.stringify({ ...state, version: 2 });
-  const prev = readCache(STORAGE_KEY);
-  if (prev === serialized) return { ok: true, reason: "unchanged" };
-
-  try {
-    writeCacheOrInvalidate(STORAGE_KEY, serialized);
-  } catch (e) {
-    console.warn("[masters] localStorage quota exceeded — using server DB persistence", e);
-  }
-  writeMastersMirrorMeta(new Date().toISOString());
-  void trackServerWork(import("@/lib/staffPersistence").then(
-    ({ scheduleStaffSync, stripStaffFromMastersForBlob }) => {
-      scheduleClientSchoolMirrorSync({
-        masters: stripStaffFromMastersForBlob(state),
-      });
-      scheduleStaffSync(state);
-    },
-  ));
-  // Deliberately does NOT touch the desk meta. `bhb_masters_desk_db_meta_v1`
-  // holds the desk revision this client last saw, and it is sent back as
-  // `baseUpdatedAt` for optimistic locking (mastersNormalizedClient.ts).
-  // Stamping it with a local clock here made the client claim to have
-  // hydrated at a revision that never existed on the server, so every save
-  // after the first was refused 409 "stale" — masters became unsavable in
-  // production on 2026-08-10. That key is now only ever written from a
-  // server response: the push result, a hydrate, or the wipe signal.
-  // Awaited, not fire-and-forget: the caller needs the real outcome.
-  // scheduleMastersSync queues the state synchronously, so flushing straight
-  // after is safe and turns the debounced push into an awaitable one.
-  const { scheduleMastersSync } = await import("@/lib/mastersPersistence");
-  scheduleMastersSync(state);
-  window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
-
-  const { flushMastersDeskSyncPending } = await import(
-    "@/lib/mastersNormalizedClient"
-  );
-  const pushed = await flushMastersDeskSyncPending();
-  // `null` = nothing was queued (Supabase unconfigured / demo mode). The
-  // local write stands; there is no remote write to have failed.
-  if (!pushed) return { ok: true };
-  return pushed.ok ? { ok: true } : { ok: false, reason: pushed.reason };
 }
 
 const MASTERS_MIRROR_META = "bhb_masters_mirror_meta_v1";
@@ -2219,9 +2177,17 @@ export function hydrateMastersFromMirror(
   const takeRemote =
     remoteIsNewer && (!localAt || (!!remoteAt && remoteAt > localAt));
   if (!takeRemote) return false;
-  const normalized = ensureFeeSetup(
-    migrateDemoStaffToTeacherRoster(raw as MastersState),
-  );
+  let incoming = raw as MastersState;
+  // The mirror blob is written stripped of staff (stripStaffFromMastersForBlob),
+  // so its [] is "not carried here", never "no staff": keep what the staff
+  // hydrate already wrote.
+  if (staffReadFromDbEnabled()) {
+    const current = loadMasters() as unknown as Record<string, unknown>;
+    const kept = { ...incoming } as unknown as Record<string, unknown>;
+    for (const key of STAFF_OWNED_MASTERS_SLICES) kept[key] = current[key];
+    incoming = kept as unknown as MastersState;
+  }
+  const normalized = ensureFeeSetup(migrateDemoStaffToTeacherRoster(incoming));
   localStorage.setItem(
     STORAGE_KEY,
     JSON.stringify({ ...normalized, version: 2 }),

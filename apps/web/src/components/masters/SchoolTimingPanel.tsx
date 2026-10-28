@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useObjectDraft } from "@/components/masters/useObjectDraft";
+import type { MastersCommitOpts } from "@/lib/data/client/mastersElementPlan";
 import {
   MastersEmptyRow,
   MastersTableCard,
@@ -22,7 +24,7 @@ import {
   type SchoolWeekTiming,
 } from "@/lib/schoolTiming";
 
-type Commit = (s: MastersState, msg?: string) => void;
+type Commit = (s: MastersState, msg?: string, opts?: MastersCommitOpts) => void;
 
 function TimingFields({
   value,
@@ -138,9 +140,10 @@ export function SchoolTimingPanel({
     [state.schoolTiming],
   );
 
-  const [defaultDraft, setDefaultDraft] = useState(() =>
-    normalizeSchoolWeekTiming(config.default),
-  );
+  const savedDefault = useMemo(() => normalizeSchoolWeekTiming(config.default), [config]);
+  // The default-week draft and the stamp it was loaded at (useObjectDraft):
+  // saving it over a newer school timing conflicts instead of reverting it.
+  const { draft: defaultDraft, setDraft: setDefaultDraft, base: defaultBase } = useObjectDraft("schoolTiming", savedDefault);
   const [groupCode, setGroupCode] = useState(CLASS_GROUPS[0]?.code ?? "PRIMARY");
   const [groupTiming, setGroupTiming] = useState(defaultSchoolWeekTiming);
   const [classId, setClassId] = useState("");
@@ -154,10 +157,11 @@ export function SchoolTimingPanel({
     [state.classes],
   );
 
-  function saveConfig(next: SchoolTimingConfig, msg: string) {
+  function saveConfig(next: SchoolTimingConfig, msg: string, base?: string) {
     commit(
       { ...state, schoolTiming: normalizeSchoolTimingConfig(next) },
       msg,
+      base ? { objectBases: { schoolTiming: base } } : undefined,
     );
   }
 
@@ -165,6 +169,7 @@ export function SchoolTimingPanel({
     saveConfig(
       { ...config, default: normalizeSchoolWeekTiming(defaultDraft) },
       "School timing saved",
+      defaultBase,
     );
   }
 

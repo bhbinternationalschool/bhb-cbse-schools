@@ -3,6 +3,7 @@
  * Parent page can mark paid on same origin; counter can confirm manually.
  */
 
+import { hydrateOnFirstRead } from "@/lib/deskLazyHydrate";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import {
   collectPayment,
@@ -106,6 +107,8 @@ export function emptyPaymentsState(): PaymentsState {
 }
 
 export function loadPayments(): PaymentsState {
+  // Not in the idle sweep any more: the first read on a page loads it.
+  hydrateOnFirstRead("payments", () => import("@/lib/paymentsPersistence").then((m) => m.ensurePaymentsHydrated()));
   if (typeof window === "undefined") {
     const mirrored = getSchoolMirrorSync().payments as PaymentsState | null;
     if (mirrored && Array.isArray(mirrored.links)) {
@@ -283,6 +286,32 @@ function refreshExpired(state: PaymentsState): PaymentsState {
   return next;
 }
 
+/**
+ * One line per due. A due appears on a link once: the line ids in the
+ * database are `${link.id}:${dueKey}`, so a repeated key cannot be stored,
+ * and if it could it would ask the family for the same month twice. A
+ * repeat keeps ONE line with that due's balance — never the sum — and when
+ * two copies disagree, the smaller balance, so a family is never asked for
+ * more than one copy says it owes.
+ */
+export function uniqueDuesByKey(dues: FeeDueLine[]): FeeDueLine[] {
+  const byKey = new Map<string, FeeDueLine>();
+  for (const d of dues) {
+    const prev = byKey.get(d.dueKey);
+    if (!prev) {
+      byKey.set(d.dueKey, d);
+      continue;
+    }
+    if (prev.balancePaise !== d.balancePaise) {
+      console.warn(
+        `[payments] due ${d.dueKey} listed twice with different balances (${prev.balancePaise} / ${d.balancePaise}); kept the smaller`,
+      );
+    }
+    if (d.balancePaise < prev.balancePaise) byKey.set(d.dueKey, d);
+  }
+  return byKey.size === dues.length ? dues : [...byKey.values()];
+}
+
 export function duesToPaymentLines(dues: FeeDueLine[]): PaymentLinkLine[] {
   const sis = loadSis();
   return dues.map((d) => ({
@@ -378,7 +407,7 @@ export function createPaymentLink(input: {
 }):
   | { ok: true; link: PaymentLink; reused?: boolean }
   | { ok: false; error: string } {
-  const open = openFeeDues(input.dues).filter((d) => d.balancePaise > 0);
+  const open = uniqueDuesByKey(openFeeDues(input.dues)).filter((d) => d.balancePaise > 0);
   if (open.length === 0) {
     return { ok: false, error: "Select at least one open due" };
   }

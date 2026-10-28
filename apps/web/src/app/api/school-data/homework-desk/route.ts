@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { scopeAllows, readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
 } from "@/lib/apiRouteAuth.server";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -41,11 +42,20 @@ export async function GET(req: Request) {
       (["view", "create", "edit", "delete"] as const).some((a) => g.access(id, a).allowed);
     const own = <T extends { classId: string }>(rows: T[]) =>
       g.ownClassIds ? rows.filter((r) => g.ownClassIds!.has(r.classId)) : rows;
+    // Homework → Dashboard (read only) owns no slice; it reads the posts,
+    // the diary and the submissions to those posts.
+    const overview = holds("homework.overview");
     const cut = stripDeskForFeatures("homework", full, g);
+    const posts =
+      holds("homework.assign") || holds("homework.review") || overview ? own(full.posts) : [];
+    const postIds = new Set(posts.map((p) => p.id));
     bundle = {
       ...cut,
-      posts: holds("homework.assign") || holds("homework.review") ? own(full.posts) : [],
-      diary: holds("homework.diary") ? own(full.diary) : [],
+      posts,
+      diary: holds("homework.diary") || overview ? own(full.diary) : [],
+      submissions: overview
+        ? full.submissions.filter((s) => postIds.has(s.postId))
+        : cut.submissions,
     };
   }
   return NextResponse.json({
@@ -102,7 +112,9 @@ export async function POST(req: Request) {
   let teacher: HomeworkTeacherSave | undefined;
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope) {
       return NextResponse.json({ ok: false, error: "Could not work out your classes — try again" }, { status: 503 });
     }
@@ -116,6 +128,20 @@ export async function POST(req: Request) {
 
   // Function holders: merged onto the stored desk, only their functions'
   // slices, class-scoped rows only in their classes — never the body as sent.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (!gate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "homework",
+      async () => {
+        const s = await fetchHomeworkDeskFromDb();
+        return s.ok ? (s.bundle as unknown as Record<string, unknown>) : null;
+      },
+      body,
+    );
+    if (refused) return refused;
+  }
   if (gate) {
     const stored = await fetchHomeworkDeskFromDb();
     if (!stored.ok) {

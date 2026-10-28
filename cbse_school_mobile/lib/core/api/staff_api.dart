@@ -212,6 +212,7 @@ class Payslip {
       paymentModeLabel = _s(j, "paymentModeLabel"),
       paidAt = _s(j, "paidAt"),
       bonus = _d(j, "bonus"),
+      pdfUrl = _s(j, "pdfUrl"),
       earnings = _list(j, "earnings").map(PayslipLine.fromJson).toList(),
       deductions = _list(j, "deductions").map(PayslipLine.fromJson).toList();
 
@@ -239,6 +240,10 @@ class Payslip {
   final String paymentModeLabel;
   final String paidAt;
   final double bonus;
+
+  /// The same slip on the letterhead, as a PDF — empty from a server that
+  /// does not offer one yet (then the app shows no PDF button).
+  final String pdfUrl;
   final List<PayslipLine> earnings;
   final List<PayslipLine> deductions;
 }
@@ -250,6 +255,82 @@ class PayslipList {
 
   final int preparing;
   final List<Payslip> slips;
+}
+
+// ------------------------------------------------------- my attendance month
+
+/// One day of the signed-in staff member's month, as
+/// /api/v1/staff/my-attendance returns it (lib/staffMonthCalendar.ts).
+class StaffCalendarDay {
+  StaffCalendarDay.fromJson(Map<String, dynamic> j)
+    : date = _s(j, "date"),
+      kind = _s(j, "kind"),
+      label = _s(j, "label"),
+      inTime = _s(j, "inTime"),
+      outTime = _s(j, "outTime"),
+      way = _s(j, "way");
+
+  /// YYYY-MM-DD
+  final String date;
+
+  /// present | late | half_day | absent | leave | holiday | unpaid_holiday |
+  /// not_marked | exempt | future
+  final String kind;
+  final String label;
+  final String inTime;
+  final String outTime;
+
+  /// How the punch was made, in words ("GPS punch", "Office QR"…).
+  final String way;
+}
+
+/// The month's totals, counted the way payroll counts them.
+class StaffCalendarCounts {
+  StaffCalendarCounts.fromJson(Map<String, dynamic> j)
+    : present = _i(j, "present"),
+      late = _i(j, "late"),
+      halfDay = _i(j, "halfDay"),
+      absent = _i(j, "absent"),
+      notMarked = _i(j, "notMarked"),
+      leave = _i(j, "leave"),
+      holidays = _i(j, "holidays"),
+      lwpDays = _d(j, "lwpDays");
+
+  final int present;
+  final int late;
+  final int halfDay;
+  final int absent;
+  final int notMarked;
+  final int leave;
+  final int holidays;
+
+  /// Loss-of-pay days: absent + not marked + ½ per half day.
+  final double lwpDays;
+}
+
+class StaffAttendanceMonth {
+  StaffAttendanceMonth.fromJson(Map<String, dynamic> j)
+    : staffId = _s(j, "staffId"),
+      fullName = _s(j, "fullName"),
+      month = _s(j, "month"),
+      today = _s(j, "today"),
+      exempt = _b(j, "exempt"),
+      days = _list(j, "days").map(StaffCalendarDay.fromJson).toList(),
+      counts = StaffCalendarCounts.fromJson(
+        Map<String, dynamic>.from((j["counts"] as Map?) ?? const {}),
+      );
+
+  final String staffId;
+  final String fullName;
+
+  /// YYYY-MM
+  final String month;
+
+  /// The school's today (IST), YYYY-MM-DD.
+  final String today;
+  final bool exempt;
+  final List<StaffCalendarDay> days;
+  final StaffCalendarCounts counts;
 }
 
 // -------------------------------------------------------------------- exams
@@ -273,28 +354,64 @@ class ExamTermInfo {
   final int sheetCount;
 }
 
+/// One numeric part of a subject marked in parts — "Written" out of 80,
+/// "Oral" out of 20. Each is entered and validated against its own [maxMarks].
+class ExamComponentInfo {
+  ExamComponentInfo.fromJson(Map<String, dynamic> j)
+    : code = _s(j, "code"),
+      label = _s(j, "label"),
+      maxMarks = _i(j, "maxMarks"),
+      kind = _s(j, "kind");
+
+  final String code;
+  final String label;
+  final int maxMarks;
+  final String kind;
+}
+
 class ExamSubjectInfo {
   ExamSubjectInfo.fromJson(Map<String, dynamic> j)
     : id = _s(j, "id"),
       code = _s(j, "code"),
       name = _s(j, "name"),
-      maxMarks = _i(j, "maxMarks");
+      maxMarks = _i(j, "maxMarks"),
+      marksParts = _list(
+        j,
+        "marksParts",
+      ).map(ExamComponentInfo.fromJson).toList();
 
   final String id;
   final String code;
   final String name;
   final int maxMarks;
+
+  /// Numeric parts this subject is marked in. Empty = one whole mark.
+  final List<ExamComponentInfo> marksParts;
+
+  /// A subject marked in parts renders one field per part, not one /100 box.
+  bool get isSplit => marksParts.isNotEmpty;
 }
 
 class StudentMark {
   StudentMark.fromJson(Map<String, dynamic> j)
     : subjectId = _s(j, "subjectId"),
       marksObtained = (j["marksObtained"] as num?)?.toDouble(),
-      grade = _s(j, "grade");
+      grade = _s(j, "grade"),
+      parts = {
+        for (final p in _list(j, "parts"))
+          _s(p, "component"): (p["marksObtained"] as num?)?.toDouble(),
+      };
 
   final String subjectId;
   double? marksObtained;
   String grade;
+
+  /// Already-entered mark for each numeric part (component code → mark), so a
+  /// split subject pre-fills each field. A null value = not entered / absent.
+  final Map<String, double?> parts;
+
+  /// The stored mark for one numeric part, or null when none is entered.
+  double? partMark(String component) => parts[component];
 }
 
 class MarkSheetStudent {
@@ -411,6 +528,8 @@ class PtmTeacherEvent {
     : id = _s(j, "id"),
       name = _s(j, "name"),
       date = _s(j, "date"),
+      endDate = _s(j, "endDate"),
+      canAddSlots = _b(j, "canAddSlots"),
       modeLabel = _s(j, "modeLabel"),
       note = _s(j, "note"),
       bookingCount = _i(j, "bookingCount"),
@@ -419,6 +538,12 @@ class PtmTeacherEvent {
   final String id;
   final String name;
   final String date;
+
+  /// Last day of a multi-day PTM ("" or == [date] for one day).
+  final String endDate;
+
+  /// The server would accept my own new slots in this event.
+  final bool canAddSlots;
   final String modeLabel;
   final String note;
   final int bookingCount;
@@ -670,16 +795,31 @@ class StaffFeatureSet {
       fullName = _s(j, "fullName"),
       features = ((j["features"] as List?) ?? const [])
           .map((e) => e.toString())
-          .toSet();
+          .toSet(),
+      groups = ((j["groups"] as Map?) ?? const {}).map(
+        (k, v) => MapEntry("$k", "$v"),
+      ),
+      groupOrder = ((j["groupOrder"] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toList();
 
   const StaffFeatureSet.empty()
     : homeKind = "",
       fullName = "",
-      features = const {};
+      features = const {},
+      groups = const {},
+      groupOrder = const [];
 
   final String homeKind;
   final String fullName;
   final Set<String> features;
+
+  /// featureId → the heading its tile sits under ("Teaching", "Fees", …).
+  /// Empty from a server older than 13 Oct 2026 — see staff/home_groups.dart.
+  final Map<String, String> groups;
+
+  /// The headings in the order the home shows them.
+  final List<String> groupOrder;
 
   bool has(String id) => features.contains(id);
 }
@@ -693,7 +833,13 @@ class CounterDue {
       label = _s(j, "label"),
       dueOn = _s(j, "dueOn"),
       balancePaise = _i(j, "balancePaise"),
-      balanceLabel = _s(j, "balanceLabel");
+      balanceLabel = _s(j, "balanceLabel"),
+      billedPaise = _i(j, "billedPaise"),
+      discountPaise = (j["discountPaise"] as num?)?.toInt(),
+      discountLines = ((j["discountLines"] as List?) ?? const [])
+          .whereType<String>()
+          .toList(),
+      allocationRank = (j["allocationRank"] as num?)?.toInt();
 
   final String dueKey;
   final String kind;
@@ -701,6 +847,22 @@ class CounterDue {
   final String dueOn;
   final int balancePaise;
   final String balanceLabel;
+
+  /// Billed before any discount (0 when the server did not say).
+  final int billedPaise;
+
+  /// Concession + counter discount on this due, as the web counter shows it.
+  ///
+  /// null = the server could not read every discount source (or is too old
+  /// to send one). Shown as "not loaded" — never as ₹0.
+  final int? discountPaise;
+
+  /// One line per concession / counter discount, e.g. "Sibling discount · 10% · −₹150".
+  final List<String> discountLines;
+
+  /// Position in the order a "total paying now" fills dues (0 = first), from
+  /// the server's own comparator. null on an older server.
+  final int? allocationRank;
 }
 
 class FeeStudentHit {
@@ -753,13 +915,17 @@ class TenderModeInfo {
       label = _s(j, "label"),
       refLabel = _s(j, "refLabel"),
       needsRef = _b(j, "needsRef"),
-      needsInstrumentDate = _b(j, "needsInstrumentDate");
+      needsInstrumentDate = _b(j, "needsInstrumentDate"),
+      needsBank = _b(j, "needsBank");
 
   final String value;
   final String label;
   final String refLabel;
   final bool needsRef;
   final bool needsInstrumentDate;
+
+  /// Cheque / RTGS / NEFT / IMPS / bank deposit: the web counter asks for the bank.
+  final bool needsBank;
 }
 
 class FeeCounter {
@@ -934,7 +1100,13 @@ class AdmissionLeadRow {
       lastOutcome = _s(j, "lastOutcome"),
       lastChannel = _s(j, "lastChannel"),
       lastNote = _s(j, "lastNote"),
-      followUpCount = _i(j, "followUpCount");
+      followUpCount = _i(j, "followUpCount"),
+      registered = _b(j, "registered"),
+      applicationNo = _s(j, "applicationNo"),
+      registrationFeeRupees = _i(j, "registrationFeeRupees"),
+      registrationCollectedRupees = _i(j, "registrationCollectedRupees"),
+      registrationBalanceRupees = _i(j, "registrationBalanceRupees"),
+      registrationPaymentStatus = _s(j, "registrationPaymentStatus");
 
   final String id;
   final String enquiryNo;
@@ -955,6 +1127,18 @@ class AdmissionLeadRow {
   final String lastChannel;
   final String lastNote;
   final int followUpCount;
+
+  /// Registered or Verified on the web — fee set, not yet sent to SIS.
+  final bool registered;
+  final String applicationNo;
+
+  /// 0 = no fee set on the lead (shown as "fee not set", never as "paid").
+  final int registrationFeeRupees;
+  final int registrationCollectedRupees;
+  final int registrationBalanceRupees;
+
+  /// none | pending | partial | paid | waived
+  final String registrationPaymentStatus;
 }
 
 class AdmissionLeadList {
@@ -967,11 +1151,103 @@ class AdmissionLeadList {
         Map<String, dynamic>.from((j["counts"] as Map?) ?? {}),
         "today",
       ),
+      registered = _i(
+        Map<String, dynamic>.from((j["counts"] as Map?) ?? {}),
+        "registered",
+      ),
       leads = _list(j, "leads").map(AdmissionLeadRow.fromJson).toList();
 
   final int overdue;
   final int dueToday;
+  final int registered;
   final List<AdmissionLeadRow> leads;
+}
+
+/// What the walk-in and registration forms pick from.
+class AdmissionFormOptions {
+  AdmissionFormOptions.fromJson(Map<String, dynamic> j)
+    : classes = _list(
+        j,
+        "classes",
+      ).map((c) => (id: _s(c, "id"), name: _s(c, "name"))).toList(),
+      feeHeads = _list(
+        j,
+        "registrationFeeHeads",
+      ).map((c) => (id: _s(c, "id"), name: _s(c, "name"))).toList(),
+      tenderModes = _list(j, "tenderModes")
+          .map(
+            (c) => (
+              id: _s(c, "id"),
+              label: _s(c, "label"),
+              needsRef: _b(c, "needsRef"),
+              refLabel: _s(c, "refLabel"),
+            ),
+          )
+          .toList();
+
+  final List<({String id, String name})> classes;
+  final List<({String id, String name})> feeHeads;
+  final List<({String id, String label, bool needsRef, String refLabel})>
+  tenderModes;
+}
+
+/// The message icon's composer: nothing is sent until Send is tapped.
+class LeadComposer {
+  LeadComposer.fromJson(Map<String, dynamic> j)
+    : leadId = _s(j, "leadId"),
+      mobile = _s(j, "mobile"),
+      familyKey = _s(j, "familyKey"),
+      draft = _s(j, "draft"),
+      inWindow = _b(j, "inWindow"),
+      templateOk = ((j["template"] as Map?) ?? const {})["ok"] == true,
+      templateBody = "${((j["template"] as Map?) ?? const {})["body"] ?? ""}",
+      templateReason =
+          "${((j["template"] as Map?) ?? const {})["reason"] ?? ""}",
+      variables = ((j["variables"] as Map?) ?? const {}).map(
+        (k, v) => MapEntry("$k", "$v"),
+      );
+
+  final String leadId;
+  final String mobile;
+  final String familyKey;
+  final String draft;
+
+  /// The family wrote to the school in the last 24 hours, so WhatsApp will
+  /// deliver free text. Outside it only the approved template goes.
+  final bool inWindow;
+  final bool templateOk;
+
+  /// The approved template with this family's names — the exact words.
+  final String templateBody;
+  final String templateReason;
+  final Map<String, String> variables;
+}
+
+class AdmissionRegistrationResult {
+  AdmissionRegistrationResult.fromJson(Map<String, dynamic> j)
+    : leadId = _s(j, "leadId"),
+      enquiryNo = _s(j, "enquiryNo"),
+      applicationNo = _s(j, "applicationNo"),
+      feeRupees = _d(j, "feeRupees"),
+      balanceRupees = _d(j, "balanceRupees"),
+      paymentCode = _s(
+        Map<String, dynamic>.from((j["payment"] as Map?) ?? {}),
+        "code",
+      ),
+      paidRupees = _d(
+        Map<String, dynamic>.from((j["payment"] as Map?) ?? {}),
+        "amountRupees",
+      );
+
+  final String leadId;
+  final String enquiryNo;
+  final String applicationNo;
+  final double feeRupees;
+  final double balanceRupees;
+
+  /// RF-… code of the money taken now; "" when nothing was received.
+  final String paymentCode;
+  final double paidRupees;
 }
 
 // ------------------------------------------------------------------ survey
@@ -1007,6 +1283,112 @@ class SurveySetup {
   final List<({String id, String name})> classes;
 }
 
+// ---------------------------------------------------------------- survey day
+
+/// A field surveyor's day (the website's /survey-day, in the app). The
+/// server answers every step with the whole picture.
+class SurveyDayStatus {
+  SurveyDayStatus.fromJson(Map<String, dynamic> j)
+    : memberName = _s(Map<String, dynamic>.from((j["member"] as Map?) ?? const {}), "name"),
+      startsAtSchool =
+          _s(Map<String, dynamic>.from((j["member"] as Map?) ?? const {}), "startMode") == "school",
+      day = j["day"] is Map
+          ? SurveyDayInfo.fromJson(Map<String, dynamic>.from(j["day"] as Map))
+          : null,
+      captures = _list(j, "captures")
+          .map((c) => (enquiryNo: _s(c, "enquiryNo"), childName: _s(c, "childName"), at: _s(c, "at")))
+          .toList(),
+      beats = _list(j, "beats")
+          .map((b) => (id: _s(b, "id"), name: _s(b, "name"), area: _s(b, "area")))
+          .toList(),
+      classes = _list(j, "classes").map((c) => (id: _s(c, "id"), name: _s(c, "name"))).toList(),
+      enquiryNo = _s(j, "enquiryNo"),
+      duplicate = _b(j, "duplicate"),
+      canManage = _b(j, "canManage");
+
+  final String memberName;
+
+  /// The survey team leader: may add / remove staff and beats from the app.
+  final bool canManage;
+
+  /// Starts at school: START needs the gate code and a fix on campus.
+  final bool startsAtSchool;
+
+  /// Null until today's survey is started.
+  final SurveyDayInfo? day;
+  final List<({String enquiryNo, String childName, String at})> captures;
+  final List<({String id, String name, String area})> beats;
+  final List<({String id, String name})> classes;
+
+  /// Set on a capture's reply.
+  final String enquiryNo;
+  final bool duplicate;
+}
+
+/// The survey team as its leader sees it (POST /api/public/survey-day
+/// "team" / "manage"): members, every beat (retired ones too), and the
+/// active staff who are not on the team yet.
+class SurveyTeamInfo {
+  SurveyTeamInfo.fromJson(Map<String, dynamic> j)
+    : members = _list(j, "members")
+          .map(
+            (m) => (
+              id: _s(m, "id"),
+              name: _s(m, "name"),
+              kind: _s(m, "kind"),
+              role: _s(m, "role"),
+              empCode: _s(m, "empCode"),
+              revision: _s(m, "revision"),
+              isMe: _b(m, "isMe"),
+            ),
+          )
+          .toList(),
+      beats = _list(j, "beats")
+          .map(
+            (b) => (
+              id: _s(b, "id"),
+              code: _s(b, "code"),
+              name: _s(b, "name"),
+              area: _s(b, "area"),
+              targetHouseholds: _i(b, "targetHouseholds"),
+              isActive: _b(b, "isActive"),
+              revision: _s(b, "revision"),
+            ),
+          )
+          .toList(),
+      staff = _list(j, "staff")
+          .map((s) => (id: _s(s, "id"), name: _s(s, "name"), empCode: _s(s, "empCode")))
+          .toList();
+
+  final List<
+    ({String id, String name, String kind, String role, String empCode, String revision, bool isMe})
+  >
+  members;
+  final List<
+    ({String id, String code, String name, String area, int targetHouseholds, bool isActive, String revision})
+  >
+  beats;
+  final List<({String id, String name, String empCode})> staff;
+}
+
+class SurveyDayInfo {
+  SurveyDayInfo.fromJson(Map<String, dynamic> j)
+    : status = _s(j, "status"),
+      beatId = _s(j, "beatId"),
+      startedAt = _s(j, "startedAt"),
+      endedAt = _s(j, "endedAt"),
+      breaks = _i(j, "breaks"),
+      workedMs = _i(j, "workedMs");
+
+  /// "active" | "on_break" | "ended".
+  final String status;
+  final String beatId;
+  final String startedAt;
+  final String endedAt;
+  final int breaks;
+  final int workedMs;
+}
+
 // -------------------------------------------------------------------- gate
 
 class GateVisitor {
@@ -1021,6 +1403,9 @@ class GateVisitor {
       linkedTo = _s(j, "linkedTo"),
       source = _s(j, "source"),
       idProofNote = _s(j, "idProofNote"),
+      peopleCount = _i(j, "peopleCount") < 1 ? 1 : _i(j, "peopleCount"),
+      vehicleNo = _s(j, "vehicleNo"),
+      address = _s(j, "address"),
       inTime = _s(j, "inTime"),
       outTime = _s(j, "outTime"),
       onCampus = _b(j, "onCampus"),
@@ -1036,6 +1421,9 @@ class GateVisitor {
   final String linkedTo;
   final String source;
   final String idProofNote;
+  final int peopleCount;
+  final String vehicleNo;
+  final String address;
   final String inTime;
   final String outTime;
   final bool onCampus;
@@ -1211,6 +1599,12 @@ extension StaffApi on ApiClient {
   Future<PayslipList> fetchPayslips() async =>
       PayslipList.fromJson(await _getData("/api/v1/staff/payslips"));
 
+  /// My own attendance for a month (YYYY-MM), day by day.
+  Future<StaffAttendanceMonth> fetchMyAttendance(String month) async =>
+      StaffAttendanceMonth.fromJson(
+        await _getData("/api/v1/staff/my-attendance?month=$month"),
+      );
+
   Future<List<ExamTermInfo>> fetchExamTerms() async {
     final data = await _getData("/api/v1/staff/exams/terms");
     return _list(data, "terms").map(ExamTermInfo.fromJson).toList();
@@ -1227,12 +1621,16 @@ extension StaffApi on ApiClient {
   );
 
   /// Returns the saved marks with their computed grades.
+  ///
+  /// Each entry's [component] is "" for a whole-subject mark, or a numeric
+  /// marks part's code (e.g. "WRIT", "ORAL") for a subject marked in parts.
+  /// The server validates each part against its own maximum.
   Future<List<StudentMark>> saveMarks({
     required String termId,
     required String classId,
     required String sectionId,
     required String subjectId,
-    required List<({String studentId, double? marks})> marks,
+    required List<({String studentId, String component, double? marks})> marks,
   }) async {
     final data = await _postData("/api/v1/staff/exams/marks", {
       "termId": termId,
@@ -1241,7 +1639,11 @@ extension StaffApi on ApiClient {
       "subjectId": subjectId,
       "marks": [
         for (final m in marks)
-          {"studentId": m.studentId, "marksObtained": m.marks},
+          {
+            "studentId": m.studentId,
+            "marksObtained": m.marks,
+            if (m.component.isNotEmpty) "component": m.component,
+          },
       ],
     });
     return _list(
@@ -1397,6 +1799,9 @@ extension StaffApi on ApiClient {
   Future<StaffApprovals> fetchApprovals() async =>
       StaffApprovals.fromJson(await _getData("/api/v1/staff/approvals"));
 
+  Future<Cached<StaffApprovals>?> cachedApprovals() =>
+      peekCached("/api/v1/staff/approvals", StaffApprovals.fromJson);
+
   Future<StaffRoster> fetchStaffRoster() async =>
       StaffRoster.fromJson(await _getData("/api/v1/staff/roster"));
 
@@ -1414,6 +1819,170 @@ extension StaffApi on ApiClient {
 
   Future<StaffFeatureSet> fetchStaffFeatures() async =>
       StaffFeatureSet.fromJson(await _getData("/api/v1/staff/features"));
+
+  Future<Cached<StaffFeatureSet>?> cachedStaffFeatures() =>
+      peekCached("/api/v1/staff/features", StaffFeatureSet.fromJson);
+
+  // ---- my profile (self service) ----------------------------------------
+
+  /// The signed-in staff member's own record: masked where it must be, the
+  /// fields they may change, and their open request to the office.
+  Future<StaffProfile> fetchMyProfile() async =>
+      StaffProfile.fromJson(await _getData("/api/v1/staff/me/profile"), erpUrl);
+
+  /// Send ONLY the values the person changed — never a masked one back.
+  /// Contact / personal fields save at once; identity, bank and statutory
+  /// ones become a request the office approves.
+  Future<StaffProfileSaveResult> updateMyProfile(
+    Map<String, String> fields,
+  ) async {
+    final res = await _http.patch(
+      _uri("/api/v1/staff/me/profile"),
+      headers: await _authHeaders(),
+      body: jsonEncode({"fields": fields}),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    return StaffProfileSaveResult(
+      saved: ((data["saved"] as List?) ?? const []).map((e) => "$e").toList(),
+      sentForApproval: ((data["sentForApproval"] as List?) ?? const [])
+          .map((e) => "$e")
+          .toList(),
+      profile: StaffProfile.fromJson(
+        Map<String, dynamic>.from((data["profile"] as Map?) ?? const {}),
+        erpUrl,
+      ),
+    );
+  }
+
+  /// Withdraw the open request to the office.
+  Future<StaffProfile> withdrawMyProfileRequest() async {
+    final res = await _http.delete(
+      _uri("/api/v1/staff/me/profile"),
+      headers: await _authHeaders(),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    return StaffProfile.fromJson(
+      Map<String, dynamic>.from((data["profile"] as Map?) ?? const {}),
+      erpUrl,
+    );
+  }
+
+  /// Upload a new profile photo (jpg / png / webp, at most 5 MB). It shows
+  /// at once and waits in the office's document queue. Returns the photo's
+  /// full URL.
+  Future<String> uploadMyPhoto(File file) async {
+    final name = file.path.split("/").last.toLowerCase();
+    final mime = name.endsWith(".png")
+        ? "image/png"
+        : name.endsWith(".webp")
+        ? "image/webp"
+        : "image/jpeg";
+    final req = http.MultipartRequest("POST", _uri("/api/v1/staff/me/photo"));
+    final headers = await _authHeaders();
+    headers.remove("Content-Type");
+    req.headers.addAll(headers);
+    req.files.add(
+      await http.MultipartFile.fromPath(
+        "file",
+        file.path,
+        filename: "photo.${mime.split("/").last.replaceAll("jpeg", "jpg")}",
+        contentType: MediaType.parse(mime),
+      ),
+    );
+    final res = await http.Response.fromStream(await _uploadHttp.send(req));
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    return erpUrl("${data["photoUrl"] ?? ""}");
+  }
+
+  /// Put [png] on the signed-in member of staff's record as their signature
+  /// (POST /api/v1/staff/me/signature — own record only; PNG / JPG / WebP,
+  /// at most 1 MB). Replaces any earlier one. Returns its full URL.
+  Future<String> uploadMySignature(Uint8List png) async {
+    final req = http.MultipartRequest("POST", _uri("/api/v1/staff/me/signature"));
+    final headers = await _authHeaders();
+    headers.remove("Content-Type");
+    req.headers.addAll(headers);
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        "file",
+        png,
+        filename: "signature.png",
+        contentType: MediaType.parse("image/png"),
+      ),
+    );
+    final res = await http.Response.fromStream(await _uploadHttp.send(req));
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    return erpUrl("${data["signatureUrl"] ?? ""}");
+  }
+
+  /// One homework file (a scanned page, a photo or a PDF) for a section the
+  /// teacher posts to — POST /api/v1/staff/homework/attachment. Stored in the
+  /// school's private files; the returned ref goes on the post.
+  Future<UploadedHomeworkFile> uploadHomeworkAttachment({
+    required String classId,
+    required String sectionId,
+    required Uint8List bytes,
+    required String fileName,
+    required String mime,
+    required String label,
+  }) async {
+    final req = http.MultipartRequest(
+      "POST",
+      _uri("/api/v1/staff/homework/attachment"),
+    );
+    final headers = await _authHeaders();
+    headers.remove("Content-Type");
+    req.headers.addAll(headers);
+    req.fields["classId"] = classId;
+    req.fields["sectionId"] = sectionId;
+    req.fields["label"] = label;
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        "file",
+        bytes,
+        filename: fileName,
+        contentType: MediaType.parse(mime),
+      ),
+    );
+    final res = await http.Response.fromStream(await _uploadHttp.send(req));
+    if (res.statusCode != 200) _throwFrom(res);
+    final data =
+        ((jsonDecode(res.body) as Map<String, dynamic>)["data"]
+            as Map<String, dynamic>?) ??
+        const {};
+    final a = (data["attachment"] as Map<String, dynamic>?) ?? const {};
+    return UploadedHomeworkFile(
+      id: _s(a, "id"),
+      label: _s(a, "label"),
+      kind: _s(a, "kind"),
+      ref: _s(a, "url"),
+    );
+  }
+
+  /// Take the signature off the signed-in member of staff's record.
+  Future<void> removeMySignature() async {
+    final res = await _http.delete(
+      _uri("/api/v1/staff/me/signature"),
+      headers: await _authHeaders(),
+    );
+    if (res.statusCode != 200) _throwFrom(res);
+  }
 
   Future<List<FeeStudentHit>> searchFeeStudents(String q) async {
     final data = await _getData(
@@ -1434,8 +2003,23 @@ extension StaffApi on ApiClient {
     required String studentId,
     required String clientRef,
     required List<({String studentId, String dueKey, int paise})> lines,
-    required List<({String mode, int paise, String ref})> tenders,
+    required List<
+      ({
+        String mode,
+        int paise,
+        String ref,
+        String instrumentDate,
+        String bankName,
+      })
+    >
+    tenders,
     String note = "",
+
+    /// "Total paying now" in paise, when the amounts in [lines] are the split
+    /// of one total. The server re-derives the split from its own dues and
+    /// refuses a mismatch or anything above what is open.
+    int? payingNowPaise,
+
     /// The day the money was handed over, YYYY-MM-DD. Empty means today.
     ///
     /// Whether a past date is accepted is the school's Masters setting and
@@ -1447,6 +2031,7 @@ extension StaffApi on ApiClient {
       "clientRef": clientRef,
       "note": note,
       if (collectionDate.isNotEmpty) "collectionDate": collectionDate,
+      "payingNowPaise": ?payingNowPaise,
       "lines": [
         for (final l in lines)
           {
@@ -1457,7 +2042,13 @@ extension StaffApi on ApiClient {
       ],
       "tenders": [
         for (final t in tenders)
-          {"mode": t.mode, "amountPaise": t.paise, "ref": t.ref},
+          {
+            "mode": t.mode,
+            "amountPaise": t.paise,
+            "ref": t.ref,
+            if (t.instrumentDate.isNotEmpty) "instrumentDate": t.instrumentDate,
+            if (t.bankName.isNotEmpty) "bankName": t.bankName,
+          },
       ],
     }),
   );
@@ -1503,6 +2094,78 @@ extension StaffApi on ApiClient {
     ),
   );
 
+  /// "Add walk-in lead" — the web's walk-in enquiry (createEnquiry).
+  Future<({String leadId, String enquiryNo, bool linkedExisting})>
+  createWalkInLead({
+    required String childName,
+    required String classSoughtId,
+    required String guardianName,
+    required String mobile,
+    String note = "",
+  }) async {
+    final d = await _postData("/api/v1/staff/admissions/leads", {
+      "childName": childName,
+      "classSoughtId": classSoughtId,
+      "guardianName": guardianName,
+      "mobile": mobile,
+      "note": note,
+    });
+    return (
+      leadId: _s(d, "leadId"),
+      enquiryNo: _s(d, "enquiryNo"),
+      linkedExisting: _b(d, "linkedExisting"),
+    );
+  }
+
+  Future<AdmissionFormOptions> fetchAdmissionFormOptions() async =>
+      AdmissionFormOptions.fromJson(
+        await _getData("/api/v1/staff/admissions/options"),
+      );
+
+  /// Register a lead ([leadId]) or a new child, with the registration fee
+  /// and — optionally — money received now. The server runs the web's
+  /// Registration desk functions; the RF- code comes back.
+  Future<AdmissionRegistrationResult> registerAdmission({
+    String leadId = "",
+    String childName = "",
+    String classSoughtId = "",
+    String guardianName = "",
+    String motherName = "",
+    String mobile = "",
+    required String feeHeadId,
+    required int feeAmountRupees,
+    int collectRupees = 0,
+    String collectMode = "",
+    String collectRef = "",
+  }) async => AdmissionRegistrationResult.fromJson(
+    await _postData("/api/v1/staff/admissions/register", {
+      if (leadId.isNotEmpty) "leadId": leadId,
+      if (leadId.isEmpty) ...{
+        "childName": childName,
+        "classSoughtId": classSoughtId,
+        "guardianName": guardianName,
+        "mobile": mobile,
+      },
+      if (motherName.isNotEmpty) "motherName": motherName,
+      "feeHeadId": feeHeadId,
+      "feeAmountRupees": feeAmountRupees,
+      if (collectRupees > 0)
+        "collect": {
+          "amountRupees": collectRupees,
+          "mode": collectMode,
+          "ref": collectRef,
+        },
+    }),
+  );
+
+  Future<LeadComposer> fetchLeadComposer(
+    String leadId,
+  ) async => LeadComposer.fromJson(
+    await _getData(
+      "/api/v1/staff/admissions/compose?leadId=${Uri.encodeQueryComponent(leadId)}",
+    ),
+  );
+
   Future<void> logLeadFollowup({
     required String leadId,
     required String channel,
@@ -1517,6 +2180,58 @@ extension StaffApi on ApiClient {
       "note": note,
       "nextFollowUpAt": nextFollowUpAt,
     });
+  }
+
+  /// One survey-day step: "status", "pair", "start", "break", "resume",
+  /// "end" or "capture". Signed by this phone's punch key over
+  /// `survey|action|extra|ts` (lib/surveyDay surveyMessage); every step but
+  /// status/pair carries the live [geo]. The surveyor is the key, not the
+  /// login — the same route the website's /survey-day uses.
+  Future<SurveyDayStatus> surveyDayStep({
+    required String action,
+    required Map<String, String> deviceJwk,
+    required String signature,
+    required int ts,
+    String deviceLabel = "BHB staff app",
+    Map<String, dynamic>? geo,
+    Map<String, dynamic> payload = const {},
+  }) async {
+    final data = await _postData("/api/public/survey-day", {
+      ...payload,
+      "action": action,
+      "geo": ?geo,
+      "device": {
+        "jwk": deviceJwk,
+        "signature": signature,
+        "ts": ts,
+        "label": deviceLabel,
+      },
+    });
+    return SurveyDayStatus.fromJson(data);
+  }
+
+  /// The team leader's "team" (read) or "manage" (one change, [change]) call
+  /// — same signed route as [surveyDayStep]; the server checks that this
+  /// phone belongs to the team's leader.
+  Future<SurveyTeamInfo> surveyTeamStep({
+    required String action,
+    required Map<String, String> deviceJwk,
+    required String signature,
+    required int ts,
+    Map<String, dynamic>? change,
+    String deviceLabel = "BHB staff app",
+  }) async {
+    final data = await _postData("/api/public/survey-day", {
+      "action": action,
+      "change": ?change,
+      "device": {
+        "jwk": deviceJwk,
+        "signature": signature,
+        "ts": ts,
+        "label": deviceLabel,
+      },
+    });
+    return SurveyTeamInfo.fromJson(data);
   }
 
   Future<SurveySetup> fetchSurveySetup() async =>
@@ -1536,8 +2251,17 @@ extension StaffApi on ApiClient {
     String address = "",
     String previousSchool = "",
     String note = "",
+    /// The family's home: the phone's location ("gps") or a map pin ("map").
+    ({double lat, double lng, double accuracyM, String source})? location,
   }) async {
     final data = await _postData("/api/v1/staff/survey/capture", {
+      if (location != null)
+        "location": {
+          "lat": location.lat,
+          "lng": location.lng,
+          "accuracyM": location.accuracyM,
+          "source": location.source,
+        },
       "beatId": beatId,
       "childName": childName,
       "guardianName": guardianName,
@@ -1570,7 +2294,8 @@ extension StaffApi on ApiClient {
       );
 
   /// Returns (visitor, alreadyIn). `alreadyIn` means this mobile was already
-  /// on campus and the OPEN visit came back — not a second check-in.
+  /// on campus (or this sheet's [clientId] already checked them in) and the
+  /// OPEN visit came back — not a second check-in. [mobile] may be "".
   Future<(GateVisitor, bool)> gateCheckIn({
     required String visitorName,
     required String mobile,
@@ -1578,6 +2303,10 @@ extension StaffApi on ApiClient {
     String personToMeet = "",
     String idProofNote = "",
     String linkedTo = "",
+    int peopleCount = 1,
+    String vehicleNo = "",
+    String address = "",
+    String clientId = "",
   }) async {
     final data = await _postData("/api/v1/staff/visitors/checkin", {
       "visitorName": visitorName,
@@ -1586,11 +2315,31 @@ extension StaffApi on ApiClient {
       "personToMeet": personToMeet,
       "idProofNote": idProofNote,
       "linkedTo": linkedTo,
+      "peopleCount": peopleCount,
+      "vehicleNo": vehicleNo,
+      "address": address,
+      if (clientId.isNotEmpty) "clientId": clientId,
     });
     return (
       GateVisitor.fromJson(data["visitor"] as Map<String, dynamic>),
       _b(data, "alreadyIn"),
     );
+  }
+
+  /// Read a photo at the gate — [kind] is "visitor_id" or "vehicle_plate".
+  /// Returns the server's reading (a draft; nothing is saved, and the photo
+  /// is not kept). An Aadhaar number only ever comes back masked.
+  Future<Map<String, dynamic>> scanAtGate({
+    required String kind,
+    required String imageBase64,
+    String mimeType = "image/jpeg",
+  }) async {
+    final data = await _postData("/api/v1/staff/visitors/scan", {
+      "kind": kind,
+      "imageBase64": imageBase64,
+      "mimeType": mimeType,
+    });
+    return Map<String, dynamic>.from((data["reading"] as Map?) ?? const {});
   }
 
   /// Returns (visitor, alreadyOut) — an already-closed visit keeps its
@@ -1616,11 +2365,170 @@ extension StaffApi on ApiClient {
   /// A file behind the ERP's authenticated proxy (student documents),
   /// fetched with the session cookie — the phone's browser has none.
   Future<(Uint8List, String)> fetchFileBytes(String path) async {
-    final res = await http.get(
+    final res = await _http.get(
       path.startsWith("http") ? Uri.parse(path) : _uri(path),
       headers: await _authHeaders(),
     );
     if (res.statusCode != 200) _throwFrom(res);
     return (res.bodyBytes, res.headers["content-type"] ?? "");
   }
+}
+
+/// A homework file already in the school's storage, not yet on a post.
+class UploadedHomeworkFile {
+  const UploadedHomeworkFile({
+    required this.id,
+    required this.label,
+    required this.kind,
+    required this.ref,
+  });
+
+  final String id;
+  final String label;
+  final String kind;
+
+  /// The stored reference (`/api/file/homework/…`) the post route checks.
+  final String ref;
+}
+
+// --------------------------------------------------------------- my profile
+
+/// One field the staff member may change (mirror of the ERP's
+/// STAFF_PROFILE_FIELDS, lib/staffSelfProfile.ts).
+class StaffProfileField {
+  StaffProfileField.fromJson(Map<String, dynamic> j)
+    : key = _s(j, "key"),
+      label = _s(j, "label"),
+      hindi = _s(j, "hindi"),
+      kind = _s(j, "kind"),
+      group = _s(j, "group"),
+      approval = _b(j, "approval"),
+      masked = _b(j, "masked"),
+      options = ((j["options"] as List?) ?? const []).map((e) => "$e").toList();
+
+  const StaffProfileField({
+    required this.key,
+    required this.label,
+    this.hindi = "",
+    this.kind = "text",
+    this.group = "Contact",
+    this.approval = false,
+    this.masked = false,
+    this.options = const [],
+  });
+
+  final String key;
+  final String label;
+  final String hindi;
+
+  /// text | mobile | email | pincode | date | number | aadhaar | pan | ifsc
+  /// | account | select
+  final String kind;
+
+  /// Contact | Personal | Qualification | Identity | Bank | Statutory
+  final String group;
+
+  /// true = the office approves the change before it counts.
+  final bool approval;
+
+  /// Shown as ••••1234; never pre-filled, never sent back.
+  final bool masked;
+  final List<String> options;
+}
+
+/// A change request as the staff member sees it (masked fields masked).
+class StaffProfileRequest {
+  StaffProfileRequest.fromJson(Map<String, dynamic> j)
+    : id = _s(j, "id"),
+      status = _s(j, "status"),
+      note = _s(j, "note"),
+      createdAt = _s(j, "createdAt"),
+      decidedAt = _s(j, "decidedAt"),
+      fields = ((j["fields"] as Map?) ?? const {}).map((k, v) {
+        final m = (v as Map?) ?? const {};
+        return MapEntry("$k", ("${m["from"] ?? ""}", "${m["to"] ?? ""}"));
+      });
+
+  final String id;
+
+  /// pending | approved | rejected
+  final String status;
+  final String note;
+  final String createdAt;
+  final String decidedAt;
+
+  /// key → (from, to)
+  final Map<String, (String, String)> fields;
+}
+
+class StaffProfile {
+  StaffProfile.fromJson(Map<String, dynamic> j, String Function(String) url)
+    : id = _s(_m(j, "staff"), "id"),
+      empCode = _s(_m(j, "staff"), "empCode"),
+      fullName = _s(_m(j, "staff"), "fullName"),
+      photoUrl = url(_s(_m(j, "staff"), "photoUrl")),
+      photoStatus = _s(_m(j, "staff"), "photoStatus"),
+      photoNote = _s(_m(j, "staff"), "photoNote"),
+      signatureUrl = url(_s(_m(j, "staff"), "signatureUrl")),
+      designation = _s(_m(j, "staff"), "designation"),
+      department = _s(_m(j, "staff"), "department"),
+      joiningDate = _s(_m(j, "staff"), "joiningDate"),
+      category = _s(_m(j, "staff"), "category"),
+      status = _s(_m(j, "staff"), "status"),
+      values = _m(j, "values").map((k, v) => MapEntry(k, "${v ?? ""}")),
+      fields = _list(j, "fields").map(StaffProfileField.fromJson).toList(),
+      pendingRequest = j["pendingRequest"] is Map
+          ? StaffProfileRequest.fromJson(
+              Map<String, dynamic>.from(j["pendingRequest"] as Map),
+            )
+          : null,
+      lastDecision = j["lastDecision"] is Map
+          ? StaffProfileRequest.fromJson(
+              Map<String, dynamic>.from(j["lastDecision"] as Map),
+            )
+          : null,
+      requestsUnknown = _b(j, "requestsUnknown");
+
+  static Map<String, dynamic> _m(Map<String, dynamic> j, String k) =>
+      j[k] is Map ? Map<String, dynamic>.from(j[k] as Map) : const {};
+
+  final String id;
+  final String empCode;
+  final String fullName;
+
+  /// Full URL, or "" when there is no photo.
+  final String photoUrl;
+
+  /// pending | verified | rejected | ""
+  final String photoStatus;
+  final String photoNote;
+
+  /// Full URL of their signature (a trimmed, transparent PNG), or "".
+  final String signatureUrl;
+  final String designation;
+  final String department;
+  final String joiningDate;
+  final String category;
+  final String status;
+
+  /// key → current value (Aadhaar / bank account already masked).
+  final Map<String, String> values;
+  final List<StaffProfileField> fields;
+  final StaffProfileRequest? pendingRequest;
+  final StaffProfileRequest? lastDecision;
+
+  /// The office's request list could not be read — the banner may be stale.
+  final bool requestsUnknown;
+}
+
+class StaffProfileSaveResult {
+  const StaffProfileSaveResult({
+    required this.saved,
+    required this.sentForApproval,
+    required this.profile,
+  });
+
+  final List<String> saved;
+  final List<String> sentForApproval;
+  final StaffProfile profile;
 }

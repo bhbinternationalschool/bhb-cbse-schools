@@ -4,6 +4,8 @@
  * Demo store: localStorage `bhb_admissions_v1`.
  */
 
+import { laterSeriesNumber } from "@/lib/numberSeries";
+import { hydrateOnFirstRead } from "@/lib/deskLazyHydrate";
 import { recordDeskDeletion } from "@/lib/deskNamedDeletes";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import {
@@ -1368,6 +1370,8 @@ function refreshLeadRegistrationPaymentStatus(
 let memoryAdmissionsState: AdmissionsState | null = null;
 
 export function loadAdmissions(): AdmissionsState {
+  // Not in the idle sweep any more: the first read on a page loads it.
+  hydrateOnFirstRead("admissions", () => import("@/lib/admissionsPersistence").then((m) => m.ensureAdmissionsHydrated()));
   if (typeof window === "undefined") {
     if (serverAdmissionsCache) return serverAdmissionsCache;
     const mirrored = getSchoolMirrorSync().admissions as
@@ -2553,6 +2557,12 @@ export function enrollLead(
   leadId: string,
   by: string,
   masters?: MastersState,
+  /**
+   * Numbers the SERVER issued for this enrolment (data-layer 2.2e:
+   * issueSeriesNumber → POST …/number-series/next). The later of it and this
+   * copy's suggestion is used — never a number the records already hold.
+   */
+  issued?: { srn?: string },
 ): EnrollResult {
   const lead = state.leads.find((l) => l.id === leadId);
   if (!lead) return { ok: false, reason: "Lead not found" };
@@ -2585,7 +2595,8 @@ export function enrollLead(
   if (sis.students.some((s) => s.admissionNo === admissionNo)) {
     return { ok: false, reason: `Admission no. ${admissionNo} already exists` };
   }
-  const srn = suggestSrn(sis.students);
+  const localSrn = suggestSrn(sis.students);
+  const srn = issued?.srn ? laterSeriesNumber(issued.srn, localSrn) : localSrn;
   if (sis.students.some((s) => (s.srn || "").toUpperCase() === srn.toUpperCase())) {
     return { ok: false, reason: `SRN ${srn} already exists` };
   }

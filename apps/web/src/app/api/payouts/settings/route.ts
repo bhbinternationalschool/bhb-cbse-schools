@@ -11,7 +11,7 @@
 import { NextResponse } from "next/server";
 import { requireStaffApi } from "@/lib/apiRouteAuth.server";
 import { readApprovalRule } from "@/lib/cashgram";
-import { setPayoutsEnabled, setRefundApproval } from "@/lib/payouts.server";
+import { setPaymentApproval, setPayoutsEnabled, setRefundApproval } from "@/lib/payouts.server";
 import { isSuperAdminSession } from "@/lib/superAdmin";
 
 export const runtime = "nodejs";
@@ -22,11 +22,30 @@ export async function POST(req: Request) {
   if (auth.viaMirrorSecret || !isSuperAdminSession(auth.ctx.session)) {
     return NextResponse.json({ ok: false, error: "Only the owner can change Payouts settings." }, { status: 403 });
   }
-  let body: { enabled?: unknown; refundApproval?: unknown; refundApprovalAbovePaise?: unknown };
+  let body: {
+    enabled?: unknown;
+    refundApproval?: unknown;
+    refundApprovalAbovePaise?: unknown;
+    paymentApproval?: unknown;
+    paymentApprovalAbovePaise?: unknown;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
+  }
+  // Vendor bills and vouchers paid from the wallet: the same three choices.
+  if (body.paymentApproval !== undefined) {
+    const raw = String(body.paymentApproval);
+    if (!["owner", "above", "none"].includes(raw)) {
+      return NextResponse.json({ ok: false, error: "paymentApproval must be owner, above or none" }, { status: 400 });
+    }
+    const r = await setPaymentApproval(
+      readApprovalRule(raw),
+      Number(body.paymentApprovalAbovePaise ?? 0),
+      auth.ctx.session.fullName || auth.ctx.session.email || "owner",
+    );
+    return NextResponse.json(r, { status: r.ok ? 200 : 400 });
   }
   if (body.refundApproval !== undefined) {
     const raw = String(body.refundApproval);

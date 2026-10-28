@@ -4,7 +4,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
 import { findRegister, loadAttendance } from "@/lib/attendance";
 import { loadSisForStaff, studentsInSession } from "@/lib/sis";
-import { assertSectionScope } from "@/lib/api/v1/staffScope";
+import { assertAttendanceScope } from "@/lib/api/v1/attendanceScope.server";
 
 export const runtime = "nodejs";
 
@@ -34,7 +34,7 @@ export async function GET(request: Request) {
     }
 
     await ensureSchoolMirrorHydrated();
-    const scope = await assertSectionScope(ctx, classId, sectionId);
+    const { scope } = await assertAttendanceScope(ctx, classId, sectionId, date);
     await ensureAttendanceHydratedServer();
 
     // The working year, not the cookie's: a session minted before

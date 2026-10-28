@@ -2,6 +2,7 @@
  * Admissions CRM remote sync — jsonb blob on admissions_state + normalized admission_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import {
   admissionsStateIsEmpty,
   defaultAdmissionsState,
@@ -112,6 +113,8 @@ async function pushBlobState(
 }
 
 export function scheduleAdmissionsSync(state: AdmissionsState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureAdmissionsHydrated())) return;
   if (!admissionsRemoteEnabled()) return;
   const normalized = normalizeAdmissionsState(state);
 

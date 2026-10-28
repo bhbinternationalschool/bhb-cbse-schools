@@ -1,5 +1,6 @@
 "use client";
 
+import { issueSeriesNumber } from "@/lib/numberSeries";
 import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import {
@@ -46,6 +47,7 @@ import {
 } from "@/components/masters/MastersLayout";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { SisParentMatchBanner } from "@/components/admissions/SisParentMatchBanner";
+import { withheldFeeGroupRefusal } from "@/components/admissions/withheldFeeGroup";
 import {
   ErpTable,
   ErpTableBody,
@@ -105,9 +107,12 @@ export function AdmissionRegistrationPanel({
   canEdit,
   onCommit,
   onOpenCrmLead,
+  feesWithheld = false,
 }: {
   state: AdmissionsState;
   masters: MastersState;
+  /** The teaching subset: fee groups withheld, not none (data-layer 2.1g). */
+  feesWithheld?: boolean;
   sis: SisState;
   by: string;
   canEdit: boolean;
@@ -613,7 +618,7 @@ export function AdmissionRegistrationPanel({
     onCommit(r.state, "Verified");
   }
 
-  function onAdmit() {
+  async function onAdmit() {
     if (!selected || !canEdit) return;
     const paid =
       selected.registrationPaymentStatus === "paid" ||
@@ -626,7 +631,19 @@ export function AdmissionRegistrationPanel({
       );
       return;
     }
-    const r = enrollLead(state, selected.id, by, masters);
+    const refusal = withheldFeeGroupRefusal(feesWithheld, selected);
+    if (refusal) {
+      onCommit(state, refusal);
+      return;
+    }
+    // The SRN from the server (data-layer 2.2e): max(the SRN counter, the
+    // highest SRN on record + 1) — never this tab's copy alone.
+    const srnIssued = await issueSeriesNumber("SRN", undefined);
+    if (!srnIssued.ok && srnIssued.kind === "failed") {
+      onCommit(state, `Not sent — the server did not give the next SRN (${srnIssued.message}). Try again.`);
+      return;
+    }
+    const r = enrollLead(state, selected.id, by, masters, { srn: srnIssued.ok ? srnIssued.formatted : undefined });
     if (!r.ok) {
       onCommit(state, r.reason);
       return;
@@ -1546,7 +1563,7 @@ export function AdmissionRegistrationPanel({
                 <button
                   type="button"
                   className="rounded-lg bg-[var(--tone-green-deep-solid)] px-4 py-2.5 text-[12px] font-semibold text-white"
-                  onClick={onAdmit}
+                  onClick={() => void onAdmit()}
                 >
                   Send to student record
                 </button>

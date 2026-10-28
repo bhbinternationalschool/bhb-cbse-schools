@@ -17,6 +17,7 @@ import { ChevronRight } from "lucide-react";
 import {
   coScholasticAreasForClass,
   componentsForSubject,
+  gradedPartsForSubject,
   findMarkSheet,
   schemeForClassId,
   subjectTakeMap,
@@ -125,9 +126,19 @@ export function ExamReadinessDashboard(props: {
         const columns = sec.subjects.flatMap((subject) => {
           const parts = scheme ? componentsForSubject(scheme, term.code, subject.code) : [];
           const name = subject.name || subject.code;
-          return parts.length === 0
-            ? [{ subjectId: subject.id, subjectName: name, component: "" }]
-            : parts.map((p) => ({ subjectId: subject.id, subjectName: name, component: p.code }));
+          // A graded part (Handwriting A/B/C) is a cell too: filled by its letter.
+          const graded = (scheme ? gradedPartsForSubject(scheme, term.code, subject.code) : []).map((g) => ({
+            subjectId: subject.id,
+            subjectName: name,
+            component: g.code,
+            graded: true,
+          }));
+          return [
+            ...(parts.length === 0
+              ? [{ subjectId: subject.id, subjectName: name, component: "" }]
+              : parts.map((p) => ({ subjectId: subject.id, subjectName: name, component: p.code }))),
+            ...graded,
+          ];
         });
         const readiness = sectionReadiness({
           studentIds: sec.studentIds,

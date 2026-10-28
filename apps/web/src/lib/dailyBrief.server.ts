@@ -51,8 +51,8 @@ import {
 import { isReviewDemoStudent, reviewDemoHouseholdIds } from "@/lib/reviewDemoRecords";
 import { classifyClassHolidayDay, classifyStaffHolidayDay } from "@/lib/holidayPolicy";
 import { normalizeYear } from "@/lib/staffTeachingScope";
-import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
-import { loadTimetable } from "@/lib/timetable";
+import { readTimetableStateServer } from "@/lib/api/v1/teachingServer.server";
+import type { TimetableState } from "@/lib/timetable";
 
 /** Today in IST — the school's day, whatever the server's clock zone is. */
 export function istToday(nowMs = Date.now()): string {
@@ -476,8 +476,10 @@ async function readStudentAttendance(
  * counted, so the PDF can say how a teacher came to be listed. Classes on
  * holiday and teachers marked absent today are left out: neither owes
  * homework.
+ *
+ * Exported for timetableServerCallers.selftest.
  */
-async function readHomework(
+export async function readHomework(
   dateIso: string,
   masters: MastersState,
   students: BriefStudentAttendance,
@@ -514,8 +516,18 @@ async function readHomework(
   const sectionsOfClass = (classId: string) =>
     (masters.sections ?? []).filter((x) => x.classId === classId && x.isActive !== false).map((x) => x.id);
 
-  await ensureTimetableHydratedServer().catch(() => false);
-  const grids = loadTimetable().publishedGrids.filter((g) => linkInYear(g.academicYearCode, ay));
+  // From the timetable desk slices: loadTimetable() is empty on the server,
+  // so until 13 Oct 2026 every section fell to the Duties basis. Unreadable
+  // = not checked — guessing from Duties would list teachers the published
+  // timetable may not expect anything from.
+  let timetable: TimetableState;
+  try {
+    timetable = await readTimetableStateServer();
+  } catch {
+    console.warn("[dailyBrief] timetable read failed — homework not checked");
+    return blank;
+  }
+  const grids = timetable.publishedGrids.filter((g) => linkInYear(g.academicYearCode, ay));
   const gridOf = new Map(grids.map((g) => [`${g.classId}:${g.sectionId}`, g]));
   const weekday = new Date(`${dateIso}T12:00:00Z`).getUTCDay();
 
@@ -692,7 +704,14 @@ async function readStaffAttendance(
 
   let present = 0;
   const absentRows: BriefStaffRow[] = [];
-  for (const s of staff) {
+  // Visiting staff (paid per period / hour / day) come on their own days:
+  // present when they punched, never an absentee or part of the strength.
+  const counted = staff.filter((s) => {
+    if (s.category !== "visiting") return true;
+    const m = marks.get(s.id);
+    return m === "P" || m === "L" || m === "HD";
+  });
+  for (const s of counted) {
     const mark = marks.get(s.id);
     // Late and half day are at work — the same rule as staffMarkTotals.
     if (mark === "P" || mark === "L" || mark === "HD") {
@@ -736,7 +755,7 @@ async function readStaffAttendance(
       : await lastRegisterBefore("staff_attendance_desk_registers", dateIso),
     present,
     absent: absentRows.length,
-    strength: staff.length,
+    strength: counted.length,
     absentRows,
     // Not "none waiting": nobody could look.
     ...(hr.ok ? {} : { leaveUnreadable: true }),

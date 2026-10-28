@@ -84,6 +84,29 @@ function emptyBundle(): MastersDeskBundle {
   return rest;
 }
 
+/**
+ * Every class–subject link says whether it is optional before it is written
+ * (data-layer 1.5, the step 1.1 finding). masters_desk_class_subjects.is_optional
+ * is NOT NULL and the row sync names the column whenever any link carries
+ * it, so ONE link without the key was accepted into the slice and then
+ * failed the row sync ("Masters saved, but the row tables did not update"),
+ * and every later save failed the same way until the slice was repaired.
+ * A missing value is false — what every app-written link carries; "true"
+ * as text is true. desk_slice_row_write applies the same rule in SQL.
+ */
+export function withClassLinkDefaults(state: MastersState): MastersState {
+  const links = state.classSubjects;
+  if (!Array.isArray(links) || links.every((l) => typeof l?.isOptional === "boolean")) return state;
+  return {
+    ...state,
+    classSubjects: links.map((l) =>
+      typeof l?.isOptional === "boolean"
+        ? l
+        : { ...l, isOptional: (l as { isOptional?: unknown })?.isOptional === "true" },
+    ),
+  };
+}
+
 function stateToSlices(state: MastersState): {
   key: MastersSliceKey;
   payload: unknown;
@@ -118,8 +141,97 @@ export type MastersPushOutcome = {
   error?: string;
   updatedAt?: string;
   /** Set when the write was refused for its revision: the caller answers 409. */
-  conflict?: "stale" | "unversioned";
+  conflict?: "stale" | "unversioned" | "slice_stale";
+  /** Section saves: the sections that changed elsewhere first. */
+  conflicts?: string[];
+  /** Section saves: each written section's new stamp. */
+  sliceStamps?: Record<string, string>;
 };
+
+/**
+ * Save only the sections a browser changed (10 Oct 2026). `bases` holds,
+ * for each section in `keys`, the `updated_at` it was loaded at ("" = it
+ * saw no such section). masters_write_slices writes them all or none: one
+ * stale section refuses the whole save, because sections depend on each
+ * other. Sections not named are left exactly as stored. `state` is the
+ * stored desk with this save's sections laid on — the route's guards ran on
+ * it — and supplies the meta counts.
+ */
+export async function pushMastersSlicesToDb(
+  state: MastersState,
+  keys: MastersSliceKey[],
+  bases: Record<string, string>,
+): Promise<MastersPushOutcome> {
+  if (!mastersDualWriteDbEnabled()) return { ok: true };
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+  const now = nowIso();
+  const stripped = stripStaffFromMastersForBlob(withClassLinkDefaults(state)) as unknown as Record<string, unknown>;
+  const slices = keys
+    .filter((key) => MASTERS_SLICE_KEYS.includes(key))
+    .filter((key) =>
+      MASTERS_OBJECT_SLICES.includes(key) ? stripped[key] != null : Array.isArray(stripped[key]),
+    )
+    .map((key) => ({ key, payload: stripped[key], base: bases[key] ?? "" }));
+  if (!slices.length) return { ok: true, updatedAt: "", sliceStamps: {} };
+
+  const { data, error } = await sb.rpc("masters_write_slices", {
+    p_tenant_id: tenantId,
+    p_slices: slices,
+    p_now: now,
+  });
+  if (error) return { ok: false, error: `Masters were not saved: ${error.message}` };
+  const res = (data ?? {}) as { ok?: boolean; conflicts?: string[]; error?: string };
+  if (!res.ok) {
+    if (res.conflicts?.length) {
+      return {
+        ok: false,
+        conflict: "slice_stale",
+        conflicts: res.conflicts,
+        error:
+          "Someone changed the same part of Masters on another device after this one loaded it " +
+          `(${res.conflicts.join(", ")}). Nothing was saved — the screen will refresh; re-apply your change.`,
+      };
+    }
+    return { ok: false, error: res.error || "Masters were not saved." };
+  }
+
+  await sb
+    .from("masters_desk_sync_meta")
+    .update({
+      class_count: (state.classes ?? []).length,
+      fee_head_count: (state.feeHeads ?? []).length,
+      subject_count: (state.subjects ?? []).length,
+    })
+    .eq("tenant_id", tenantId);
+
+  // The derived masters_desk_* row tables follow the slices, as for a whole save.
+  const { error: syncErr } = await sb.rpc("masters_sync_rows_from_slices", { p_tenant_id: tenantId });
+  if (syncErr) {
+    console.error("[masters] row-table sync failed", syncErr.message);
+    return { ok: false, error: `Masters saved, but the row tables did not update: ${syncErr.message}`, updatedAt: now };
+  }
+  return {
+    ok: true,
+    updatedAt: now,
+    sliceStamps: Object.fromEntries(slices.map((x) => [x.key, now])),
+  };
+}
+
+/** Each section's `updated_at` — the base a browser saves that section from. */
+export async function fetchMastersSliceStamps(): Promise<Record<string, string> | null> {
+  const ctx = await resolveCtx();
+  if (!ctx) return null;
+  const { data, error } = await ctx.sb
+    .from("masters_desk_slices")
+    .select("slice_key, updated_at")
+    .eq("tenant_id", ctx.tenantId);
+  if (error) return null;
+  return Object.fromEntries(
+    (data ?? []).map((r) => [String((r as { slice_key: string }).slice_key), String((r as { updated_at: string }).updated_at)]),
+  );
+}
 
 /**
  * Write masters — only on top of the revision the writer read.
@@ -145,7 +257,7 @@ export async function pushMastersDeskToDb(
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
   const { sb, tenantId } = ctx;
   const now = nowIso();
-  const stripped = stripStaffFromMastersForBlob(state);
+  const stripped = stripStaffFromMastersForBlob(withClassLinkDefaults(state));
   const slices = stateToSlices(stripped);
 
   // A slice the push does not carry is left as stored — absence is not a
@@ -290,6 +402,8 @@ export async function fetchMastersDeskFromDb(): Promise<{
    * has no `rows` property); this path predates it.
    */
   readFailed: boolean;
+  /** Each section's `updated_at`, read with the slices. */
+  sliceStamps?: Record<string, string>;
 }> {
   const ctx = await resolveCtx();
   const empty = emptyBundle();
@@ -330,14 +444,16 @@ export async function fetchMastersDeskFromDb(): Promise<{
   }
 
   const sliceMap: Partial<Record<MastersSliceKey, unknown>> = {};
+  const sliceStamps: Record<string, string> = {};
   for (const row of sliceRows ?? []) {
-    const r = row as { slice_key: string; payload: unknown };
+    const r = row as { slice_key: string; payload: unknown; updated_at?: string };
     const key = r.slice_key as MastersSliceKey;
     if (MASTERS_SLICE_KEYS.includes(key)) sliceMap[key] = r.payload;
+    if (r.updated_at) sliceStamps[r.slice_key] = String(r.updated_at);
   }
 
   const bundle = slicesToBundle(sliceMap);
-  return { bundle, meta: metaFromRow(metaRow, bundle), readFailed: false };
+  return { bundle, meta: metaFromRow(metaRow, bundle), readFailed: false, sliceStamps };
 }
 
 /**
@@ -351,15 +467,21 @@ export async function fetchMastersDeskFromDb(): Promise<{
  */
 export async function fetchMastersSyncMeta(
   bundle: MastersDeskBundle,
-): Promise<MastersDeskSyncMeta | null> {
+): Promise<{ meta: MastersDeskSyncMeta | null; readFailed: boolean }> {
   const ctx = await resolveCtx();
-  if (!ctx) return null;
-  const { data } = await ctx.sb
+  if (!ctx) return { meta: null, readFailed: true };
+  const { data, error } = await ctx.sb
     .from("masters_desk_sync_meta")
     .select(META_SELECT)
     .eq("tenant_id", ctx.tenantId)
     .maybeSingle();
-  return metaFromRow(data, bundle);
+  // A failed read is not "no revision yet": that would hand the browser a
+  // fresh `updatedAt` as its save base (data-layer 0.5b).
+  if (error) {
+    console.error("[masters-desk] sync meta read FAILED — reporting unknown:", error.message);
+    return { meta: null, readFailed: true };
+  }
+  return { meta: metaFromRow(data, bundle), readFailed: false };
 }
 
 /**

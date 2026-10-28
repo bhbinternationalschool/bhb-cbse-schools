@@ -1,6 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ReportsTab } from "@/components/inventory/ReportsTab";
+import { useInvBootstrap } from "@/lib/inventory/client";
+import { PTM_REPORTS, loadPtm, runPtmReport, type PtmReportId } from "@/lib/ptm";
+import { STUDENT_LEAVE_REPORTS, runStudentLeaveReport, type StudentLeaveReportId } from "@/lib/studentLeave";
+import { VAULT_REPORTS, runVaultReport, type VaultReportId } from "@/lib/vault";
+import { RTE_REPORTS, runRteReport, type RteReportId } from "@/lib/rteEws";
+import { TEACHING_REPORTS, runTeachingReport, type TeachingReportId } from "@/lib/teachingReportCatalog";
+import { COMPLAINTS_REPORTS, runComplaintsReport, type ComplaintsReportId } from "@/lib/complaintsReportCatalog";
 import Link from "next/link";
 import {
   ACCOUNTS_REPORTS,
@@ -19,16 +27,19 @@ import type { AccountsState } from "@/lib/accountsTypes";
 import {
   TRANSPORT_REPORTS,
   runTransportReport,
+  TRANSPORT_REPORTS_NEEDING_COSTS,
   type TransportReportFormat,
 } from "@/lib/transportReportCatalog";
-import { loadTransport, migrateDemoFleetToReal, seedTransportIfEmpty } from "@/lib/transport";
+import type { VehicleCosts } from "@/lib/transportVehicleCosts";
+import { fetchVehicleCosts } from "@/lib/transportVehicleCostsClient";
+import { loadTransport } from "@/lib/transport";
 import {
   TRUST_REPORTS,
   runTrustReport,
   type TrustReportFormat,
   type TrustReportId,
 } from "@/lib/trustReportCatalog";
-import { loadTrust, seedTrustIfEmpty } from "@/lib/trust";
+import { loadTrust } from "@/lib/trust";
 import {
   TIMETABLE_REPORTS,
   runTimetableReport,
@@ -65,15 +76,19 @@ import {
   type CommsReportId,
 } from "@/lib/commsReportCatalog";
 import type { CommsAudience } from "@/lib/schoolComms";
-import { loadMasters } from "@/lib/masters";
+import { useMasters } from "@/lib/data/client/hooks";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { QueryError } from "@/components/data/QueryError";
 import { loadSis } from "@/lib/sis";
 import { hasPermission } from "@/lib/rbac";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
+import type { RegisterDayMark } from "@/lib/transportBoardingLog";
+import { fetchRegisterDayMarks } from "@/lib/transportRegisterClient";
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */;
 }
 
 /**
@@ -83,18 +98,24 @@ function todayIso() {
  * run server-side against the stock ledger and the sale documents, so this
  * points at them rather than shipping a second, weaker copy.
  */
-export function StoreReportsRunner() {
-  return (
-    <div className="space-y-3">
-      <p className="text-sm text-[var(--muted)]">
-        Stock register, item margin, sales day book and purchases by vendor are
-        run inside Store &amp; purchase, against the live ledger.
+export function StoreReportsRunner({ initialReport }: { initialReport?: string }) {
+  // The store's own reports, run server-side against the stock ledger and
+  // the sale documents — embedded here rather than a second, weaker copy.
+  const boot = useInvBootstrap();
+  if (boot.loading && !boot.data) {
+    return <p className="text-sm text-[var(--muted)]">Loading the store from the server…</p>;
+  }
+  if (boot.error || !boot.data) {
+    return (
+      <p className="text-sm text-[var(--danger)]">
+        {boot.error || "Could not load the store."}{" "}
+        <button type="button" className="underline" onClick={() => boot.reload()}>
+          Try again
+        </button>
       </p>
-      <Link href="/inventory?tab=reports" className={btnOutline}>
-        Open store reports
-      </Link>
-    </div>
-  );
+    );
+  }
+  return <ReportsTab boot={boot.data} initialReport={initialReport} />;
 }
 
 export function AccountsReportsRunner() {
@@ -108,20 +129,13 @@ export function AccountsReportsRunner() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Read only: the Reports Center loads the desk first (ReportDataGate).
+  // This used to seed a chart of accounts when the desk looked empty — a
+  // report screen must never write the school's books.
   useEffect(() => {
-    let live = true;
-    void (async () => {
-      // Pull the school's desk before seeding; a fresh browser would
-      // otherwise push a seeded chart of its own.
-      const { ensureAccountsSeeded } = await import("@/lib/accountsPersistence");
-      const s = await ensureAccountsSeeded();
-      if (!live) return;
-      setState(s);
-      if (!coaId && s.coaAccounts[0]) setCoaId(s.coaAccounts[0].id);
-    })();
-    return () => {
-      live = false;
-    };
+    const s = loadAccounts();
+    setState(s);
+    if (s.coaAccounts[0]) setCoaId((cur) => cur || s.coaAccounts[0]!.id);
   }, []);
 
   function run(id: AccountsReportId) {
@@ -223,8 +237,8 @@ export function AccountsReportsRunner() {
       <ul className="space-y-1.5">
         {ACCOUNTS_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -245,23 +259,49 @@ export function AccountsReportsRunner() {
 }
 
 export function TransportReportsRunner() {
+  // data-layer 2.1h: Masters from the query kernel, not a page-copy read per run.
+  const { masters } = useScreenMasters();
   const [format, setFormat] = useState<TransportReportFormat>("excel");
   const [date, setDate] = useState(todayIso);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    migrateDemoFleetToReal();
-    seedTransportIfEmpty();
-  }, []);
-
-  function run(id: (typeof TRANSPORT_REPORTS)[number]["id"]) {
+  async function run(id: (typeof TRANSPORT_REPORTS)[number]["id"]) {
+    if (!masters) {
+      setError("The school's setup (Masters) has not loaded — wait a moment or press Try again on the page.");
+      setNotice(null);
+      return;
+    }
+    // The boarding day sheet reads the bus register (server truth).
+    let registerMarks: RegisterDayMark[] | null = null;
+    if (id === "boarding_day_sheet") {
+      try {
+        registerMarks = await fetchRegisterDayMarks(date);
+      } catch (e) {
+        setError(`Bus register could not be read — ${e instanceof Error ? e.message : "try again"}`);
+        setNotice(null);
+        return;
+      }
+    }
+    // Fuel, papers, loans and TCO read the server stores, not the desk.
+    let costs: VehicleCosts | null = null;
+    if (TRANSPORT_REPORTS_NEEDING_COSTS.has(id)) {
+      try {
+        costs = await fetchVehicleCosts();
+      } catch (e) {
+        setError(`Fuel, vehicle papers and loans could not be read — ${e instanceof Error ? e.message : "try again"}`);
+        setNotice(null);
+        return;
+      }
+    }
     const r = runTransportReport(id, {
       date,
       format,
       transport: loadTransport(),
-      masters: loadMasters(),
+      masters,
       sis: loadSis(),
+      registerMarks,
+      costs,
     });
     if (!r.ok) {
       setError(r.error);
@@ -304,8 +344,8 @@ export function TransportReportsRunner() {
       <ul className="space-y-1.5">
         {TRANSPORT_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -315,7 +355,7 @@ export function TransportReportsRunner() {
                 <p className="text-xs text-[var(--muted)]">{r.hint}</p>
               ) : null}
             </div>
-            <button type="button" className={btn} onClick={() => run(r.id)}>
+            <button type="button" className={btn} onClick={() => void run(r.id)}>
               Export
             </button>
           </li>
@@ -330,10 +370,8 @@ export function TrustReportsRunner() {
   const [projectId, setProjectId] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const projects = useMemo(() => {
-    const t = seedTrustIfEmpty();
-    return t.projects;
-  }, []);
+  // Read only (loaded first by ReportDataGate).
+  const projects = useMemo(() => loadTrust().projects, []);
 
   useEffect(() => {
     if (!projectId && projects[0]) setProjectId(projects[0].id);
@@ -391,8 +429,8 @@ export function TrustReportsRunner() {
       <ul className="space-y-1.5">
         {TRUST_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -426,9 +464,11 @@ export function HomeworkReportsRunner({ ay }: { ay: string }) {
   // here used to cover the whole school.
   const { my } = useMyTeaching();
   const teacherMode = isRestrictedTeacher(my);
+  // data-layer 2.1h: decided on useScreenMasters — no export while unknown.
+  const { masters: hwMasters } = useScreenMasters();
   const canExport = useMemo(
-    () => hasPermission(session, loadMasters(), "homework", "export"),
-    [session],
+    () => !!hwMasters && hasPermission(session, hwMasters, "homework", "export"),
+    [session, hwMasters],
   );
 
   function run(id: HomeworkReportId) {
@@ -523,8 +563,8 @@ export function HomeworkReportsRunner({ ay }: { ay: string }) {
       <ul className="space-y-1.5">
         {HOMEWORK_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -553,7 +593,12 @@ export function ExamReportsRunner({ ay }: { ay: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const terms = useMemo(() => listAllExamTerms(ay), [ay]);
-  const classes = useMemo(() => loadMasters().classes.filter((c) => c.isActive), []);
+  // data-layer 2.1h: classes from the Masters view (versions poll).
+  const examMastersQ = useMasters();
+  const classes = useMemo(
+    () => (examMastersQ.data?.masters.classes ?? []).filter((c) => c.isActive),
+    [examMastersQ.data],
+  );
 
   useEffect(() => {
     if (!examTermId && terms[0]) setExamTermId(terms[0].id);
@@ -581,6 +626,14 @@ export function ExamReportsRunner({ ay }: { ay: string }) {
     setNotice(r.message);
   }
 
+  // Masters unknown: say so — never an empty class list (R6).
+  if (!examMastersQ.data) {
+    return examMastersQ.isError ? (
+      <QueryError what="the school's classes" error={examMastersQ.error} retry={examMastersQ.refetch} />
+    ) : (
+      <p className="text-sm text-[var(--muted)]">Loading…</p>
+    );
+  }
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
@@ -644,8 +697,8 @@ export function ExamReportsRunner({ ay }: { ay: string }) {
       <ul className="space-y-1.5">
         {EXAM_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -672,9 +725,16 @@ export function LibraryReportsRunner() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // data-layer 2.1h: the staff side from useScreenMasters, not the page copy.
+  const { masters } = useScreenMasters();
+
   function run(id: LibraryReportId, label: string) {
+    if (!masters) {
+      setError("The school's setup (Masters) has not loaded — wait a moment or press Try again on the page.");
+      setNotice(null);
+      return;
+    }
     const sis = loadSis();
-    const masters = loadMasters();
     const r = runLibraryReport({
       reportId: id,
       format,
@@ -731,7 +791,7 @@ export function LibraryReportsRunner() {
             <option value="pdf">PDF</option>
           </select>
         </label>
-        <Link href="/library?tab=reports" className={btnOutline}>
+        <Link href="/library?tab=lib_reports" className={btnOutline}>
           Open in Library
         </Link>
       </div>
@@ -745,8 +805,8 @@ export function LibraryReportsRunner() {
           <ul className="space-y-1.5">
             {g.reports.map((r) => (
               <li
-                key={r.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+                key={r.id} data-report-id={r.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
               >
                 <div>
                   <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -852,8 +912,8 @@ export function CertificatesReportsRunner() {
       <ul className="space-y-1.5">
         {CERTIFICATES_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -952,8 +1012,8 @@ export function CommsReportsRunner() {
       <ul className="space-y-1.5">
         {COMMS_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -1054,8 +1114,8 @@ export function TimetableReportsRunner({ ay }: { ay: string }) {
       <ul className="space-y-1.5">
         {TIMETABLE_REPORTS.map((r) => (
           <li
-            key={r.id}
-            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[rgba(32,48,80,0.08)] bg-white px-3 py-2"
+            key={r.id} data-report-id={r.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
           >
             <div>
               <p className="text-sm font-medium text-[var(--brand-deep)]">
@@ -1075,3 +1135,274 @@ export function TimetableReportsRunner({ ay }: { ay: string }) {
   );
 }
 
+
+/* ── Runners for modules that only had a link (14 Oct 2026) ─────────── */
+
+function ExportList<T extends { id: string; label: string; hint?: string }>({
+  reports,
+  onRun,
+}: {
+  reports: readonly T[];
+  onRun: (id: T["id"]) => void;
+}) {
+  return (
+    <ul className="space-y-1.5">
+      {reports.map((r) => (
+        <li
+          key={r.id}
+          data-report-id={r.id}
+          className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-2"
+        >
+          <div>
+            <p className="text-sm font-medium text-[var(--brand-deep)]">{r.label}</p>
+            {r.hint ? <p className="text-xs text-[var(--muted)]">{r.hint}</p> : null}
+          </div>
+          <button type="button" className={btn} onClick={() => onRun(r.id)}>
+            Export
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function FormatPicker({ value, onChange }: { value: "excel" | "pdf"; onChange: (v: "excel" | "pdf") => void }) {
+  return (
+    <label className="text-xs text-[var(--muted)]">
+      Format
+      <select className={`${field} mt-1 block`} value={value} onChange={(e) => onChange(e.target.value as "excel" | "pdf")}>
+        <option value="excel">Excel</option>
+        <option value="pdf">PDF</option>
+      </select>
+    </label>
+  );
+}
+
+function useRunResult() {
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const show = (r: { ok: true; message: string } | { ok: false; error: string }) => {
+    if (r.ok) {
+      setError(null);
+      setNotice(r.message);
+    } else {
+      setNotice(null);
+      setError(r.error);
+    }
+  };
+  const view = (
+    <>
+      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {notice ? <p className="text-sm text-[var(--success)]">{notice}</p> : null}
+    </>
+  );
+  return { show, view };
+}
+
+export function PtmReportsRunner() {
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const events = useMemo(
+    () => [...loadPtm().events].sort((a, b) => (b.date || "").localeCompare(a.date || "")),
+    [],
+  );
+  const [eventId, setEventId] = useState(() => events[0]?.id ?? "");
+  const { show, view } = useRunResult();
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-[var(--muted)]">
+          PTM
+          <select className={`${field} mt-1 block`} value={eventId} onChange={(e) => setEventId(e.target.value)}>
+            {events.length === 0 ? <option value="">No PTM yet</option> : null}
+            {events.map((e) => (
+              <option key={e.id} value={e.id}>
+                {e.name}
+                {e.date ? ` · ${e.date}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/ptm?tab=reports" className={btnOutline}>
+          Open in PTM
+        </Link>
+      </div>
+      {view}
+      <ExportList
+        reports={PTM_REPORTS}
+        onRun={(id) => show(runPtmReport(id as PtmReportId, { eventId: eventId || undefined, format }))}
+      />
+    </div>
+  );
+}
+
+export function StudentLeaveReportsRunner({ ay }: { ay: string }) {
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const [fromDate, setFromDate] = useState(`${ay.slice(0, 4)}-04-01`);
+  const [toDate, setToDate] = useState(todayIso);
+  const { show, view } = useRunResult();
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-[var(--muted)]">
+          From
+          <input type="date" className={`${field} mt-1 block`} value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        </label>
+        <label className="text-xs text-[var(--muted)]">
+          To
+          <input type="date" className={`${field} mt-1 block`} value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </label>
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/attendance?tab=leave" className={btnOutline}>
+          Open student leave
+        </Link>
+      </div>
+      {view}
+      <ExportList
+        reports={STUDENT_LEAVE_REPORTS}
+        onRun={(id) =>
+          show(runStudentLeaveReport(id as StudentLeaveReportId, { academicYearCode: ay, fromDate, toDate, format }))
+        }
+      />
+    </div>
+  );
+}
+
+export function VaultReportsRunner() {
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const { show, view } = useRunResult();
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/vault?tab=reports" className={btnOutline}>
+          Open the vault
+        </Link>
+      </div>
+      {view}
+      <ExportList reports={VAULT_REPORTS} onRun={(id) => show(runVaultReport(id as VaultReportId, { format }))} />
+    </div>
+  );
+}
+
+export function RteReportsRunner({ ay }: { ay: string }) {
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const { show, view } = useRunResult();
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/admissions?tab=rte" className={btnOutline}>
+          Open RTE / EWS
+        </Link>
+      </div>
+      {view}
+      <ExportList
+        reports={RTE_REPORTS}
+        onRun={(id) => show(runRteReport(id as RteReportId, { format, academicYearCode: ay }))}
+      />
+    </div>
+  );
+}
+
+export function TeachingReportsRunner({ ay }: { ay: string }) {
+  const session = useDemoSession();
+  const { my } = useMyTeaching();
+  // A teacher's period delivery is their own; leadership sees everyone's.
+  const ownOnly = isRestrictedTeacher(my);
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  // data-layer 2.1h: classes from the Masters view (versions poll).
+  const teachMastersQ = useMasters();
+  const classes = useMemo(
+    () => (teachMastersQ.data?.masters.classes ?? []).filter((c) => c.isActive !== false),
+    [teachMastersQ.data],
+  );
+  const [classId, setClassId] = useState("");
+  const [fromDate, setFromDate] = useState(`${todayIso().slice(0, 7)}-01`);
+  const [toDate, setToDate] = useState(todayIso);
+  const { show, view } = useRunResult();
+  // Masters unknown: say so — never an empty class list (R6).
+  if (!teachMastersQ.data) {
+    return teachMastersQ.isError ? (
+      <QueryError what="the school's classes" error={teachMastersQ.error} retry={teachMastersQ.refetch} />
+    ) : (
+      <p className="text-sm text-[var(--muted)]">Loading…</p>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-[var(--muted)]">
+          Class
+          <select className={`${field} mt-1 block`} value={classId} onChange={(e) => setClassId(e.target.value)}>
+            <option value="">All classes</option>
+            {classes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-[var(--muted)]">
+          From (delivery)
+          <input type="date" className={`${field} mt-1 block`} value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        </label>
+        <label className="text-xs text-[var(--muted)]">
+          To
+          <input type="date" className={`${field} mt-1 block`} value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </label>
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/teaching" className={btnOutline}>
+          Open Teaching
+        </Link>
+      </div>
+      {ownOnly ? <p className="text-xs text-[var(--muted)]">Period delivery shows your own periods.</p> : null}
+      {view}
+      <ExportList
+        reports={TEACHING_REPORTS}
+        onRun={(id) =>
+          show(
+            runTeachingReport(id as TeachingReportId, {
+              academicYearCode: ay,
+              classId: classId || undefined,
+              fromDate,
+              toDate,
+              staffId: ownOnly ? session.staffId || "__none__" : undefined,
+              format,
+            }),
+          )
+        }
+      />
+    </div>
+  );
+}
+
+export function ComplaintsReportsRunner() {
+  const [format, setFormat] = useState<"excel" | "pdf">("excel");
+  const [fromDate, setFromDate] = useState(`${todayIso().slice(0, 4)}-04-01`);
+  const [toDate, setToDate] = useState(todayIso);
+  const { show, view } = useRunResult();
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs text-[var(--muted)]">
+          From
+          <input type="date" className={`${field} mt-1 block`} value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        </label>
+        <label className="text-xs text-[var(--muted)]">
+          To
+          <input type="date" className={`${field} mt-1 block`} value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </label>
+        <FormatPicker value={format} onChange={setFormat} />
+        <Link href="/complaints" className={btnOutline}>
+          Open Complaints
+        </Link>
+      </div>
+      {view}
+      <ExportList
+        reports={COMPLAINTS_REPORTS}
+        onRun={(id) => show(runComplaintsReport(id as ComplaintsReportId, { fromDate, toDate, format }))}
+      />
+    </div>
+  );
+}

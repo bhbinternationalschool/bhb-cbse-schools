@@ -23,7 +23,8 @@ import {
   type AdmissionReportFormat,
   type AdmissionReportId,
 } from "@/lib/admissionReportCatalog";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 
 export function AdmissionReportsPanel({
@@ -33,12 +34,13 @@ export function AdmissionReportsPanel({
   tick?: number;
   onNotice?: (msg: string) => void;
 }) {
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1g: the server's book (class names), kept fresh by the versions poll.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [admissions, setAdmissions] = useState<AdmissionsState | null>(null);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [surveyDate, setSurveyDate] = useState(() =>
-    new Date().toISOString().slice(0, 10),
+    new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */,
   );
   const [stage, setStage] = useState<AdmissionStage | "all" | "open">("all");
   const [source, setSource] = useState<AdmissionSource | "all">("all");
@@ -72,7 +74,6 @@ export function AdmissionReportsPanel({
   const [running, setRunning] = useState<string | null>(null);
 
   useEffect(() => {
-    setMasters(loadMasters());
     setAdmissions(loadAdmissions());
   }, [tick]);
 
@@ -191,7 +192,7 @@ export function AdmissionReportsPanel({
   function clearFilters() {
     setFromDate("");
     setToDate("");
-    setSurveyDate(new Date().toISOString().slice(0, 10));
+    setSurveyDate(new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10) /* IST */);
     setStage("all");
     setSource("all");
     setAcademicYearCode("");
@@ -205,6 +206,9 @@ export function AdmissionReportsPanel({
     setIncludeLost(false);
   }
 
+  if (!masters && mastersError) {
+    return <QueryError what="the school's classes for the reports" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !admissions) {
     return (
       <p className="mt-4 text-sm text-[var(--muted)]">Loading reports…</p>
@@ -519,7 +523,7 @@ export function AdmissionReportsPanel({
             <ul className="divide-y divide-[rgba(32,48,80,0.06)]">
               {(byCat[cat.id] ?? []).map((r) => (
                 <li
-                  key={r.id}
+                  key={r.id} data-report-id={r.id}
                   className="flex items-start justify-between gap-2 bg-white px-3 py-2.5"
                 >
                   <div className="min-w-0">

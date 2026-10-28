@@ -1,5 +1,6 @@
 "use client";
 
+import { duesDesksLabel, useDuesInputs } from "@/components/fees/useDuesInputs";
 import { useEffect, useMemo, useState } from "react";
 import {
   computeStudentDues,
@@ -34,6 +35,7 @@ import { ManualPreviousDuePanel } from "@/components/fees/ManualPreviousDuePanel
 import { BulkPreviousDueByClassPanel } from "@/components/fees/BulkPreviousDueByClassPanel";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
 import { bulkWaiverPlan } from "@/lib/feeAdjustmentsMerge";
+import { MonthGroupedList, useMonthGroups } from "@/components/ui/month-grouped-rows";
 
 export function FeeAdjustmentsPanel({
   onChanged,
@@ -47,6 +49,19 @@ export function FeeAdjustmentsPanel({
   const [query, setQuery] = useState("");
   const [studentId, setStudentId] = useState("");
   const [rows, setRows] = useState<FeeAdjustment[]>([]);
+  // Every adjustment, newest first, folded by the IST month it was made.
+  // The list used to show the first 30 in storage order, undated. A month
+  // holding one still awaiting approval starts open.
+  const sortedRows = useMemo(
+    () => [...rows].sort((x, y) => (y.createdAt || "").localeCompare(x.createdAt || "")),
+    [rows],
+  );
+  const adjustmentMonths = useMonthGroups({
+    rows: sortedRows,
+    dateOf: (a) => a.createdAt,
+    storageKey: "fees.adjustments",
+    needsAttention: (a) => a.status === "pending_approval",
+  });
   const [notice, setNotice] = useState<string | null>(null);
 
   /** "bulk_waiver" is a form mode, not a stored type: it writes many waivers. */
@@ -97,8 +112,20 @@ export function FeeAdjustmentsPanel({
 
   const student = sis?.students.find((s) => s.id === studentId) ?? null;
 
+  // The fee book and transport desk this list is computed from: re-read when
+  // either lands, or a bus month the family owes is missing from the list of
+  // dues that can be waived (15 Oct 2026).
+  const duesInputs = useDuesInputs();
+  // Nothing is waived or written off on dues that are not loaded: "Leave
+  // mid-year" wrote off only the lines it was shown, leaving the bus months
+  // open on a child marked inactive (15 Oct 2026).
+  const duesReady = duesInputs.status === "ready";
+  const duesNotReady =
+    duesInputs.status === "loading"
+      ? "Loading this student's dues — wait a moment."
+      : `Dues not loaded — ${duesDesksLabel(duesInputs.missing)} could not be read. Nothing can be waived or written off until it is.`;
   const dues = useMemo(() => {
-    if (!student || !masters) return [] as FeeDueLine[];
+    if (!student || !masters || !duesReady) return [] as FeeDueLine[];
     return openFeeDues(
       computeStudentDues(student, masters, loadFees(), {
         includeFuture: true,
@@ -106,7 +133,8 @@ export function FeeAdjustmentsPanel({
         includeInactive: student.status === "inactive",
       }),
     );
-  }, [student, masters, rows]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [student, masters, rows, duesReady, duesInputs.tick]);
 
   const todayIso = new Date().toISOString().slice(0, 10);
   const waivable = useMemo(
@@ -163,6 +191,10 @@ export function FeeAdjustmentsPanel({
     e.preventDefault();
     if (!studentId) {
       flash("Select a student");
+      return;
+    }
+    if (!duesReady) {
+      flash(duesNotReady);
       return;
     }
     if (type === "bulk_waiver") {
@@ -256,6 +288,10 @@ export function FeeAdjustmentsPanel({
 
   function onLeaveSettle() {
     if (!student) return;
+    if (!duesReady) {
+      flash(duesNotReady);
+      return;
+    }
     const ok = window.confirm(
       `Stop future dues from ${stopAfter}, write off remaining open dues, and mark ${student.fullName} inactive?`,
     );
@@ -431,6 +467,26 @@ export function FeeAdjustmentsPanel({
               New adjustment
               {student ? ` · ${student.fullName}` : ""}
             </h3>
+            {student && !duesReady ? (
+              <p
+                role={duesInputs.status === "failed" ? "alert" : "status"}
+                className={`mt-2 rounded-lg px-3 py-2 text-xs ${
+                  duesInputs.status === "failed"
+                    ? "bg-[rgba(192,57,43,0.08)] text-[var(--danger)]"
+                    : "bg-[rgba(32,48,80,0.05)] text-[var(--muted)]"
+                }`}
+              >
+                {duesNotReady}
+                {duesInputs.status === "failed" ? (
+                  <>
+                    {" "}
+                    <button type="button" className="font-semibold underline" onClick={duesInputs.retry}>
+                      Try again
+                    </button>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="text-sm">
                 <span className="mb-1 block text-[var(--muted)]">Type</span>
@@ -490,7 +546,7 @@ export function FeeAdjustmentsPanel({
               <div className="mt-3 space-y-3 text-sm">
                 {!student ? (
                   <p className="text-[var(--muted)]">Select a student first.</p>
-                ) : waivable.length === 0 ? (
+                ) : !duesReady ? null : waivable.length === 0 ? (
                   <p className="text-[var(--muted)]">Nothing open to waive for this student.</p>
                 ) : (
                   <>
@@ -675,41 +731,50 @@ export function FeeAdjustmentsPanel({
         <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
           Recent adjustments
         </h3>
-        <ul className="mt-2 divide-y divide-[rgba(32,48,80,0.08)] text-sm">
-          {rows.slice(0, 30).map((a) => (
-            <li
-              key={a.id}
-              className="flex flex-wrap items-center justify-between gap-2 py-2"
-            >
-              <div>
-                <div className="font-medium text-[var(--brand-deep)]">
-                  {feeAdjustmentTypeLabel(a.type)} · {a.label}
+        <div className="mt-2 text-sm">
+          <MonthGroupedList
+            month={adjustmentMonths}
+            rowKey={(a) => a.id}
+            countLabel={(n) => `${n} ${n === 1 ? "adjustment" : "adjustments"}`}
+            listClassName="divide-y divide-[rgba(32,48,80,0.08)]"
+            flush
+            empty={
+              <p className="py-6 text-center text-[var(--muted)]">
+                No adjustments yet
+              </p>
+            }
+            renderItem={(a) => (
+              <li
+                className="flex flex-wrap items-center justify-between gap-2 py-2"
+              >
+                <div>
+                  <div className="font-medium text-[var(--brand-deep)]">
+                    {feeAdjustmentTypeLabel(a.type)} · {a.label}
+                  </div>
+                  <div className="text-xs text-[var(--muted)]">
+                    {sis?.students.find((s) => s.id === a.studentId)?.fullName} ·{" "}
+                    {a.status} · {formatInr(a.amountPaise)} · {a.createdBy}
+                    {a.createdAt && Number.isFinite(Date.parse(a.createdAt))
+                      ? ` · ${new Date(a.createdAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" })}`
+                      : ""}
+                  </div>
                 </div>
-                <div className="text-xs text-[var(--muted)]">
-                  {sis?.students.find((s) => s.id === a.studentId)?.fullName} ·{" "}
-                  {a.status} · {formatInr(a.amountPaise)} · {a.createdBy}
-                </div>
-              </div>
-              {a.status === "posted" || a.status === "pending_approval" ? (
-                <button
-                  type="button"
-                  className="text-xs font-medium text-[var(--danger)]"
-                  onClick={() => {
-                    voidFeeAdjustment(a.id, session.fullName);
-                    refresh();
-                  }}
-                >
-                  Void
-                </button>
-              ) : null}
-            </li>
-          ))}
-          {rows.length === 0 ? (
-            <li className="py-6 text-center text-[var(--muted)]">
-              No adjustments yet
-            </li>
-          ) : null}
-        </ul>
+                {a.status === "posted" || a.status === "pending_approval" ? (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-[var(--danger)]"
+                    onClick={() => {
+                      voidFeeAdjustment(a.id, session.fullName);
+                      refresh();
+                    }}
+                  >
+                    Void
+                  </button>
+                ) : null}
+              </li>
+            )}
+          />
+        </div>
       </div>
     </div>
   );

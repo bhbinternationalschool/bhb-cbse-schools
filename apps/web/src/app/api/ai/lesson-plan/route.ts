@@ -26,18 +26,13 @@ import { getDemoSession } from "@/lib/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { loadMasters } from "@/lib/masters";
 import { hasPermission } from "@/lib/rbac";
-import { TENANT } from "@/lib/types";
-import { generateLessonPlanJson, llmStatus } from "@/lib/aiLlm.server";
-import { geminiModel } from "@/lib/erpAiGemini.server";
-import { openAiModel } from "@/lib/openAi.server";
-import { ncertTextbooksListing } from "@/lib/tutorSyllabus.server";
+import { llmStatus } from "@/lib/aiLlm.server";
+import { draftLessonPlan } from "@/lib/lessonPlanDraft.server";
 import {
   cleanLessonPlanAiInput,
   LESSON_PLAN_MAX_PERIODS,
   LESSON_PLAN_MAX_UNITS,
 } from "@/lib/lessonPlanAi";
-import { fillAgreedOutcomes } from "@/lib/chapterStandards";
-import { loadAgreedOutcomesByPosition } from "@/lib/chapterStandards.server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -82,36 +77,10 @@ export async function POST(req: Request) {
     );
   }
 
-  // Only the lesson's own subject — a Science plan gains nothing from the
-  // Hindi book — and in the plan's language, so a Hindi plan quotes the
-  // Hindi-medium chapter names. Classes 1–8: the school's own books; for
-  // Nursery–UKG, NCERT's learning outcomes for the subject's developmental
-  // goals, as a minimum. Empty (never an error) when nothing is loaded.
-  const ncert = await ncertTextbooksListing({
-    className: input.classLabel,
-    subjectLabel: input.subjectName,
-    coreFallback: false,
-    medium: input.language === "hi" ? "Hindi" : "English",
-  });
-
-  // The outcomes somebody agreed with, for the chapters this lesson covers.
-  // Without this the prompt tells the model to "derive sensible ones from its
-  // title" — a guess about what the chapter teaches, made fresh every draft.
-  // Only fills units the teacher left blank; their own words always win, and a
-  // chapter nobody has agreed outcomes for is still left to the guess.
-  const agreed = await loadAgreedOutcomesByPosition({
-    classLabel: input.classLabel,
-    subjectName: input.subjectName,
-  });
-  const grounded = fillAgreedOutcomes(input.units, agreed);
-  const groundedInput = { ...input, units: grounded.units };
-
-  const r = await generateLessonPlanJson({
-    input: groundedInput,
-    schoolName: TENANT.nameDisplay,
-    textbooks: ncert.text,
-    textbooksKind: ncert.kind,
-  });
+  // Grounding (the school's books, agreed outcomes) and the router call
+  // live in lib/lessonPlanDraft.server.ts — the staff app's route uses the
+  // same function, so a phone draft is the same draft.
+  const r = await draftLessonPlan(input);
   if (!r.ok) {
     return NextResponse.json({ error: r.error, engine: r.engine }, { status: 502 });
   }
@@ -120,13 +89,12 @@ export async function POST(req: Request) {
     ok: true,
     language: input.language,
     engine: r.engine,
-    model:
-      r.engine === "gemini" ? geminiModel() : r.engine === "openai" ? openAiModel() : "",
+    model: r.model,
     generatedAt: new Date().toISOString(),
     /** ai_generations row — the editor reports accepted/edited/rejected against it */
     generationId: r.generationId,
     /** Whether the draft was written with a book list (the school's) or pre-primary outcomes. */
-    groundedOnBooks: ncert.kind !== "none",
+    groundedOnBooks: r.booksKind !== "none",
     /**
      * How many ticked chapters were drafted against outcomes a teacher agreed
      * with, rather than ones the model derived from the chapter title. 0 means
@@ -134,13 +102,13 @@ export async function POST(req: Request) {
      * outcomes tab existed — which is the honest answer until somebody works
      * through it.
      */
-    agreedOutcomeUnits: grounded.filled,
+    agreedOutcomeUnits: r.agreedOutcomeUnits,
     /** "chapters" (Classes 1–8, the school's books), "outcomes" (Nursery–UKG: NCERT's minimum) or "none". */
-    booksKind: ncert.kind,
+    booksKind: r.booksKind,
     /** @deprecated same as groundedOnBooks — kept for editors still reading the old name. */
-    groundedOnNcert: ncert.kind !== "none",
+    groundedOnNcert: r.booksKind !== "none",
     /** @deprecated same as booksKind. */
-    ncertKind: ncert.kind,
+    ncertKind: r.booksKind,
     draft: r.draft,
   });
 }

@@ -1,6 +1,9 @@
 "use client";
 
+import { hasDeskLoaded } from "@/lib/deskHydrateGuard";
+import { ensureStaffHrHydrated } from "@/lib/staffHrPersistence";
 import { useEffect, useMemo, useState } from "react";
+import { raiseStaffRequest } from "@/lib/staffRequestsClient";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { VoiceDictateButton } from "@/components/teaching/VoiceDictateButton";
 import { chatSelfFromSession } from "@/lib/erpChat";
@@ -8,11 +11,11 @@ import {
   staffAllowedSections,
   type ChatSectionRef,
 } from "@/lib/erpChatAccess";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis } from "@/lib/sis";
 import {
   computeLeaveDays,
-  createStaffRequestTicket,
   loadStaffHr,
   STAFF_REQUEST_TYPE_LABELS,
   type LeaveTypeCode,
@@ -108,7 +111,9 @@ async function postOutdoorDuty(
 export function StaffBroadcastButton() {
   const session = useDemoSession();
   const [open, setOpen] = useState(false);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // Masters + the roster (data-layer 2.1c), asked for only once the panel is
+  // opened: this button sits in every page's header.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters({ enabled: open });
   const [audience, setAudience] = useState<Audience>("class_parents");
   const [mode, setMode] = useState<Mode>("message");
   const [sectionId, setSectionId] = useState("");
@@ -123,6 +128,10 @@ export function StaffBroadcastButton() {
 
   // Leave-request fields
   const [hr, setHr] = useState(() => loadStaffHr());
+  // Staff HR loaded from the server on this page (12 Oct 2026): until then
+  // loadStaffHr() is the placeholder CL/EL/ML/LWP list, so leave types and
+  // request tickets wait for the real copy.
+  const [hrReady, setHrReady] = useState(() => hasDeskLoaded("staff_hr"));
   const [leaveType, setLeaveType] = useState<LeaveTypeCode>("");
   const [fromDate, setFromDate] = useState(() =>
     new Date().toISOString().slice(0, 10),
@@ -149,7 +158,6 @@ export function StaffBroadcastButton() {
 
   useEffect(() => {
     if (!open) return;
-    setMasters(loadMasters());
     setTemplates(listApprovedTemplates(loadWaTemplates()));
     void withHydrationSlot(() => ensureWaTemplatesHydrated()).then(() => {
       setTemplates(listApprovedTemplates(loadWaTemplates()));
@@ -157,6 +165,17 @@ export function StaffBroadcastButton() {
     const freshHr = loadStaffHr();
     setHr(freshHr);
     setLeaveType((cur) => cur || freshHr.leaveTypes[0]?.code || "");
+    setHrReady(hasDeskLoaded("staff_hr"));
+    void withHydrationSlot(() => ensureStaffHrHydrated()).then(() => {
+      const loaded = loadStaffHr();
+      setHr(loaded);
+      // A type picked from the placeholder that the school does not have
+      // (e.g. EL after it was removed) is replaced by the school's first one.
+      setLeaveType((cur) =>
+        cur && loaded.leaveTypes.some((t) => t.code === cur) ? cur : loaded.leaveTypes[0]?.code || "",
+      );
+      setHrReady(hasDeskLoaded("staff_hr"));
+    });
   }, [open]);
 
   const actor = useMemo(() => {
@@ -331,9 +350,9 @@ export function StaffBroadcastButton() {
     setBusy(true);
     setError(null);
     try {
-      const r = createStaffRequestTicket({
-        staffId: selfStaff.id,
-        raisedByName: session.fullName,
+      // Saved on the server (one element through the write kernel): the
+      // office sees it on any device. Before 15 Oct it stayed in this browser.
+      const r = await raiseStaffRequest({
         type: requestType,
         subject: requestSubject.trim(),
         description: requestDescription.trim(),
@@ -449,7 +468,7 @@ export function StaffBroadcastButton() {
         : !!message.trim();
 
   return (
-    <div className="relative">
+    <div className="sm:relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -461,7 +480,13 @@ export function StaffBroadcastButton() {
       </button>
 
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(100vw-1.5rem,24rem)] space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_16px_40px_rgba(32,48,80,0.28)]">
+        // On a phone the button is not the header's last icon (the bell and
+        // the account menu sit to its right), so a popover hung off its right
+        // edge ran past the screen's left edge. Below sm the wrapper is not
+        // positioned, so the popover hangs from the sticky header instead and
+        // spans it with the page's gutter (and scrolls if taller than the
+        // screen).
+        <div data-testid="staff-broadcast-panel" className="absolute right-0 top-[calc(100%+0.5rem)] z-50 w-[min(100vw-1.5rem,24rem)] max-sm:inset-x-3 max-sm:max-h-[calc(100dvh-6rem)] max-sm:w-auto max-sm:overflow-y-auto space-y-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-[0_16px_40px_rgba(32,48,80,0.28)]">
           <div className="flex items-center justify-between">
             <p className="text-sm font-bold text-[var(--brand-deep)]">
               WhatsApp
@@ -502,7 +527,9 @@ export function StaffBroadcastButton() {
             <span className="ml-1 font-semibold">→</span>
           </a>
 
-          {sentResult ? (
+          {mastersError ? (
+            <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+          ) : sentResult ? (
             <div className="space-y-2 text-sm">
               <p>
                 Sent to {sentResult.sent ?? 0} of{" "}
@@ -642,11 +669,24 @@ export function StaffBroadcastButton() {
                 </div>
               )}
 
+              {/* Not yet known is not "no record": only a loaded roster
+                  without this login in it earns the "ask admin" line. */}
               {audience === "leadership" && !selfStaff ? (
-                <p className="text-[10px] text-[var(--muted)]">
-                  Leave, requests and outdoor duty need a staff record linked
-                  to your login — ask admin to link it in Staff → Profiles.
-                </p>
+                mastersError ? (
+                  <p className="text-[10px] text-[var(--danger)]" role="alert">
+                    Could not load your staff record from the server.{" "}
+                    <button type="button" className="font-semibold underline" onClick={() => void retryMasters()}>
+                      Try again
+                    </button>
+                  </p>
+                ) : !masters ? (
+                  <p className="text-[10px] text-[var(--muted)]">Loading your staff record…</p>
+                ) : (
+                  <p className="text-[10px] text-[var(--muted)]">
+                    Leave, requests and outdoor duty need a staff record linked
+                    to your login — ask admin to link it in Staff → Profiles.
+                  </p>
+                )
               ) : null}
 
               {audience === "leadership" && mode === "leave" ? (
@@ -738,7 +778,7 @@ export function StaffBroadcastButton() {
                     ) : null}
                     <button
                       type="button"
-                      disabled={busy || !reason.trim() || !leaveType}
+                      disabled={busy || !hrReady || !reason.trim() || !leaveType}
                       className="w-full rounded-lg bg-[var(--primary)] py-2 text-xs font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
                       onClick={() => void submitLeave()}
                     >

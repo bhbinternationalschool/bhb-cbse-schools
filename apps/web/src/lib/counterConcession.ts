@@ -16,13 +16,31 @@ import {
   isAllSessionsConcession,
   loadMasters,
   newId,
-  saveMasters,
   type ConcessionGrant,
   type ConcessionGround,
   type ConcessionRule,
   type MastersState,
 } from "@/lib/masters";
 import type { SisStudent } from "@/lib/sis";
+import { diffMastersLists } from "@/lib/data/mastersElementChanges";
+
+/**
+ * Write this action's concession changes — the new counter rule (if one was
+ * minted) and the grants created or ended — as element writes, one
+ * all-or-none batch (data-layer 2.2e). Before, the tab's WHOLE book went back
+ * to the server (saveMasters) and nobody awaited it: a refused or stale save
+ * left the clerk told "future grant approved" for a grant that never landed.
+ */
+async function writeConcessionChanges(
+  before: MastersState,
+  after: MastersState,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const changes = diffMastersLists(before, after, ["concessions", "concessionGrants"]);
+  if (changes.length === 0) return { ok: true };
+  const { writeMastersChanges } = await import("@/lib/data/client/mastersLibWrites");
+  const out = await writeMastersChanges(changes);
+  return out.ok ? { ok: true } : { ok: false, error: `Not saved — ${out.message}` };
+}
 
 export type FutureConcessionCandidate = {
   /** Stable key for UI selection */
@@ -346,9 +364,13 @@ function ensureCounterConcessionRule(
     return { state: masters, rule: existing, created: false };
   }
 
+  const code = counterRuleCode(input.feeHeadCode, input.discountPaise);
   const rule: ConcessionRule = {
-    id: newId("cnc"),
-    code: counterRuleCode(input.feeHeadCode, input.discountPaise),
+    // Fixed per head and amount (data-layer 2.2e): two counters minting the
+    // same rule at once write ONE id — the second create is refused, not a
+    // second identical definition.
+    id: `cnc_ctr_${input.feeHeadId}_${input.discountPaise}`,
+    code,
     name: `${input.feeHeadName} · ${formatInr(input.discountPaise)} off`,
     kind: "other",
     academicYearCode: input.academicYearCode,
@@ -378,70 +400,67 @@ function grantNeedsPrincipal(rule: ConcessionRule, discountPaise: number): boole
   return discountPaise > rule.autoApproveMaxPaise;
 }
 
-export function applyFutureConcessionsFromCounter(input: {
-  candidates: FutureConcessionCandidate[];
-  applyKeys: Set<string>;
+/** One recurring counter discount the clerk ticked (from a FutureConcessionCandidate). */
+export type CounterGrantItem = {
+  studentId: string;
+  studentName: string;
+  feeHeadId: string;
+  feeHeadName: string;
+  discountPaise: number;
+  dueLabel: string;
+  futureEffectiveFrom: string;
+};
+
+export type CounterGrantRequest = {
+  items: CounterGrantItem[];
   reason: string;
   academicYearCode: string;
-  /**
-   * The receipt this discount rode in on. Stamped into each grant's reason
-   * (`[v:<voucherId>]`) so voiding that receipt can auto-revoke the grants
-   * it created — a dead receipt must not leave its concession running.
-   */
+  ground?: ConcessionGround | "";
+  /** The receipt this discount rode in on (`[v:<id>]` marker); absent on the discount-only path. */
   sourceVoucherId?: string;
   sourceReceiptNo?: string;
-  /**
-   * Whether the person at the counter may approve a concession.
-   *
-   * The fee counter creates standing grants exactly like Masters does, so
-   * the same rule has to hold here: an assigned user's recurring discount is
-   * PENDING until owner, admin or principal approves it. Without this a
-   * clerk who cannot approve a ₹500 grant in Masters could approve the same
-   * ₹500 by ticking a box at the counter.
-   *
-   * Defaults to false — the safe reading. A caller that does not say who is
-   * collecting gets a grant that must be approved.
-   */
-  canApprove?: boolean;
-  /**
-   * WHY this family qualifies — sibling, staff ward, hardship, RTE, and so on.
-   *
-   * The reason line records the MECHANISM ("Fee Take · Counter concession ·
-   * from Tuition Fee"), which is where the discount was applied, not why it
-   * was owed. 108 of 149 live grants say only that, so for 99 of the 120
-   * children on a concession nobody can now say on what ground. This is the
-   * field that stops the hole getting deeper.
-   */
-  ground?: ConcessionGround | "";
-}):
-  | {
-      ok: true;
-      granted: number;
-      skipped: number;
-      pending: number;
-      ruleLabels: string[];
-      /** Heads refused because a discount is already on them. */
-      blocked: string[];
-    }
-  | { ok: false; error: string } {
-  if (input.applyKeys.size === 0) {
-    return {
-      ok: true, granted: 0, skipped: 0, pending: 0, ruleLabels: [], blocked: [],
-    };
-  }
+};
 
-  let masters = loadMasters();
+export type CounterGrantPlan = {
+  /** The book with the new rules and grants laid in. */
+  next: MastersState;
+  newRules: ConcessionRule[];
+  newGrants: ConcessionGrant[];
+  granted: number;
+  skipped: number;
+  pending: number;
+  ruleLabels: string[];
+  /** Heads refused because a discount is already on them. */
+  blocked: string[];
+};
+
+/** The counter grant's id: fixed per child, head and how many such grants they already have (data-layer 2.2e). */
+export function counterGrantId(studentId: string, feeHeadId: string, stored: readonly ConcessionGrant[]): string {
+  const prefix = `cg_ctr_${studentId}_${feeHeadId}_`;
+  const n = stored.filter((g) => g.id.startsWith(prefix)).length + 1;
+  return `${prefix}${n}`;
+}
+
+/**
+ * The counter's standing grants, planned on the STORED concessions and grants
+ * (data-layer 2.2e: the server runs this inside POST /api/fees/counter-grants,
+ * so "already on file", "one discount per head" and the approval rule are
+ * judged against what is stored, not against one tab's copy). Pure.
+ *
+ * Two counters granting the same child's head at once compute the same grant
+ * id (counterGrantId) — the second create is refused by the database, and its
+ * retry then finds the first grant and skips.
+ */
+export function planCounterGrants(
+  stored: MastersState,
+  input: CounterGrantRequest & { canApprove: boolean; by: string; nowIso: string },
+): CounterGrantPlan {
+  let masters = stored;
   const grants = [...(masters.concessionGrants ?? [])];
   const reason = input.reason.trim() || "Counter discount at Fee Take";
-  let granted = 0;
-  let skipped = 0;
-  let pending = 0;
-  const ruleLabels: string[] = [];
-  const blocked: string[] = [];
+  const out: CounterGrantPlan = { next: masters, newRules: [], newGrants: [], granted: 0, skipped: 0, pending: 0, ruleLabels: [], blocked: [] };
 
-  for (const item of input.candidates) {
-    if (!input.applyKeys.has(item.key)) continue;
-
+  for (const item of input.items) {
     const head = masters.feeHeads.find((h) => h.id === item.feeHeadId);
     const ensured = ensureCounterConcessionRule(masters, {
       academicYearCode: input.academicYearCode,
@@ -454,11 +473,12 @@ export function applyFutureConcessionsFromCounter(input: {
     masters = ensured.state;
     const rule = ensured.rule;
     if (ensured.created) {
-      ruleLabels.push(rule.name);
+      out.ruleLabels.push(rule.name);
+      out.newRules.push(rule);
     }
 
     if (isStudentAlreadyGranted(item.studentId, rule, grants, masters)) {
-      skipped += 1;
+      out.skipped += 1;
       continue;
     }
 
@@ -470,31 +490,26 @@ export function applyFutureConcessionsFromCounter(input: {
     // already there so the clerk can go and remove it.
     const clash = activeGrantOnHead(masters, item.studentId, item.feeHeadId, grants);
     if (clash) {
-      blocked.push(
+      out.blocked.push(
         `${item.studentName} · ${item.feeHeadName} already has ${clash.rule.name}` +
           ` — remove it in Masters → Concessions before granting another`,
       );
-      skipped += 1;
+      out.skipped += 1;
       continue;
     }
 
     // The amount can only keep it pending; it can never approve one for
     // somebody without the authority.
-    const needsPrincipal =
-      input.canApprove === false ||
-      grantNeedsPrincipal(rule, item.discountPaise);
-    const now = new Date().toISOString();
+    const needsPrincipal = !input.canApprove || grantNeedsPrincipal(rule, item.discountPaise);
     const row: ConcessionGrant = {
-      id: newId("cg"),
+      id: counterGrantId(item.studentId, item.feeHeadId, grants),
       concessionId: rule.id,
       studentId: item.studentId,
       ground: input.ground ?? "",
       status: needsPrincipal ? "pending" : "approved",
       reason:
-        `Fee Take · ${reason} · from ${item.dueLabel}` +
-        (input.sourceReceiptNo
-          ? ` · receipt ${input.sourceReceiptNo} [v:${input.sourceVoucherId ?? ""}]`
-          : ""),
+        `Fee Take · ${reason} · from ${item.dueLabel} · by ${input.by}` +
+        (input.sourceReceiptNo ? ` · receipt ${input.sourceReceiptNo} [v:${input.sourceVoucherId ?? ""}]` : ""),
       effectiveFrom: item.futureEffectiveFrom,
       /**
        * Ends with the session — 31 March.
@@ -511,17 +526,73 @@ export function applyFutureConcessionsFromCounter(input: {
        * guessed wrong would cut a family off early.
        */
       effectiveTo: academicYearEndOn(input.academicYearCode),
-      createdAt: now,
+      createdAt: input.nowIso,
       siblingChildNo: null,
     };
     grants.push(row);
-    if (needsPrincipal) pending += 1;
-    else granted += 1;
+    out.newGrants.push(row);
+    if (needsPrincipal) out.pending += 1;
+    else out.granted += 1;
   }
+  out.next = { ...masters, concessionGrants: grants };
+  return out;
+}
 
-  saveMasters({ ...masters, concessionGrants: grants });
-
-  return { ok: true, granted, skipped, pending, ruleLabels, blocked };
+/**
+ * The counter's "Also apply to future months": the standing grants for the
+ * ticked lines, recorded by the SERVER (POST /api/fees/counter-grants,
+ * data-layer 2.2e) — which reads the stored grants, refuses duplicates and
+ * decides approval from the session, and for a paid collection writes them
+ * only once the receipt itself is in the database (so a receipt the database
+ * refused never leaves a running grant behind). A fees · edit clerk may
+ * record these (director, 27 Oct 2026); editing the concession catalogue or
+ * other grants still needs Masters.
+ *
+ * A grant the server could not record yet is kept and retried
+ * (lib/data/client/counterGrantsClient) and the clerk is told.
+ */
+export async function applyFutureConcessionsFromCounter(input: {
+  candidates: FutureConcessionCandidate[];
+  applyKeys: Set<string>;
+  reason: string;
+  academicYearCode: string;
+  sourceVoucherId?: string;
+  sourceReceiptNo?: string;
+  ground?: ConcessionGround | "";
+}): Promise<
+  | {
+      ok: true;
+      granted: number;
+      skipped: number;
+      pending: number;
+      ruleLabels: string[];
+      blocked: string[];
+    }
+  | { ok: false; error: string }
+> {
+  const items: CounterGrantItem[] = input.candidates
+    .filter((c) => input.applyKeys.has(c.key))
+    .map((c) => ({
+      studentId: c.studentId,
+      studentName: c.studentName,
+      feeHeadId: c.feeHeadId,
+      feeHeadName: c.feeHeadName,
+      discountPaise: c.discountPaise,
+      dueLabel: c.dueLabel,
+      futureEffectiveFrom: c.futureEffectiveFrom,
+    }));
+  if (items.length === 0) {
+    return { ok: true, granted: 0, skipped: 0, pending: 0, ruleLabels: [], blocked: [] };
+  }
+  const { recordCounterGrants } = await import("@/lib/counterGrantsClient");
+  return recordCounterGrants({
+    items,
+    reason: input.reason,
+    academicYearCode: input.academicYearCode,
+    ground: input.ground,
+    sourceVoucherId: input.sourceVoucherId,
+    sourceReceiptNo: input.sourceReceiptNo,
+  });
 }
 
 /**
@@ -540,7 +611,7 @@ export function applyFutureConcessionsFromCounter(input: {
  * `fromDueOn` is the due date of the month the change takes effect from, which
  * the caller reads off the line the clerk is looking at.
  */
-export function changeStandingDiscount(input: {
+export async function changeStandingDiscount(input: {
   studentId: string;
   studentName: string;
   feeHeadId: string;
@@ -560,9 +631,10 @@ export function changeStandingDiscount(input: {
    * field that stops the hole getting deeper.
    */
   ground?: ConcessionGround | "";
-}):
+}): Promise<
   | { ok: true; endedGrantId: string | null; newGrantId: string | null }
-  | { ok: false; error: string } {
+  | { ok: false; error: string }
+> {
   if (!input.fromDueOn) {
     return { ok: false, error: "No month to start the change from" };
   }
@@ -571,6 +643,7 @@ export function changeStandingDiscount(input: {
   }
 
   let masters = loadMasters();
+  const loaded = masters;
   const grants = [...(masters.concessionGrants ?? [])];
 
   // Every grant still in force on or after the month we are changing from —
@@ -626,7 +699,8 @@ export function changeStandingDiscount(input: {
   // Zero means "remove the discount" — the old grant is closed and nothing
   // replaces it.
   if (input.newDiscountPaise === 0) {
-    saveMasters({ ...masters, concessionGrants: grants });
+    const saved = await writeConcessionChanges(loaded, { ...masters, concessionGrants: grants });
+    if (!saved.ok) return saved;
     return { ok: true, endedGrantId, newGrantId: null };
   }
 
@@ -658,7 +732,8 @@ export function changeStandingDiscount(input: {
   };
   grants.push(row);
 
-  saveMasters({ ...masters, concessionGrants: grants });
+  const saved = await writeConcessionChanges(loaded, { ...masters, concessionGrants: grants });
+  if (!saved.ok) return saved;
   return { ok: true, endedGrantId, newGrantId: row.id };
 }
 

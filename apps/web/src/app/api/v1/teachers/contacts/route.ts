@@ -1,5 +1,6 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
+import { readTimetableStateServer } from "@/lib/api/v1/teachingServer.server";
 import { childOfHousehold, requireParentHousehold } from "@/lib/api/v1/household";
 import { loadMasters } from "@/lib/masters";
 import { classLabelForStudent } from "@/lib/parentPortal";
@@ -18,6 +19,11 @@ export const dynamic = "force-dynamic";
  * WhatsApp link to the SCHOOL's number with the message pre-addressed
  * (the bot relays it). Links are only issued while the window is open;
  * the in-app chat is always available.
+ *
+ * Subject teachers come from the published timetable as stored. A failed
+ * timetable read is a 503 (the app shows its retry state) — never a list of
+ * class teachers alone, which would tell the parent their child has no
+ * subject teachers.
  */
 export async function GET(request: Request) {
   try {
@@ -32,8 +38,8 @@ export async function GET(request: Request) {
     const masters = loadMasters();
     const classLabel = classLabelForStudent(student, masters);
     const open = teacherHoursOpen();
-    const school = await schoolWhatsAppContact();
-    const teachers = teacherContactsFor(student, masters).map((t) => {
+    const [school, timetable] = await Promise.all([schoolWhatsAppContact(), readTimetableStateServer()]);
+    const teachers = teacherContactsFor(student, masters, timetable).map((t) => {
       const text = buildTeacherWaText({
         teacherName: t.name,
         role: t.role,

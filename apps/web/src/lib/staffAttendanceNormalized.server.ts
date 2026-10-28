@@ -367,6 +367,56 @@ export async function fetchStaffAttendanceRegistersFromDb(): Promise<{
   };
 }
 
+/**
+ * The registers (with their marks) dated from `from` to `to`, read for this
+ * request only — the month register's read (staff attendance month view).
+ * `ok: false` = the read failed: unknown, never an empty month.
+ */
+export async function fetchStaffAttendanceRegistersBetween(
+  from: string,
+  to: string,
+): Promise<{ ok: true; registers: StaffAttendanceRegister[] } | { ok: false; error: string }> {
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const { sb, tenantId } = ctx;
+  const headersRes = await fetchAllPages<Record<string, unknown>>((a, b) =>
+    sb
+      .from("staff_attendance_desk_registers")
+      .select("id, academic_year_code, attendance_date, marked_by, marked_at, remark")
+      .eq("tenant_id", tenantId)
+      .gte("attendance_date", from)
+      .lte("attendance_date", to)
+      .order("id", { ascending: true })
+      .range(a, b),
+  );
+  if (headersRes.error) return { ok: false, error: headersRes.error };
+  const headers = headersRes.rows;
+  if (!headers.length) return { ok: true, registers: [] };
+  const markRes = await fetchByIds<Record<string, unknown>>(
+    headers.map((h) => String(h.id)),
+    (chunk, a, b) =>
+      sb
+        .from("staff_attendance_desk_marks")
+        .select("register_id, staff_id, status, note, in_time, out_time, punch_way")
+        .eq("tenant_id", tenantId)
+        .in("register_id", chunk)
+        .order("id", { ascending: true })
+        .range(a, b),
+  );
+  if (markRes.error) return { ok: false, error: markRes.error };
+  const byRegister = new Map<string, Record<string, unknown>[]>();
+  for (const m of markRes.rows) {
+    const k = String(m.register_id);
+    const list = byRegister.get(k) ?? [];
+    list.push(m);
+    byRegister.set(k, list);
+  }
+  return {
+    ok: true,
+    registers: headers.map((h) => rowToRegister(h, byRegister.get(String(h.id)) ?? [])),
+  };
+}
+
 export async function pushStaffAttendanceDeskToDb(
   state: Pick<StaffAttendanceState, "registers" | "settings"> &
     Partial<Pick<StaffAttendanceState, "outdoorDuty">>,

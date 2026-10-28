@@ -352,7 +352,10 @@ export type InvPaymentMode =
   | "neft"
   | "rtgs"
   | "imps"
-  | "card";
+  | "card"
+  /** Paid from the Cashfree Payouts wallet — only ever set by the server
+   *  when Cashfree confirms (payoutRequests.server); refused from screens. */
+  | "cashfree";
 
 export type InvIndentLine = {
   id: string;

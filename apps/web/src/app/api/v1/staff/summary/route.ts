@@ -2,11 +2,12 @@ import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureAttendanceHydratedServer } from "@/lib/attendancePersistence";
-import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
 import { findRegister, loadAttendance } from "@/lib/attendance";
-import { loadTimetable, periodBell } from "@/lib/timetable";
+import { readTimetableStateServer } from "@/lib/api/v1/teachingServer.server";
+import { staffPeriodsOn } from "@/lib/api/v1/staffTimetableView";
 import { loadSisForStaff, studentsInSession } from "@/lib/sis";
 import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { attendanceCoverToday } from "@/lib/attendanceCover.server";
 
 export const runtime = "nodejs";
 
@@ -26,6 +27,13 @@ function todayInKolkata(): { date: string; weekday: number } {
  * GET /api/v1/staff/summary — the teacher home screen payload: who I am,
  * which section I'm class teacher of (with today's attendance status),
  * and my periods today from the published timetable.
+ *
+ * The timetable is read from its desk slices (until 13 Oct 2026 this read
+ * loadTimetable(), empty on the server, so "Today's periods" was always
+ * empty). A failed read is a 503, not "no periods today". Published grids
+ * only — the home screen shows no "draft" label, and a draft grid grants no
+ * section (timetableScope.server.ts); `timetablePublished: false` says why
+ * the list is empty.
  */
 export async function GET(request: Request) {
   try {
@@ -46,21 +54,20 @@ export async function GET(request: Request) {
       : null;
 
     await ensureSchoolMirrorHydrated();
-    await Promise.all([
-      ensureTimetableHydratedServer(),
+    const [tt] = await Promise.all([
+      readTimetableStateServer(),
       ensureAttendanceHydratedServer(),
     ]);
 
     const scope = await staffSectionScope(ctx);
     const ay = scope.academicYearCode;
+    const cover = scope.unrestricted ? [] : await attendanceCoverToday(ctx, ay);
     const { date, weekday } = todayInKolkata();
 
     const classNameOf = (id: string) =>
       ctx.masters.classes.find((c) => c.id === id)?.name || "";
     const sectionNameOf = (id: string) =>
       ctx.masters.sections.find((s) => s.id === id)?.name || "";
-    const subjectNameOf = (id: string) =>
-      ctx.masters.subjects.find((s) => s.id === id)?.nameEn || "";
 
     // Class teacher section (primary link for this AY first).
     const links = (staff?.classTeacherLinks || []).filter((l) =>
@@ -86,29 +93,18 @@ export async function GET(request: Request) {
       };
     }
 
-    // Today's periods across published grids (fallback: working grids).
-    const tt = loadTimetable();
-    const grids = tt.publishedGrids.length ? tt.publishedGrids : tt.grids;
-    // Each period's time from its own class's bell (pre-primary may differ).
-    const at = (classId: string, periodNo: number) => periodBell(tt, classId, periodNo);
-
-    const periods = grids
-      .filter((g) => !g.academicYearCode || g.academicYearCode === ay)
-      .flatMap((g) =>
-        g.slots
-          .filter((s) => s.teacherId === staffId && s.weekday === weekday)
-          .map((s) => ({
-            periodNo: s.periodNo,
-            startTime: at(g.classId, s.periodNo)?.startTime || "",
-            endTime: at(g.classId, s.periodNo)?.endTime || "",
-            subjectName: subjectNameOf(s.subjectId),
-            classId: g.classId,
-            sectionId: g.sectionId,
-            className: classNameOf(g.classId),
-            sectionName: sectionNameOf(g.sectionId),
-          })),
-      )
-      .sort((a, b) => a.startTime.localeCompare(b.startTime) || a.periodNo - b.periodNo);
+    // Today's periods: published grids only (see above).
+    const today = staffPeriodsOn(tt, ctx.masters, { staffId, academicYearCode: ay, weekday });
+    const periods = today.periods.map((p) => ({
+      periodNo: p.periodNo,
+      startTime: p.startTime,
+      endTime: p.endTime,
+      subjectName: p.subjectName,
+      classId: p.classId,
+      sectionId: p.sectionId,
+      className: p.className,
+      sectionName: p.sectionName,
+    }));
 
     // The app's class/section picker. It used to be every class in the
     // school for everyone, so a teacher picked any class and was refused on
@@ -136,6 +132,20 @@ export async function GET(request: Request) {
             }
             c.sections.push({ id: t.sectionId, name: t.sectionName });
           }
+          // Today's attendance cover — a substitute or the class's
+          // co-ordinator while its teacher is away (13 Oct 2026). Named
+          // "· cover today" so the teacher knows why it is there; any other
+          // screen using this picker refuses it on save.
+          for (const cv of cover) {
+            let c = byClass.get(cv.classId);
+            if (!c) {
+              c = { id: cv.classId, name: classNameOf(cv.classId), sections: [] };
+              byClass.set(cv.classId, c);
+            }
+            if (!c.sections.some((x) => x.id === cv.sectionId)) {
+              c.sections.push({ id: cv.sectionId, name: `${sectionNameOf(cv.sectionId)} · cover today` });
+            }
+          }
           return [...byClass.values()];
         })();
 
@@ -154,6 +164,7 @@ export async function GET(request: Request) {
       academicYearCode: ay,
       classTeacherOf,
       periodsToday: periods,
+      timetablePublished: today.published,
       classes,
       // Newer clients: each of my sections with MY subjects in it.
       teaching: scope.teaching,

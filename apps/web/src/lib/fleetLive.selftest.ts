@@ -4,6 +4,7 @@
  */
 import assert from "node:assert/strict";
 import {
+  detectIdling,
   ageSeconds,
   estimateEtaMinutes,
   evaluateFleetAlerts,
@@ -57,6 +58,27 @@ const vehicles = [
 assert.equal(positionForVehicle(vehicles[0]!, positions)?.vehicleRef, "MAT558053TVE29204", "by plate");
 assert.equal(positionForVehicle(vehicles[1]!, positions)?.vehicleRef, "MAT557029PUA00368", "by VIN when the desk holds a VIN as the plate");
 assert.equal(positionForVehicle(vehicles[2]!, positions), null, "Rajesh's van has no tracker");
+
+// Chassis no.: Magic-3 with its plate in Registration and VIN in Chassis no.
+// matches a Fleet Edge ping whose plate is "NA".
+{
+  const magic3Ping: LivePosition = { vehicleRef: "MAT558053TVG40149", registrationNumber: "NA", recordedAt: at(1), lat: 25.4, lng: 82.9, speedKmh: 0, courseDeg: null, ignitionOn: false, fuelPercent: null, odometerKm: null };
+  const all = [...positions, magic3Ping];
+  const v3 = { id: "veh_m3", registrationNo: "UP65ST1373", chassisNo: "MAT558053TVG40149", name: "Magic-3" };
+  assert.equal(positionForVehicle(v3, all)?.vehicleRef, "MAT558053TVG40149", "by chassis no.");
+  assert.equal(positionForVehicle({ ...v3, registrationNo: "MAT558053TVG40149", chassisNo: "" }, all)?.vehicleRef, "MAT558053TVG40149", "old shape unchanged");
+  assert.equal(positionForVehicle({ ...v3, chassisNo: "" }, all), null, "plate alone cannot find an NA tracker");
+  // Plate first: a plate hit beats a chassis hit.
+  assert.equal(positionForVehicle({ id: "x", name: "x", registrationNo: "UP65RT9825", chassisNo: "MAT558053TVG40149" }, all)?.vehicleRef, "MAT558053TVE29204");
+  const drains = evaluateFleetAlerts({
+    vehicles: [{ ...v3, isActive: true, status: "active", serviceSchedule: [], compliance: [] }],
+    positions: [],
+    nowMs: T0,
+    lastSent: {},
+    fuelDrains: [{ vehicleRef: "MAT558053TVG40149", registrationNumber: "NA", at: at(5), detail: "drop 3 L" }],
+  });
+  assert.deepEqual(drains.filter((a) => a.kind === "fuel_drain").map((a) => a.key), ["fuel_drain:veh_m3"], "fuel drain reaches Magic-3 by chassis");
+}
 
 // 17:30 IST is inside the window: no out-of-hours alert, but low fuel + service + paper.
 {
@@ -113,5 +135,50 @@ assert.equal(positionForVehicle(vehicles[2]!, positions), null, "Rajesh's van ha
 const text = renderFleetAlertText({ key: "x", kind: "out_of_hours", vehicleId: "v", vehicleLabel: "Magic-2", title: "Bus moving outside school hours", detail: "Moving at 32 km/h.", at: { lat: 25.44, lng: 82.96 } }, "BHB", "2026-09-10 21:40 IST");
 assert.match(text, /\*Bus moving outside school hours\*/);
 assert.match(text, /https:\/\/maps\.google\.com\/\?q=25\.440000,82\.960000/);
+
+// Idling: engine on, still, 12 minutes → spell; ignition unknown never counts; stale tail is not idling.
+{
+  const now = Date.parse("2026-10-14T03:00:00Z");
+  const pt = (minAgo: number, extra: Partial<{ ignitionOn: boolean | null; speedKmh: number; lat: number }> = {}) => ({
+    recordedAt: new Date(now - minAgo * 60_000).toISOString(),
+    lat: extra.lat ?? 25.44,
+    lng: 82.96,
+    speedKmh: extra.speedKmh ?? 0,
+    ignitionOn: extra.ignitionOn === undefined ? true : extra.ignitionOn,
+  });
+  const spell = detectIdling([pt(15, { speedKmh: 20 }), ...[12, 10, 8, 6, 4, 2, 0].map((m) => pt(m))], now);
+  assert.deepEqual(spell && spell.minutes, 12);
+  assert.equal(detectIdling([pt(6, { speedKmh: 20 }), pt(4), pt(2), pt(0)], now), null, "4 minutes is loading, not idling");
+  assert.equal(detectIdling([12, 6, 0].map((m) => pt(m, { ignitionOn: null })), now), null);
+  assert.equal(detectIdling([12, 10, 8].map((m) => pt(m)), now), null, "newest ping 8 min old → tracker quiet, not idling");
+  assert.equal(detectIdling([pt(12), pt(6, { lat: 25.45 }), pt(0)], now), null, "moved 1 km in between");
+
+  const vehicles = [{ id: "veh_i", name: "Magic-9", registrationNo: "UP65AA0001", isActive: true, status: "active" }];
+  // 08:00 IST on a Tuesday: idle spell + last position 45 min old.
+  const t = Date.parse("2026-10-13T02:30:00Z");
+  const alerts = evaluateFleetAlerts({
+    vehicles,
+    positions: [{ vehicleRef: "X", registrationNumber: "UP65AA0001", recordedAt: new Date(t - 45 * 60_000).toISOString(), lat: 25.44, lng: 82.96, speedKmh: 0, courseDeg: null, ignitionOn: true, fuelPercent: null, odometerKm: null }],
+    nowMs: t,
+    lastSent: {},
+    idleSpells: [{ vehicleId: "veh_i", minutes: 14, lat: 25.44, lng: 82.96, atSchool: false }],
+  });
+  assert.deepEqual(alerts.map((a) => a.kind).sort(), ["idling", "tracker_silent"]);
+  // Cooldown: idling sent 10 min ago → not again.
+  const again = evaluateFleetAlerts({
+    vehicles,
+    positions: [],
+    nowMs: t,
+    lastSent: { "idling:veh_i": new Date(t - 10 * 60_000).toISOString() },
+    idleSpells: [{ vehicleId: "veh_i", minutes: 24, lat: 25.44, lng: 82.96, atSchool: true }],
+  });
+  assert.equal(again.length, 0);
+  // Sunday: no tracker-silent alert.
+  const sunday = Date.parse("2026-10-11T04:30:00Z");
+  assert.equal(
+    evaluateFleetAlerts({ vehicles, positions: [{ vehicleRef: "X", registrationNumber: "UP65AA0001", recordedAt: new Date(sunday - 90 * 60_000).toISOString(), lat: 25.44, lng: 82.96, speedKmh: 0, courseDeg: null, ignitionOn: false, fuelPercent: null, odometerKm: null }], nowMs: sunday, lastSent: {} }).filter((a) => a.kind === "tracker_silent").length,
+    0,
+  );
+}
 
 console.log("  ok");

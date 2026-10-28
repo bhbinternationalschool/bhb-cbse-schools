@@ -3,6 +3,7 @@
  * when Supabase is configured, push/pull overlays remote rows.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
@@ -195,6 +196,8 @@ export async function pushClassCurriculumTemplatesRemote(
 
 /** Debounced push after local saveSis. */
 export function scheduleCurriculumSync(state: SisLike) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureCurriculumHydrated())) return;
   if (!curriculumRemoteEnabled()) return;
   if (typeof window === "undefined") return;
   pendingPush = state;

@@ -73,6 +73,12 @@ export const L_PAYOUTS_WALLET = "1110";
 /** The gateway's own fee. GST on it goes to 1080 and is claimable. */
 export const L_PG_CHARGES = "5080";
 /**
+ * Fees paid to visiting staff (AI teacher, music, dance, survey members) by
+ * the period, hour or day — not salary: no PF/ESIC, TDS under 194J when
+ * ticked (lib/visitingPay.ts).
+ */
+export const L_VISITING_FEES = "5075";
+/**
  * The gateway fee recovered from the parent, where the school has chosen to
  * pass it on rather than absorb it.
  *
@@ -181,6 +187,7 @@ export function defaultLedgerAccounts(): LedgerAccountSeed[] {
     { code: L_COGS, name: "Cost of Goods Sold", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
     { code: L_STOCK_WRITTEN_OFF, name: "Stock Written Off", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
     { code: "5070", name: "Salary & Wages", kind: "expense", parentCode: "5", scheduleGroup: G.establishment },
+    { code: L_VISITING_FEES, name: "Visiting Faculty / Professional Fees", kind: "expense", parentCode: "5", scheduleGroup: G.establishment },
     { code: L_PG_CHARGES, name: "Payment Gateway Charges", kind: "expense", parentCode: "5", scheduleGroup: G.administrative },
     { code: L_FEE_CONCESSION, name: "Fee Concessions & RTE", kind: "expense", parentCode: "5", scheduleGroup: G.feeIncome },
     { code: L_DEPRECIATION, name: "Depreciation", kind: "expense", parentCode: "5", scheduleGroup: G.depreciation },

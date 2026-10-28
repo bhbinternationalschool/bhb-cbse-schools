@@ -111,6 +111,25 @@ if [[ "${SKIP_DESK_ENV_CHECK:-}" != "1" ]]; then
   }
 fi
 
+# The runtime desk flags now come ONLY from the committed
+# deploy/desk-cutover-runtime.env, inside the single `gcloud run deploy` in
+# cloudbuild.yaml (13 Oct 2026). This script used to add the flags generated
+# from .env.local afterwards, so a flag present only in .env.local reached
+# production. Refuse to deploy rather than drop one silently.
+DESK_DRIFT="$(python3 - "$ROOT/deploy/.generated/desk-cutover-runtime.yaml" "$ROOT/deploy/desk-cutover-runtime.env" <<'PY'
+import re, sys
+gen = {l.split(":", 1)[0].strip() for l in open(sys.argv[1]) if ":" in l and not l.strip().startswith("#")}
+com = {l.split("=", 1)[0] for l in open(sys.argv[2]) if re.match(r"^[A-Za-z0-9_]+=", l)}
+print(" ".join(sorted(k for k in gen - com if k)))
+PY
+)"
+if [[ -n "$DESK_DRIFT" ]]; then
+  echo "These desk flags are in .env.local but not in deploy/desk-cutover-runtime.env:"
+  echo "  $DESK_DRIFT"
+  echo "The deploy sets runtime desk flags only from the committed file. Add them there and commit."
+  exit 1
+fi
+
 echo "Project:  $PROJECT_ID"
 echo "Region:   $REGION"
 echo "App URL:  $APP_URL"
@@ -213,16 +232,32 @@ if [[ -n "$BIGQUERY_PROJECT_ID" ]]; then
 else
   echo "BigQuery: not configured — run ./scripts/setup-bigquery-gcp.sh after deploy"
 fi
+
+# The commit being deployed. It labels the Cloud Run revision (`commit`) and
+# is served by /api/app-version, so "is the fix live?" is one command. A
+# `git archive` export has no .git: pass it in, e.g.
+#   COMMIT_SHA=$(git rev-parse origin/main) bash scripts/deploy-online.sh
+COMMIT_SHA="${COMMIT_SHA:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)}"
+COMMIT_SHA="$(printf '%s' "$COMMIT_SHA" | tr 'A-F' 'a-f')"
+if [[ ! "$COMMIT_SHA" =~ ^[0-9a-f]{7,40}$ ]]; then
+  echo "WARNING: no commit sha (set COMMIT_SHA=…) — the revision will not name its commit."
+  COMMIT_SHA=""
+fi
+echo "Commit:   ${COMMIT_SHA:-unknown}"
 echo ""
 echo "Submitting Cloud Build (this replaces school-erp-web)…"
 
-# Optional: bootstrap Supabase super admin + RBAC (requires service role in .env.local)
-if [[ "${SKIP_BOOTSTRAP:-}" != "1" ]] && grep -q "SUPABASE_SERVICE_ROLE_KEY=." "$ENV_FILE" 2>/dev/null; then
+# bootstrap:go-live and wa:subscribe write to PRODUCTION (roles, RBAC slices,
+# profiles; the Meta app subscription). Since 13 Oct 2026 they run only when
+# asked for: RUN_BOOTSTRAP=1 / RUN_WA_SUBSCRIBE=1. From a `git archive` export
+# they always failed anyway (no node_modules), and from a real checkout the
+# bootstrap would rewrite RBAC under the role model of PRs #574–#577.
+if [[ "${RUN_BOOTSTRAP:-}" == "1" ]] && grep -q "SUPABASE_SERVICE_ROLE_KEY=." "$ENV_FILE" 2>/dev/null; then
   echo "Running bootstrap:go-live (Supabase RBAC + director profile)…"
   (cd "$ROOT/apps/web" && npm run bootstrap:go-live) || echo "Bootstrap warning — continue deploy"
 fi
 
-if [[ "${SKIP_WA_SUBSCRIBE:-}" != "1" ]] && grep -q "WHATSAPP_TOKEN=." "$ENV_FILE" 2>/dev/null; then
+if [[ "${RUN_WA_SUBSCRIBE:-}" == "1" ]] && grep -q "WHATSAPP_TOKEN=." "$ENV_FILE" 2>/dev/null; then
   echo "Ensuring Meta app is subscribed to WABA (inbound webhooks)…"
   (cd "$ROOT/apps/web" && npm run wa:subscribe) || echo "WABA subscribe warning — continue deploy"
 fi
@@ -314,44 +349,28 @@ SUBSTITUTIONS+="@_CASHFREE_PAYOUTS_ARMED=${CASHFREE_PAYOUTS_ARMED:-false}"
 SUBSTITUTIONS+="@_REVIEW_LOGIN_MOBILE=${REVIEW_LOGIN_MOBILE}"
 SUBSTITUTIONS+="@_REVIEW_LOGIN_CODE=${REVIEW_LOGIN_CODE}"
 SUBSTITUTIONS+="@_REVIEW_LOGIN_HOUSEHOLD_ID=${REVIEW_LOGIN_HOUSEHOLD_ID}"
+SUBSTITUTIONS+="@_COMMIT_SHA=${COMMIT_SHA}"
+# BigQuery settings and the desk-cutover flags are part of the single
+# `gcloud run deploy` in cloudbuild.yaml (13 Oct 2026). They used to be two
+# `gcloud run services update` calls after the build: two extra revisions,
+# and 20–60 s of production running without the desk flags in between.
+SUBSTITUTIONS+="@_BIGQUERY_PROJECT_ID=${BIGQUERY_PROJECT_ID}"
+SUBSTITUTIONS+="@_BIGQUERY_DATASET=${BIGQUERY_DATASET:-bhb_erp}"
+SUBSTITUTIONS+="@_BIGQUERY_LOCATION=${BIGQUERY_LOCATION:-asia-south1}"
+SUBSTITUTIONS+="@_BIGQUERY_TENANT_SLUG=${BIGQUERY_TENANT_SLUG:-bhb-international}"
 
 gcloud builds submit "$ROOT" \
   --project="$PROJECT_ID" \
   --config="$ROOT/cloudbuild.yaml" \
   --substitutions="${SUBSTITUTIONS}"
 
-echo ""
-echo "Applying desk cutover env (additive update)…"
-DESK_UPDATE="$(python3 "$ROOT/scripts/lib/formatDeskCutoverUpdate.py" "$ROOT/deploy/.generated/desk-cutover-runtime.yaml")"
-gcloud run services update school-erp-web \
-  --project="$PROJECT_ID" \
-  --region="$REGION" \
-  --update-env-vars="^@^${DESK_UPDATE}" \
-  >/dev/null
-
+# A deploy routes all traffic to the new revision already; this also undoes a
+# traffic pin left by an earlier rollback. It creates no revision.
 gcloud run services update-traffic school-erp-web \
   --project="$PROJECT_ID" \
   --region="$REGION" \
   --to-latest \
   >/dev/null
-
-if [[ -n "${BIGQUERY_PROJECT_ID:-}" ]]; then
-  echo "Applying BigQuery + Postgres env on Cloud Run…"
-  BQ_DATASET="${BIGQUERY_DATASET:-bhb_erp}"
-  BQ_LOCATION="${BIGQUERY_LOCATION:-asia-south1}"
-  BQ_TENANT="${BIGQUERY_TENANT_SLUG:-bhb-international}"
-  BQ_UPDATE="BIGQUERY_PROJECT_ID=${BIGQUERY_PROJECT_ID}|BIGQUERY_DATASET=${BQ_DATASET}|BIGQUERY_LOCATION=${BQ_LOCATION}|BIGQUERY_TENANT_SLUG=${BQ_TENANT}"
-  # DIRECT_URL is deliberately absent here — it moved to Secret Manager on
-  # 2026-08-12 and is already applied by cloudbuild.yaml's --set-secrets in
-  # the main deploy step above. Pushing it again as a plain value here hits
-  # the same "already been set with a different type" error that broke this
-  # whole script until this file was updated.
-  gcloud run services update school-erp-web \
-    --project="$PROJECT_ID" \
-    --region="$REGION" \
-    --update-env-vars="^|^${BQ_UPDATE}" \
-    >/dev/null
-fi
 
 echo ""
 echo "Syncing school-erp-lite (GPS pushes + night ticks, per-request billing)…"

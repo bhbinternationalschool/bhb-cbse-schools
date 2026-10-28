@@ -21,7 +21,12 @@ const ok = (kind: "student" | "household", p: Record<string, unknown>) => {
 expect("mobile +91", mobile10("+91 98765-43210"), "9876543210");
 expect("mobile 0", mobile10("09876543210"), "9876543210");
 expect("mobile bad", mobile10("12345"), null);
-expect("wa number", ok("household", { whatsappMobile: "+91 98765 43210" }), { whatsappMobile: "9876543210" });
+expect("wa number", ok("household", { whatsappMobile: "+91 98391 24567" }), { whatsappMobile: "9839124567" });
+// A placeholder is never a family's number (PR #377), on any mobile field.
+for (const ph of ["0000000000", "9999999999", "+91 99999 99999", "9876543210", "1234567890", "6666666666"]) {
+  expect(`wa placeholder ${ph}`, String(ok("household", { whatsappMobile: ph })).startsWith("ERR"), true);
+}
+expect("father placeholder", String(ok("student", { fatherMobile: "8888888888" })).startsWith("ERR"), true);
 expect("wa not a number", typeof ok("household", { whatsappMobile: "98765" }), "string");
 expect("wa cleared refused", String(ok("household", { whatsappMobile: "" })).startsWith("ERR"), true);
 
@@ -43,7 +48,7 @@ expect("name empty", String(ok("student", { fullName: " " })).startsWith("ERR"),
 expect("gender", String(ok("student", { gender: "X" })).startsWith("ERR"), true);
 expect("blood group", ok("student", { bloodGroup: "B+" }), { bloodGroup: "B+" });
 expect("pincode", String(ok("household", { pincode: "22100" })).startsWith("ERR"), true);
-expect("father mobile", ok("student", { fatherMobile: "9876543210" }), { fatherMobile: "9876543210" });
+expect("father mobile", ok("student", { fatherMobile: "9839124567" }), { fatherMobile: "9839124567" });
 expect("nothing", String(ok("student", {})).startsWith("ERR"), true);
 
 if (failed) {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireWaStaffApi } from "@/lib/apiRouteAuth.server";
+import { orCommsFunction } from "@/lib/commsFunctionGate.server";
 import {
   listWaHubThreads,
   markWaHubThreadRead,
@@ -30,7 +31,7 @@ const CATEGORIES = new Set([
 
 /** GET ?category=parent — categorized WhatsApp threads + stats */
 export async function GET(req: Request) {
-  const auth = await requireWaStaffApi(req);
+  const auth = await orCommsFunction(req, await requireWaStaffApi(req), "notices.wa_chats", "view");
   if (!auth.ok) return auth.response;
   await ensureSchoolMirrorHydrated();
   const url = new URL(req.url);
@@ -49,8 +50,12 @@ export async function GET(req: Request) {
 
 /** POST { action, mobile?, category?, threadId?, text?, by?, template? } */
 export async function POST(req: Request) {
-  const auth = await requireWaStaffApi(req);
+  const wa = await requireWaStaffApi(req);
+  const auth = await orCommsFunction(req, wa, "notices.wa_chats", "view");
   if (!auth.ok) return auth.response;
+  // Marking a thread read is part of reading it; replying is sending, which
+  // a function holder needs "send" for.
+  const maySend = async () => (await orCommsFunction(req, wa, "notices.wa_chats", "send")).ok;
   await ensureSchoolMirrorHydrated();
   let body: {
     action?: string;
@@ -76,6 +81,10 @@ export async function POST(req: Request) {
   if (body.action === "markRead" && body.mobile && body.category) {
     await markWaHubThreadRead(body.mobile, body.category);
     return NextResponse.json({ ok: true });
+  }
+
+  if ((body.action === "reply" || body.action === "sendTemplate") && !(await maySend())) {
+    return NextResponse.json({ error: "Replying needs WhatsApp chats · send" }, { status: 403 });
   }
 
   if (body.action === "reply" && body.threadId && body.text) {

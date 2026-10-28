@@ -7,13 +7,17 @@ import "package:flutter_svg/flutter_svg.dart";
 import "package:url_launcher/url_launcher.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/ui/stale_banner.dart";
 import "../../core/config/app_config.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../../core/ui/motion.dart";
 import "../../core/ui/spacing.dart";
 import "../modules/attendance_history_screen.dart";
+import "../modules/exam_date_sheet_screen.dart";
+import "../modules/results_screen.dart";
 import "../modules/chat_thread_screen.dart";
+import "../modules/school_chat_screen.dart";
 import "../modules/complaints_screen.dart";
 import "../modules/ebook_shelf_screen.dart";
 import "../modules/online_classes_screen.dart";
@@ -21,16 +25,19 @@ import "../modules/gallery_screen.dart";
 import "../modules/fees_screen.dart";
 import "../modules/homework_screen.dart";
 import "../modules/leave_screen.dart";
+import "../modules/notice_detail_screen.dart";
 import "../modules/notices_screen.dart";
 import "../modules/ptm_screen.dart";
 import "../modules/receipts_screen.dart";
 import "../modules/teachers_screen.dart";
 import "../modules/transport_screen.dart";
 import "../modules/tutor_screen.dart";
+import "../modules/games_screen.dart";
 import "../profile/profile_screen.dart";
 import "home_stats.dart";
 import "student_id_screen.dart";
 import "../../core/i18n/locale_controller.dart";
+import "../../core/push/notification_bell.dart";
 
 class _Module {
   const _Module(this.label, this.icon, this.tone);
@@ -45,12 +52,16 @@ const _modules = [
   _Module("Attendance", Icons.fact_check_outlined, ModuleTone.teal),
   _Module("Homework", Icons.menu_book_outlined, ModuleTone.purple),
   _Module("Tutor", Icons.school_outlined, ModuleTone.amber),
+  // Learning games: practice from the class's own books, number dash and
+  // teacher-launched competitions; time played and stars for the parent.
+  _Module("Games", Icons.sports_esports_outlined, ModuleTone.purple),
   _Module("Notices", Icons.campaign_outlined, ModuleTone.coral),
   _Module("Transport", Icons.directions_bus_outlined, ModuleTone.pink),
-  // Exams (date sheets, report cards) is deliberately absent. It was a tile
-  // that opened a "coming soon" sheet, and Google Play rejects placeholder
-  // features under Minimum Functionality. Put it back the same day the exams
-  // endpoint returns real published results — not before.
+  // Results and Date sheet open real data: only exams the school released
+  // to parents (Exams desk → "Show to parents"); until then each screen says
+  // "not published yet" rather than showing a placeholder.
+  _Module("Results", Icons.workspace_premium_outlined, ModuleTone.green),
+  _Module("Date sheet", Icons.event_note_outlined, ModuleTone.amber),
   _Module("Online class", Icons.videocam_outlined, ModuleTone.blue),
   _Module("Library", Icons.local_library_outlined, ModuleTone.green),
   _Module("PTM", Icons.groups_outlined, ModuleTone.gray),
@@ -69,6 +80,7 @@ String _moduleLabel(BuildContext context, String id) {
     "Attendance" => l.homeModuleAttendance,
     "Homework" => l.homeModuleHomework,
     "Tutor" => l.homeModuleTutor,
+    "Games" => l.homeModuleGames,
     "Notices" => l.notices,
     "Transport" => l.transport,
     "Online class" => l.homeModuleOnlineClass,
@@ -78,6 +90,8 @@ String _moduleLabel(BuildContext context, String id) {
     "Complaints" => l.homeModuleComplaints,
     "Receipts" => l.homeModuleReceipts,
     "Gallery" => l.gallery,
+    "Results" => l.homeModuleResults,
+    "Date sheet" => l.homeModuleDateSheet,
     _ => id,
   };
 }
@@ -118,6 +132,12 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   String? _pendingRoute;
 
+  /// data-layer 4.4: set when the server could not be reached and the home
+  /// shows the copy saved at this time; the banner says so.
+  DateTime? _staleSince;
+  final _clock = RefreshClock();
+  late final _resume = ResumeWatcher(_onResume);
+
   /// Attendance and homework per child, loaded after the summary. A missing
   /// entry (still loading, or the call failed) shows as a dash.
   final _attendance = <String, AttendanceHistory>{};
@@ -127,7 +147,20 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _pendingRoute = widget.openRoute;
-    _load();
+    _resume.attach();
+    _load(first: true);
+  }
+
+  @override
+  void dispose() {
+    _resume.detach();
+    super.dispose();
+  }
+
+  /// Back in front after 2 minutes or more: re-read the summary (dues,
+  /// children), so a change at the school shows without a restart.
+  void _onResume() {
+    if (mounted && _clock.isStale) _load(stats: false);
   }
 
   @override
@@ -141,6 +174,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Turn a notification deep link into the same navigation a tap on the
   /// module grid would do. Unknown routes just land on Home.
+  /// An item's link from the notifications list.
+  void _openRoute(String route) {
+    _pendingRoute = route;
+    _consumePendingRoute();
+  }
+
   void _consumePendingRoute() {
     final raw = _pendingRoute;
     _pendingRoute = null;
@@ -158,6 +197,8 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
     switch (uri.path) {
+      case "/notifications":
+        openNotifications(context, widget.api, _openRoute);
       case "/homework":
         _openModule("Homework", child);
       case "/attendance":
@@ -165,7 +206,12 @@ class _HomeScreenState extends State<HomeScreen> {
       case "/fees":
         _openModule("Fees", child);
       case "/notices":
-        _openModule("Notices", child);
+        // A tapped broadcast opens in full; otherwise the notices list.
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => noticesScreenForRoute(widget.api, uri),
+          ),
+        );
       case "/ptm":
         _openModule("PTM", child);
       case "/transport":
@@ -205,24 +251,61 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         );
+      case "/school-chat":
+        _openSchoolChat(child);
     }
   }
 
-  Future<void> _load() async {
+  /// [first]: the app just opened this home — paint the saved copy at once.
+  Future<void> _load({bool first = false, bool stats = true}) async {
     setState(() => _error = null);
-    try {
-      final summary = await widget.api.fetchParentSummary();
-      if (!mounted) return;
-      setState(() {
-        _summary = summary;
-        if (_childIndex >= summary.children.length) _childIndex = 0;
-      });
-      if (_pendingRoute != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _consumePendingRoute();
+    ParentSummary? fresh;
+    await loadCachedThenFresh<ParentSummary>(
+      peek: first ? widget.api.cachedParentSummary : () async => null,
+      fetch: widget.api.fetchParentSummary,
+      onCached: (c) {
+        if (!mounted) return;
+        setState(() {
+          _summary = c.value;
+          if (_childIndex >= c.value.children.length) _childIndex = 0;
         });
-      }
-      _loadStats(summary);
+      },
+      onFresh: (summary) {
+        fresh = summary;
+        _clock.markFresh();
+        if (!mounted) return;
+        setState(() {
+          _summary = summary;
+          _staleSince = null;
+          if (_childIndex >= summary.children.length) _childIndex = 0;
+        });
+      },
+      onError: (e, since) {
+        if (!mounted) return;
+        setState(() {
+          if (_summary != null) {
+            // Keep what is on screen and say how old it is.
+            _staleSince = since ?? _clock.lastFresh ?? DateTime.now();
+          } else {
+            _error = e is ApiException
+                ? e.message
+                : context.l10n.couldNotReachTheSchoolServer;
+          }
+        });
+      },
+    );
+    if (!mounted || _summary == null) return;
+    if (_pendingRoute != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _consumePendingRoute();
+      });
+    }
+    final summary = fresh;
+    if (summary == null) return;
+    {
+      // A resume re-reads the summary only; the per-child tiles keep theirs
+      // unless they never loaded.
+      if (stats || _attendance.isEmpty) _loadStats(summary);
       // The school's pop-up, if any — once per app open (core/popups).
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -241,12 +324,6 @@ class _HomeScreenState extends State<HomeScreen> {
           },
         );
       });
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } catch (_) {
-      if (mounted) {
-        setState(() => _error = context.l10n.couldNotReachTheSchoolServer);
-      }
     }
   }
 
@@ -316,6 +393,8 @@ class _HomeScreenState extends State<HomeScreen> {
           studentId: child.id,
           child: child,
         );
+      case "Games":
+        screen = GamesScreen(backend: ApiGamesBackend(api), child: child);
       case "Notices":
         screen = NoticesScreen(api: api);
       case "PTM":
@@ -332,6 +411,10 @@ class _HomeScreenState extends State<HomeScreen> {
         screen = LeaveScreen(api: api, child: child);
       case "Receipts":
         screen = ReceiptsScreen(api: api);
+      case "Results":
+        screen = ResultsScreen(api: api, child: child);
+      case "Date sheet":
+        screen = ExamDateSheetScreen(api: api, child: child);
       case "Complaints":
         screen = ComplaintsScreen(
           api: api,
@@ -342,6 +425,26 @@ class _HomeScreenState extends State<HomeScreen> {
     if (screen != null) {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen!));
     }
+  }
+
+  /// School chat for the picked child: its class group, its subject groups
+  /// and direct chats with its teachers; the older class-teacher thread is
+  /// the first row.
+  void _openSchoolChat(ParentChild child) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SchoolChatScreen(
+          api: widget.api,
+          studentId: child.id,
+          childName: child.fullName,
+          classTeacherThread: (_) => ChatThreadScreen(
+            api: widget.api,
+            studentId: child.id,
+            studentName: child.fullName,
+          ),
+        ),
+      ),
+    );
   }
 
   void _openProfile() {
@@ -444,6 +547,10 @@ class _HomeScreenState extends State<HomeScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
             _Header(
+              bell: NotificationBellButton(
+                api: widget.api,
+                onOpenRoute: _openRoute,
+              ),
               child: child,
               siblings: summary.children,
               selectedIndex: _childIndex,
@@ -476,6 +583,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
+            StaleBanner(since: _staleSince, onRetry: _load, bottomGap: 8),
             // Notices and news scrolling across, as on the web ERP.
             RunningStrip(
               api: widget.api,
@@ -572,15 +680,7 @@ class _HomeScreenState extends State<HomeScreen> {
             case 1:
               _openModule("Fees", child);
             case 2:
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => ChatThreadScreen(
-                    api: widget.api,
-                    studentId: child.id,
-                    studentName: child.fullName,
-                  ),
-                ),
-              );
+              _openSchoolChat(child);
             case 3:
               _openProfile();
           }
@@ -616,8 +716,11 @@ class _Header extends StatelessWidget {
     required this.onSelectChild,
     required this.onNotices,
     required this.onLogout,
+    required this.bell,
   });
 
+  /// The notifications bell (core/push/notification_bell.dart).
+  final Widget bell;
   final ParentChild child;
   final List<ParentChild> siblings;
   final int selectedIndex;
@@ -669,12 +772,14 @@ class _Header extends StatelessWidget {
                         ),
                       ),
                     ),
+                    bell,
                     const ScreenGuideButton(
                       guideId: "parent-home",
                       screenLabel: "Home",
                     ),
                     _RoundAction(
-                      icon: Icons.notifications_none_rounded,
+                      // The bell is the notifications list now; notices keep their own button.
+                      icon: Icons.campaign_outlined,
                       tooltip: context.l10n.notices,
                       onTap: onNotices,
                     ),

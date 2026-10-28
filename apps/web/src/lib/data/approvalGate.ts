@@ -17,11 +17,17 @@
  * fires on the VALUE, not the column.
  */
 
-import type { RbacModule } from "@/lib/rbac";
+import type { RbacAction, RbacModule } from "@/lib/rbac";
 
 export type ApprovalRule = {
   /** Permission checked when the gate fires. Usually the collection's own. */
   readonly module: RbacModule;
+  /**
+   * The action checked on `module` when the gate fires; `approve` when
+   * absent. Staff removal asks `delete` (data-layer 2.2b), as the old
+   * staff-roster DELETE did.
+   */
+  readonly action?: RbacAction;
   /**
    * Column → the values that make a write a decision.
    * e.g. { status: ['published', 'scheduled'] }
@@ -32,6 +38,13 @@ export type ApprovalRule = {
    * for dates, where every non-null value means the same decision.
    */
   readonly whenSet?: readonly string[];
+  /**
+   * Every delete needs approval (data-layer 1.5): removing a student or a
+   * family hard-deletes the row and cascades to their transport point and
+   * fee-hold records, so it is a decision, not data entry — never behind
+   * `edit` alone.
+   */
+  readonly onDelete?: boolean;
   /** Shown to the author when they are refused, in their words not ours. */
   readonly message: string;
 };
@@ -48,7 +61,9 @@ export function batchNeedsApproval(
   ops: readonly { readonly op?: string; readonly row?: Record<string, unknown> }[],
 ): boolean {
   if (!rule) return false;
-  return ops.some((o) => rowNeedsApproval(rule, o.row));
+  return ops.some(
+    (o) => (rule.onDelete === true && o.op === "delete") || rowNeedsApproval(rule, o.row),
+  );
 }
 
 export function rowNeedsApproval(

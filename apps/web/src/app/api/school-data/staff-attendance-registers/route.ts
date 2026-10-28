@@ -1,4 +1,4 @@
-import { staffSectionScope } from "@/lib/api/v1/staffScope";
+import { readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import { NextResponse } from "next/server";
 import {
   authorizeSchoolDataDesk,
@@ -7,6 +7,7 @@ import {
 import type { StaffAttendanceState } from "@/lib/staffAttendance";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -23,6 +24,11 @@ import {
 } from "@/lib/staffAttendanceNormalized.server";
 
 import { readStampsParam } from "@/lib/rowStampClient";
+import {
+  isStaffRegisterOwner,
+  STAFF_REGISTER_OWNER_ONLY,
+  staffRegisterMarkChanges,
+} from "@/lib/staffRegisterOwner";
 
 export const runtime = "nodejs";
 
@@ -55,7 +61,9 @@ export async function GET(req: Request) {
   let outdoorDuty = desk.ancillary.outdoorDuty;
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       const me = scopeCtx.session.staffId || "";
       registers = desk.registers.map((r) => ({ ...r, marks: r.marks.filter((m) => !!me && m.staffId === me) }));
@@ -69,7 +77,10 @@ export async function GET(req: Request) {
     const cut = stripDeskForFeatures("attendance", { registers, outdoorDuty }, gate, {
       prefix: STAFF_PREFIX,
     });
-    registers = cut.registers;
+    // Attendance → Dashboard & reports (read only) owns no slice and reads
+    // the registers (already cut to the person's own marks above when
+    // their scope is restricted).
+    if (!gate.access("attendance.reports", "view").allowed) registers = cut.registers;
     outdoorDuty = cut.outdoorDuty;
   }
   // Each register's updated_at (only for the registers served): the
@@ -113,7 +124,9 @@ export async function POST(req: Request) {
   // not that a teacher's browser may push every colleague's register.
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {
@@ -144,8 +157,53 @@ export async function POST(req: Request) {
   // The registers this browser changed and the stamp each was changed from.
   const stamps = readStampsParam(body.stamps, ["registers"])?.registers;
 
+  // Only the owner changes the register (director, 15 Oct 2026). Anyone
+  // else's save may carry the registers as they are stored (a rules save
+  // does), but not one changed mark. Staff punch for themselves through
+  // their own routes, which this does not touch.
+  if (scopeCtx && !isStaffRegisterOwner(scopeCtx.session, scopeCtx.rbac, scopeCtx.masters)) {
+    const incoming = Array.isArray(body.registers) ? body.registers : [];
+    const toWrite = incoming.filter((r) => !stamps || (r && r.id in stamps));
+    if (toWrite.length > 0) {
+      const stored = await fetchStaffAttendanceDeskFromDb();
+      if (!stored.ok) {
+        return NextResponse.json(
+          { ok: false, error: "Could not read the saved staff register — nothing was written. Try again." },
+          { status: 503 },
+        );
+      }
+      const changed = staffRegisterMarkChanges(stored.registers, toWrite, stamps);
+      if (changed.length > 0) {
+        return NextResponse.json(
+          { ok: false, error: STAFF_REGISTER_OWNER_ONLY, ownerOnly: true, changed: changed.length },
+          { status: 403 },
+        );
+      }
+    }
+  }
+
   // Function holders: merged onto the stored desk, only their functions'
   // slices — never the body as sent.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (!gate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "attendance",
+      async () => {
+        const [desk, settings] = await Promise.all([
+          fetchStaffAttendanceDeskFromDb(),
+          readStaffAttendanceSettings(),
+        ]);
+        return desk.ok && settings.ok
+          ? { registers: desk.registers, settings: settings.settings, outdoorDuty: desk.ancillary.outdoorDuty ?? [] }
+          : null;
+      },
+      body,
+      { prefix: STAFF_PREFIX },
+    );
+    if (refused) return refused;
+  }
   if (gate) {
     const [desk, settings] = await Promise.all([
       fetchStaffAttendanceDeskFromDb(),

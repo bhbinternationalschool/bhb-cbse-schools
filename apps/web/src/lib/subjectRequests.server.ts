@@ -1,5 +1,7 @@
 import { writeAudit } from "@/lib/audit.server";
-import { deskBundleToMastersState, fetchMastersDeskFromDb, pushMastersDeskToDb } from "@/lib/mastersNormalized.server";
+import { diffMastersLists } from "@/lib/data/mastersElementChanges";
+import { writeMastersChangesServer } from "@/lib/data/server/mastersLibWrites.server";
+import { deskBundleToMastersState, fetchMastersDeskFromDb } from "@/lib/mastersNormalized.server";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import {
   applySubjectRequest,
@@ -12,9 +14,11 @@ import type { SubjectsSlice } from "@/lib/subjectMasters";
 
 /**
  * Storage and decisions for teachers' subject requests (lib/subjectRequests,
- * table subject_change_requests). Approval changes Masters through the same
- * versioned save the Masters screen uses — read, change one class's links,
- * write against the revision read — and only then marks the request.
+ * table subject_change_requests). Approval changes Masters the way the
+ * Masters screen does since data-layer 2.2f: the subjects and class links it
+ * adds, changes or removes are ONE all-or-none element batch
+ * (desk_slice_rows_write, each element at its `_rev` as stored now — never
+ * the whole book) — and only then marks the request.
  */
 
 type Row = Record<string, unknown>;
@@ -132,25 +136,36 @@ export async function decideSubjectRequest(
   }
 
   // Masters may move between the read and the write (another office save):
-  // the revision lock refuses the write, and a fresh read is tried once more.
+  // the batch is planned on the elements as stored at write time and refused
+  // whole if one this approval touches changed since the read — then a fresh
+  // read is tried, up to three times.
   let summary = "";
+  let lastError = "";
   for (let attempt = 0; attempt < 3; attempt++) {
-    const { bundle, meta, readFailed } = await fetchMastersDeskFromDb();
-    if (readFailed || !meta) return { ok: false, error: "Could not read Masters — nothing was changed. Please try again.", status: 503 };
+    const { bundle, readFailed } = await fetchMastersDeskFromDb();
+    if (readFailed) return { ok: false, error: "Could not read Masters — nothing was changed. Please try again.", status: 503 };
     const state = deskBundleToMastersState(bundle);
     const applied = applySubjectRequest(subjectsSliceOf(state), req, { newCode: opts.newCode });
     if (!applied.ok) return { ok: false, error: applied.error, status: 400 };
-    const pushed = await pushMastersDeskToDb(
-      { ...state, subjects: applied.subjects, classSubjects: applied.classSubjects },
-      { baseUpdatedAt: meta.updatedAt ?? meta.lastUpdatedAt ?? null },
+    const changes = diffMastersLists(
+      state,
+      { subjects: applied.subjects, classSubjects: applied.classSubjects },
+      ["subjects", "classSubjects"],
     );
-    if (pushed.ok) {
+    const written = await writeMastersChangesServer(changes);
+    if (written.ok) {
       summary = applied.summary;
       break;
     }
-    if (!pushed.conflict) return { ok: false, error: pushed.error || "Masters could not be saved — nothing was changed.", status: 500 };
+    lastError = written.message;
   }
-  if (!summary) return { ok: false, error: "Masters kept changing while this was being saved — please try again.", status: 409 };
+  if (!summary) {
+    return {
+      ok: false,
+      error: `Masters could not be saved — nothing was changed${lastError ? ` (${lastError})` : ""}. Please try again.`,
+      status: 409,
+    };
+  }
 
   // Masters is changed; the request row follows. If someone decided it in
   // between, Masters already has the change and that is what they saw too.

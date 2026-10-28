@@ -56,6 +56,12 @@ type BlobRow = {
 export type DomainBlobPersistence<T> = {
   remoteEnabled: () => boolean;
   scheduleSync: (state: T) => void;
+  /**
+   * Push now and say what the server did — for a change that must not be
+   * reported (audited) unless it was really saved. Refused, conflicting or
+   * failed = ok:false with the reason; nothing is retried behind the caller.
+   */
+  saveNow: (state: T) => Promise<{ ok: true } | { ok: false; error: string; conflict?: boolean }>;
   ensureHydrated: () => Promise<boolean>;
   resetCache: () => void;
 };
@@ -139,7 +145,7 @@ export function createDomainBlobPersistence<T>(opts: {
     }
   }
 
-  async function pushState(state: T): Promise<{ ok: boolean; error?: string }> {
+  async function pushState(state: T): Promise<{ ok: boolean; error?: string; conflict?: boolean }> {
     if (!remoteEnabled()) return { ok: true };
     if (typeof window === "undefined") return { ok: true };
     try {
@@ -169,7 +175,8 @@ export function createDomainBlobPersistence<T>(opts: {
             }),
           )
           .catch(() => {});
-        return { ok: true };
+        // ok: the retry queue must not resend a refused copy.
+        return { ok: true, conflict: true };
       }
       if (!res.ok || !body?.ok) {
         const message = body?.error || `HTTP ${res.status}`;
@@ -203,6 +210,25 @@ export function createDomainBlobPersistence<T>(opts: {
       if (!payload) return;
       scheduleRetryingPush(`blob:${opts.table}`, () => pushState(payload));
     }, DESK_PUSH_DEBOUNCE_MS);
+  }
+
+  async function saveNow(state: T): Promise<{ ok: true } | { ok: false; error: string; conflict?: boolean }> {
+    if (!remoteEnabled() || typeof window === "undefined") return { ok: true };
+    const blobModule = domainBlobRbacModule(opts.table);
+    if (blobModule && isFunctionOnlyWriter(blobModule)) {
+      return { ok: false, error: "You may not change this — ask an admin." };
+    }
+    // This copy is the newest: a pending debounced push would only repeat
+    // an older one after it.
+    if (pushTimer) clearTimeout(pushTimer);
+    pushTimer = null;
+    pendingPush = null;
+    const r = await pushState(state);
+    if (r.conflict) {
+      return { ok: false, conflict: true, error: "changed on another device — NOT saved; the screen now shows the current data" };
+    }
+    if (!r.ok) return { ok: false, error: r.error || "save failed" };
+    return { ok: true };
   }
 
   /**
@@ -265,6 +291,7 @@ export function createDomainBlobPersistence<T>(opts: {
   return {
     remoteEnabled,
     scheduleSync,
+    saveNow,
     ensureHydrated,
     resetCache,
   };

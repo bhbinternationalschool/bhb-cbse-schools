@@ -25,7 +25,9 @@ import {
   type ExtraBellTemplate,
   type TimetableState,
 } from "@/lib/timetable";
-import { classGroupCodeForName, saveMasters, type MastersState } from "@/lib/masters";
+import { classGroupCodeForName, type MastersState } from "@/lib/masters";
+import { useMasters } from "@/lib/data/client/hooks";
+import { useMastersMutation } from "@/lib/data/client/writeHooks";
 import { classTeachersOf, isPrePrimaryClass } from "@/lib/timetableSolver";
 import { bellFacts, effectiveSubjectRule, toMinutes, type TimeOfDay, type TimetableSubjectRule } from "@/lib/timetableRules";
 import type { TimetableRulesSuggestion } from "@/lib/timetableRulesAi";
@@ -320,6 +322,12 @@ export function SubjectRulesPanel({ masters, state, canEdit, onSaved, flash }: C
   const [rows, setRows] = useState<Row[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [ai, setAi] = useState<{ generationId: string } | null>(null);
+  // data-layer 2.2c: periods/week is written on the class-subject links
+  // themselves — only the links whose number changed, each on its own `_rev`
+  // (masters.class-subjects; a teacher with the Class subjects function only
+  // in her own classes, decided on the server).
+  const served = useMasters().data;
+  const classSubjects = useMastersMutation("classSubjects");
 
   const preprimary = classId ? isPrePrimaryClass(masters, classId) : false;
   const facts = useMemo(() => bellFacts(bellForClass(state, classId)), [state, classId]);
@@ -411,16 +419,19 @@ export function SubjectRulesPanel({ masters, state, canEdit, onSaved, flash }: C
     setSubjectRulesForClass(classId, current.map((r) => r.rule));
     const changedPeriods = current.filter((r) => baseRows.find((b) => b.subjectId === r.subjectId)?.periods !== r.periods);
     if (changedPeriods.length) {
-      const next = {
-        ...masters,
-        classSubjects: (masters.classSubjects ?? []).map((l) => {
-          const r = changedPeriods.find((x) => x.subjectId === l.subjectId && l.classId === classId);
+      const list = (served?.masters.classSubjects ?? []) as unknown as Record<string, unknown>[];
+      const out = await classSubjects.commit(
+        list.map((l) => {
+          const r = l.classId === classId ? changedPeriods.find((x) => x.subjectId === l.subjectId) : undefined;
           return r ? { ...l, periodsPerWeek: r.periods } : l;
         }),
-      };
-      const out = await saveMasters(next);
+      );
       if (!out.ok) {
-        flash("Rules saved, but periods/week could not be saved to Masters (needs Masters edit permission).");
+        flash(
+          out.kind === "conflict"
+            ? "Rules saved, but periods/week were changed on another device meanwhile — not saved; the screen shows theirs."
+            : `Rules saved, but periods/week could not be saved to Masters — ${out.message || "not saved"}.`,
+        );
         onSaved();
         return;
       }

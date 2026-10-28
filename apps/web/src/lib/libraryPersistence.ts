@@ -2,6 +2,7 @@
  * Library state — jsonb blob on library_state + normalized library_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   libraryStateIsEmpty,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/library";
 import {
   hydrateLibraryDeskFromDb,
+  reloadLibraryDeskFromApi,
   scheduleLibraryDeskSync,
 } from "@/lib/libraryNormalizedClient";
 import { mergeDbDeskIntoLibraryState } from "@/lib/libraryNormalizedMerge";
@@ -35,6 +37,8 @@ const blob = createDomainBlobPersistence<LibraryState>({
 
 export const libraryRemoteEnabled = blob.remoteEnabled;
 export const scheduleLibrarySync = (state: LibraryState) => {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureLibraryHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushLibraryRemoteServer(state));
     return;
@@ -57,7 +61,7 @@ export const ensureLibraryHydrated = async () => {
     return blobChanged;
   }
   markDeskHydrated(MODULE);
-  if (changed && (bundle.titles.length > 0 || bundle.procurementDocs.length > 0 || readFromDb)) {
+  if (changed && (bundle.titles.length > 0 || bundle.procurementDocs.length > 0 || (bundle.ebooks?.length ?? 0) > 0 || readFromDb)) {
     writeLibraryLocalRaw(
       mergeDbDeskIntoLibraryState(loadLibrary(), bundle, { preferDb: readFromDb }),
     );
@@ -67,6 +71,19 @@ export const ensureLibraryHydrated = async () => {
   if (normChanged && !readFromDb) scheduleLibrarySync(loadLibrary());
   return blobChanged || normChanged;
 };
+
+/**
+ * After a counter action (issue, return, copies, fines, rules) changed the
+ * server: take the server's desk as it now is. false = the read failed and
+ * the screen still shows the previous copy — the caller must say so.
+ */
+export async function reloadLibraryFromServer(): Promise<boolean> {
+  const bundle = await reloadLibraryDeskFromApi();
+  if (!bundle) return false;
+  writeLibraryLocalRaw(mergeDbDeskIntoLibraryState(loadLibrary(), bundle, { preferDb: true }));
+  markDeskHydrated(MODULE);
+  return true;
+}
 
 export async function pushLibraryRemoteServer(
   state: LibraryState,

@@ -24,12 +24,14 @@ import { AlertTriangle, Filter, RotateCcw, Search, X } from "lucide-react";
 import { Dialog, DialogPopup } from "@/components/ui/dialog";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
+import { VoucherDetailDialog, rowOpenProps } from "@/components/accounts/VoucherDetailDialog";
 import {
   AmendVoucherDialog,
   VoidVoucherDialog,
   type PartyRow,
 } from "@/components/accounts/VoucherAmendDialogs";
 import {
+  ENTRY_VIEWS,
   childCodesByParent,
   headGaps,
   type ChartAccount,
@@ -79,7 +81,17 @@ async function ledgerApi<T>(body: Record<string, unknown>): Promise<T> {
   return (await res.json()) as T;
 }
 
-export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
+export function VoucherBrowserPanel({
+  canEdit,
+  initialView,
+  title = "Vouchers",
+}: {
+  canEdit: boolean;
+  /** Open on one of ENTRY_VIEWS (e.g. "trustee" on the Owner loans tab). */
+  initialView?: string;
+  title?: string;
+}) {
+  const startView = ENTRY_VIEWS.find((x) => x.id === initialView) ?? null;
   const [chart, setChart] = useState<ChartRow[]>([]);
   const [result, setResult] = useState<SearchResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -88,13 +100,16 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
   const [fixing, setFixing] = useState<VoucherFacts | null>(null);
   const [amending, setAmending] = useState<VoucherFacts | null>(null);
   const [voiding, setVoiding] = useState<VoucherFacts | null>(null);
+  // The row opened in the shared detail view; its actions are the row menu's.
+  const [viewing, setViewing] = useState<VoucherFacts | null>(null);
   const [parties, setParties] = useState<PartyRow[]>([]);
   const [notice, setNotice] = useState("");
 
   // The draft is what the operator is typing; `applied` is what was searched.
   // Separating them stops every keystroke hitting a query that reads the book.
-  const [draft, setDraft] = useState<VoucherFilter>({ status: "live" });
-  const [applied, setApplied] = useState<VoucherFilter>({ status: "live" });
+  const [draft, setDraft] = useState<VoucherFilter>(startView?.filter ?? { status: "live" });
+  const [applied, setApplied] = useState<VoucherFilter>(startView?.filter ?? { status: "live" });
+  const [viewId, setViewId] = useState<string | null>(startView?.id ?? null);
 
   const chartForFilter: ChartAccount[] = useMemo(
     () =>
@@ -148,13 +163,23 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
 
   function run() {
     setPage(0);
+    setViewId(null);
     setApplied(draft);
   }
   function clear() {
     const fresh: VoucherFilter = { status: "live" };
     setDraft(fresh);
     setPage(0);
+    setViewId(null);
     setApplied(fresh);
+  }
+  function openView(id: string) {
+    const v = ENTRY_VIEWS.find((x) => x.id === id);
+    if (!v) return;
+    setDraft(v.filter);
+    setPage(0);
+    setViewId(id);
+    setApplied(v.filter);
   }
 
   const rows = result?.rows ?? [];
@@ -170,7 +195,7 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
   return (
     <section className={CARD}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h4 className="text-sm font-bold text-[var(--brand-deep)]">Vouchers</h4>
+        <h4 className="text-sm font-bold text-[var(--brand-deep)]">{title}</h4>
         <p className="text-[11px] text-[var(--muted)]">
           {busy
             ? "Reading the book…"
@@ -178,6 +203,34 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
                 total > PAGE ? ` · showing ${page * PAGE + 1}–${Math.min((page + 1) * PAGE, total)}` : ""
               }`}
         </p>
+      </div>
+
+      {/* ── ready-made views: check here before keying an entry ─ */}
+      <div className="mt-3">
+        <p className={LABEL}>Already in the books — check before entering</p>
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {ENTRY_VIEWS.map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              title={v.hint}
+              aria-pressed={viewId === v.id}
+              onClick={() => openView(v.id)}
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-bold ${
+                viewId === v.id
+                  ? "border-[var(--primary)] bg-[var(--primary)] text-[var(--primary-foreground)]"
+                  : "border-[var(--border)] text-[var(--ink)] hover:bg-[var(--surface-sunken)]"
+              }`}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+        {viewId ? (
+          <p className="mt-1 text-[10px] text-[var(--muted)]">
+            {ENTRY_VIEWS.find((x) => x.id === viewId)?.hint} · reversed entries are hidden
+          </p>
+        ) : null}
       </div>
 
       {/* ── filters ─────────────────────────────────────────── */}
@@ -373,8 +426,9 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
                 v.lines.reduce((n, l) => n + l.debitPaise, 0),
                 v.lines.reduce((n, l) => n + l.creditPaise, 0),
               );
+              const open = rowOpenProps(() => setViewing(v), `Open voucher ${v.voucherNo}`);
               return (
-                <tr key={v.id} className="align-top">
+                <tr key={v.id} {...open} className={`align-top ${open.className}`}>
                   <td className="py-1.5 font-mono text-[11px]">{v.voucherNo}</td>
                   <td className="py-1.5 whitespace-nowrap">{v.date}</td>
                   <td className="py-1.5">
@@ -411,7 +465,12 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
                   </td>
                   <td className="py-1.5 text-right font-mono tabular-nums">{rupees(amount)}</td>
                   <td className="py-1.5 text-[10px] text-[var(--muted)]">{v.sourceType || "manual"}</td>
-                  <td className="px-2 py-1.5 text-right">
+                  {/* The menu is its own control: a click on it is not a row open. */}
+                  <td
+                    className="px-2 py-1.5 text-right"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
                     <RowActionMenu
                       row={v}
                       label="Voucher actions"
@@ -485,6 +544,49 @@ export function VoucherBrowserPanel({ canEdit }: { canEdit: boolean }) {
             Page {page + 1} of {Math.ceil(total / PAGE)}
           </span>
         </div>
+      ) : null}
+
+      {viewing ? (
+        <VoucherDetailDialog
+          target={{ voucherId: viewing.id, voucherNo: viewing.voucherNo }}
+          onClose={() => setViewing(null)}
+          // Same rights and the same guards as the row menu: a reversed
+          // voucher is history, and a reversal is the record of a void.
+          actions={
+            canEdit && viewing.id
+              ? [
+                  {
+                    id: "head",
+                    label: "Change the head",
+                    hidden: (d) => !!d.reversedBy || d.id !== viewing.id,
+                    onSelect: () => {
+                      setViewing(null);
+                      setFixing(viewing);
+                    },
+                  },
+                  {
+                    id: "amend",
+                    label: "Change it…",
+                    hidden: (d) => !!d.reversedBy || !!d.reverses || d.id !== viewing.id,
+                    onSelect: () => {
+                      setViewing(null);
+                      setAmending(viewing);
+                    },
+                  },
+                  {
+                    id: "void",
+                    label: "Void it…",
+                    tone: "danger",
+                    hidden: (d) => !!d.reversedBy || !!d.reverses || d.id !== viewing.id,
+                    onSelect: () => {
+                      setViewing(null);
+                      setVoiding(viewing);
+                    },
+                  },
+                ]
+              : []
+          }
+        />
       ) : null}
 
       {amending ? (

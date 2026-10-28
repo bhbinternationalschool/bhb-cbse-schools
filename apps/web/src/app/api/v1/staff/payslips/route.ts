@@ -3,14 +3,13 @@ import { resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensurePayrollHydratedServer } from "@/lib/payrollPersistence";
 import { loadPayroll, PAYROLL_PAYMENT_MODES } from "@/lib/payroll";
+import { bestPayslipRunsForStaff } from "@/lib/staffPayslips";
 
 export const runtime = "nodejs";
 
-const VISIBLE = new Set(["approved", "posted", "paid"]);
-
 /**
  * GET /api/v1/staff/payslips — the signed-in staff member's own payslips:
- * one per approved / posted / paid payroll run that carries their line.
+ * one per month, from the best approved / posted / paid run with their line.
  * Draft and pending runs are counted, not shown, so the app can say
  * "September is being prepared" instead of "no payslips".
  */
@@ -32,18 +31,17 @@ export async function GET(request: Request) {
     const modeLabel = (m: string) =>
       PAYROLL_PAYMENT_MODES.find((x) => x.value === m)?.label || m;
 
-    let preparing = 0;
+    // One payslip per month — the same pick the payslip PDF makes.
+    const { best, preparing } = bestPayslipRunsForStaff(payroll.runs, staffId);
     const slips: Record<string, unknown>[] = [];
-    for (const run of payroll.runs) {
-      const line = run.lines.find((l) => l.staffId === staffId);
-      if (!line) continue;
-      if (!VISIBLE.has(run.status)) {
-        preparing += 1;
-        continue;
-      }
+    for (const run of best.values()) {
+      const line = run.lines.find((l) => l.staffId === staffId)!;
       slips.push({
         runId: run.id,
         month: run.month,
+        // The same slip, printed on the letterhead (the app shows a PDF
+        // button only when the server offers one).
+        pdfUrl: `/api/v1/staff/payslips/${run.month}/pdf`,
         status: run.status,
         dayCount: run.dayCount,
         daysPresent: line.daysPresent,
@@ -58,10 +56,12 @@ export async function GET(request: Request) {
         amountPayable: line.amountPayable,
         onHold: line.juneHold && !line.eligibleForJuneDraw,
         holdNote: line.holdNote,
-        paymentDate: line.paymentDate,
+        // The day this person was actually paid, when marked on its own
+        // (14 Oct 2026); else the planned day / the run's paid day.
+        paymentDate: line.paidOn || line.paymentDate,
         paymentMode: line.paymentMode,
         paymentModeLabel: modeLabel(line.paymentMode),
-        paidAt: run.paidAt,
+        paidAt: line.paidOn ? `${line.paidOn}T12:00:00+05:30` : run.paidAt,
         earnings: line.components
           .filter((c) => c.kind === "earning")
           .map((c) => ({ name: c.headName, amount: c.amount })),

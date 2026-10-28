@@ -1,6 +1,7 @@
 import "package:flutter/material.dart";
 
 import "../../core/api/api_client.dart";
+import "../../core/ui/pop_with_changed.dart";
 import "../../core/theme/app_theme.dart";
 import "../../core/ui/haptics.dart";
 import "../modules/module_shell.dart";
@@ -24,8 +25,23 @@ class StudentLeaveQueueScreen extends StatefulWidget {
 class _StudentLeaveQueueScreenState extends State<StudentLeaveQueueScreen> {
   String _filter = "pending";
 
+  /// A decision was made here — the home re-reads its waiting counts.
+  bool _changed = false;
+
+  Future<void> _decided(Future<void> Function() reload) {
+    _changed = true;
+    return reload();
+  }
+
   @override
   Widget build(BuildContext context) {
+    return PopWithChanged(
+      changed: () => _changed,
+      child: _shell(context),
+    );
+  }
+
+  Widget _shell(BuildContext context) {
     return ModuleShell<List<StudentLeaveQueueItem>>(
       guideId: "student-leave-queue",
       key: ValueKey(_filter),
@@ -56,7 +72,7 @@ class _StudentLeaveQueueScreenState extends State<StudentLeaveQueueScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          for (final r in list) _Card(api: widget.api, r: r, reload: reload),
+          for (final r in list) _Card(api: widget.api, r: r, reload: () => _decided(reload)),
         ],
       ),
     );

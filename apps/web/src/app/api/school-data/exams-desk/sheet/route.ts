@@ -26,7 +26,7 @@ import {
   fetchExamSheetFromDb,
   pushExamSheetToDb,
 } from "@/lib/examsNormalized.server";
-import { hasPermission, inferRoleCodes } from "@/lib/rbac";
+import { hasPermission, inferRoleCodes, isFeaturePersonallyDenied } from "@/lib/rbac";
 
 export const runtime = "nodejs";
 
@@ -87,6 +87,17 @@ async function saveSheet(req: Request) {
     }
   }
   if (!auth.ok) return auth.response;
+  if (
+    !marksGate &&
+    !auth.viaMirrorSecret &&
+    (["create", "edit"] as const).every((a) =>
+      isFeaturePersonallyDenied(auth.ctx.session, auth.ctx.masters, "exams.marks", a, auth.ctx.rbac),
+    )
+  ) {
+    // Mark entry turned off for this person, though their role holds all of
+    // Exams (Masters → Roles → Assign to user).
+    return bad(403, "You may not enter marks — it is turned off for you; ask the office to give your role this.");
+  }
   if (!examsDualWriteDbEnabled()) {
     // Not "ok, skipped": the browser would record a success for marks the
     // database never received. Say plainly that nothing was saved.

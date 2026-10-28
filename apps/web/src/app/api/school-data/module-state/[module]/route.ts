@@ -7,10 +7,11 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission, type RouteAuthResult } from "@/lib/apiRouteAuth.server";
 import { deskFeatureGateFor } from "@/lib/deskFeatureGate.server";
 import { featuresForModule } from "@/lib/rbacFeatures";
+import { isFeaturePersonallyDenied } from "@/lib/rbac";
 import { isModuleStateKey, MODULE_STATE_DEFS } from "@/lib/moduleStateRegistry";
 import { getServerTenantContext } from "@/lib/serverTenant";
 import { complaintScopeFilter } from "@/lib/api/v1/staffComplaints";
-import { scopeAllows, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { scopeAllows, readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import type { ComplaintTicket } from "@/lib/complaints";
 import { isMergedModuleState, mergeModuleState } from "@/lib/moduleStateMerge";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
@@ -39,6 +40,30 @@ async function bookAuth(
 ): Promise<RouteAuthResult> {
   const rbacModule = MODULE_STATE_DEFS[book].rbac;
   const auth = await requireStaffPermission(req, rbacModule, action);
+  if (auth.ok && !auth.viaMirrorSecret && action === "edit") {
+    // The book is saved whole, so its functions are book-level: one the
+    // office has turned off for this person closes the save, even though
+    // their role holds the whole module (Masters → Roles → Assign to user).
+    const slice = `module-state/${book}`;
+    const off = featuresForModule(rbacModule).find(
+      (f) =>
+        f.slices?.includes(slice) &&
+        isFeaturePersonallyDenied(auth.ctx.session, auth.ctx.masters, f.id, "edit", auth.ctx.rbac),
+    );
+    if (off) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          {
+            ok: false,
+            error: `You may not change ${off.label.toLowerCase()} — it is turned off for you; ask the office to give your role this.`,
+            reason: "feature_forbidden",
+          },
+          { status: 403 },
+        ),
+      };
+    }
+  }
   if (auth.ok || auth.response.status !== 403) return auth;
   const gate = await deskFeatureGateFor(req, rbacModule, action === "view" ? "read" : "write");
   if (!gate) return auth;
@@ -101,7 +126,9 @@ export async function GET(req: Request, ctx: RouteCtx) {
     // discipline.view / health.view are held by teachers, and these rows are
     // the whole school's registers (health: children's medical notes). A
     // teacher's browser gets only their own sections' children (2026-09-29).
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(auth.ctx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope) {
       return NextResponse.json({ ok: false, error: "Could not work out your classes" }, { status: 503 });
     }
@@ -140,7 +167,9 @@ export async function POST(req: Request, ctx: RouteCtx) {
     // Same rule for discipline / health: a teacher's copy is filtered to
     // their classes, so pushing it whole would erase every other class.
     // Teachers log entries through /api/v1/staff/discipline|health.
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(auth.ctx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {
@@ -160,7 +189,9 @@ export async function POST(req: Request, ctx: RouteCtx) {
     // class's tickets. Teachers move their own tickets one at a time through
     // /api/v1/staff/complaints/update; this route is the office's
     // (2026-09-29, same rule as the attendance register push).
-    const scope = await staffSectionScope(auth.ctx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(auth.ctx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {

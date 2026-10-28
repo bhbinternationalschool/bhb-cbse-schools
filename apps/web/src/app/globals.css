@@ -407,11 +407,11 @@ h3,
   background:
     radial-gradient(
       ellipse 80% 60% at 10% 0%,
-      rgba(197, 160, 40, 0.35),
-      transparent 55%
+      rgba(197, 160, 40, 0.26),
+      transparent 58%
     ),
     linear-gradient(135deg, #203050 0%, #2a3d66 48%, #384870 100%);
-  box-shadow: 0 16px 40px rgba(32, 48, 80, 0.22);
+  box-shadow: 0 10px 28px rgba(32, 48, 80, 0.16);
 }
 
 .module-dash-panel {
@@ -1812,6 +1812,48 @@ h3,
     margin: 0 !important;
     padding: 0 !important;
     box-shadow: none !important;
+  }
+
+  /* Staff attendance month register / month leave — landscape, letterhead,
+     the sheet only (StaffMonthRegisterPanel printSheet). */
+  body.printing-staff-register * {
+    visibility: hidden !important;
+  }
+  body.printing-staff-register .staff-register-sheet.print-target,
+  body.printing-staff-register .staff-register-sheet.print-target * {
+    visibility: visible !important;
+  }
+  body.printing-staff-register .staff-register-sheet.print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+  body.printing-staff-register .staff-register-sheet.print-target .sticky {
+    position: static !important;
+  }
+  /* A month across one landscape A4: no minimum cell widths, small marks. */
+  body.printing-staff-register .staff-register-sheet.print-target table th,
+  body.printing-staff-register .staff-register-sheet.print-target table td {
+    min-width: 0 !important;
+    width: auto !important;
+    padding: 0 1px !important;
+    font-size: 7px !important;
+    line-height: 1.1 !important;
+  }
+  body.printing-staff-register .staff-register-sheet.print-target table td > span {
+    min-width: 0 !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    font-size: 7px !important;
+  }
+  body.printing-staff-register .staff-register-sheet.print-target table {
+    width: 100% !important;
+    min-width: 0 !important;
   }
 
   /* Counter day close — one A4 to sign and file. */

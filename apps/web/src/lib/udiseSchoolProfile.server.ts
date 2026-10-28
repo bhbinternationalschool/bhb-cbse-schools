@@ -78,7 +78,8 @@ export async function readErpSchoolFacts(academicYear: string): Promise<ErpSchoo
       .select("slice_key, payload")
       .eq("tenant_id", ctx.tenantId)
       .in("slice_key", ["schoolProfile", "classes", "academicYears"]),
-    ctx.sb.from("sis_staff").select("*").eq("tenant_id", ctx.tenantId),
+    // Removed members (2.2b soft remove) are not on the school's staff.
+    ctx.sb.from("sis_staff").select("*").eq("tenant_id", ctx.tenantId).is("deleted_at", null),
     ctx.sb.from("sis_designations").select("*").eq("tenant_id", ctx.tenantId),
     ctx.sb
       .from("module_local_state")

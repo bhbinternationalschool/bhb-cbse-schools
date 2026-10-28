@@ -7,6 +7,7 @@
  */
 import assert from "node:assert/strict";
 import {
+  ENTRY_VIEWS,
   childCodesByParent,
   headGapForLine,
   headGaps,
@@ -78,6 +79,50 @@ assert.equal(headGapForLine({ accountCode: "9999" }, chart, byParent), null);
 // Only the expense line of a cash payment is flagged, not the cash side.
 assert.equal(headGaps(voucher(), chart, byParent).length, 1);
 assert.equal(headGaps(voucher(), chart, byParent)[0]!.index, 0);
+
+// Payroll's own vouchers book regular pay to the parent on purpose: once the
+// office adds sub-heads under Salary & Wages, the payroll run is not flagged
+// (13 Oct 2026), while a hand-keyed salary voucher on the parent still is.
+{
+  const salaryChart: ChartAccount[] = [
+    ...chart,
+    { code: "5070.01", name: "Extra Work Salary", parentCode: "5070" },
+  ];
+  const salaryByParent = childCodesByParent(salaryChart);
+  const salaryLines = [
+    { accountCode: "5070", accountName: "Salary & Wages", partyName: "", debitPaise: 900000, creditPaise: 0 },
+    { accountCode: "1000", accountName: "Cash in Hand", partyName: "", debitPaise: 0, creditPaise: 900000 },
+  ];
+  assert.equal(
+    headGaps(voucher({ sourceType: "payroll_run", lines: salaryLines }), salaryChart, salaryByParent).length,
+    0,
+    "a payroll run on Salary & Wages is not a head gap",
+  );
+  assert.equal(
+    headGaps(voucher({ sourceType: "payroll_payment", lines: salaryLines }), salaryChart, salaryByParent).length,
+    0,
+  );
+  assert.equal(
+    headGaps(voucher({ sourceType: "", lines: salaryLines }), salaryChart, salaryByParent)[0]?.gap.kind,
+    "parent_with_subheads",
+    "a hand-keyed salary voucher on the parent is still flagged",
+  );
+  assert.equal(
+    headGaps(voucher({ sourceType: "payroll_reclass", lines: salaryLines }), salaryChart, salaryByParent).length,
+    0,
+  );
+  assert.equal(
+    headGaps(
+      voucher({ sourceType: "ledger_reversal", isReversal: true, lines: salaryLines }),
+      salaryChart,
+      salaryByParent,
+    ).length,
+    0,
+    "a reversal mirrors its original and is not flagged for the parent head",
+  );
+  // A catch-all is still a catch-all, payroll or not.
+  assert.equal(headGaps(voucher({ sourceType: "payroll_run" }), chart, byParent).length, 1);
+}
 
 /* ── filtering ────────────────────────────────────────────── */
 
@@ -194,5 +239,30 @@ assert.equal(
   }).ok,
   false,
 );
+
+/* ── ready-made "already in the book" views (13 Oct 2026) ─────── */
+{
+  const view = (id: string) => ENTRY_VIEWS.find((x) => x.id === id)!.filter;
+  const line = (accountCode: string, debitPaise: number, creditPaise: number) =>
+    ({ accountCode, accountName: accountCode, partyName: "", debitPaise, creditPaise });
+  const fuel = voucher({ lines: [line("5031", 1000, 0), line("1000", 0, 1000)] });
+  const salary = voucher({ lines: [line("5070", 9000, 0), line("1070", 0, 1000), line("1012", 0, 8000)] });
+  const fee = voucher({ sourceType: "fee_voucher", voucherType: "receipt", lines: [line("1000", 500, 0), line("4000", 0, 500)] });
+  const trusteeIn = voucher({ voucherType: "receipt", lines: [line("1012", 100000, 0), line("2100", 0, 100000)] });
+  const emi = voucher({ sourceType: "vehicle_loan", lines: [line("2151", 15000, 0), line("1012", 0, 15000)] });
+  const reversed = voucher({ reversed: true, lines: [line("5031", 1000, 0), line("1000", 0, 1000)] });
+  const m = (v: VoucherFacts, id: string) => matchesVoucherFilter(v, view(id), chart, byParent);
+
+  assert.equal(m(fuel, "expenses"), true, "an expense is in Expenses");
+  assert.equal(m(salary, "expenses"), false, "salary is not an Expense — it has its own view");
+  assert.equal(m(salary, "salary"), true);
+  assert.equal(m(salary, "advances"), true, "a salary that recovered an advance shows under advances too");
+  assert.equal(m(fee, "in_book"), false, "fees are never keyed in Vouchers, so they are left out");
+  assert.equal(m(fuel, "in_book"), true);
+  assert.equal(m(trusteeIn, "trustee"), true, "trustee money in shows with the repayments");
+  assert.equal(m(emi, "vehicle_loans"), true, "any of the three loan heads");
+  assert.equal(m(reversed, "expenses"), false, "a reversed entry is hidden — it is no longer in the book");
+  assert.ok(ENTRY_VIEWS.every((x) => x.filter.status === "live"), "every view hides reversed entries");
+}
 
 console.log("voucherFilter self-test passed");

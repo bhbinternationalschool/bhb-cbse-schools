@@ -1,9 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { urlAsksForTab } from "@/lib/nucleusHandoff";
 import { BookMarked } from "lucide-react";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   classSectionLabel,
   loadTimetable,
@@ -27,7 +30,7 @@ import {
   type TeachingLogStatus,
   type TeachingState,
 } from "@/lib/teaching";
-import { hasPermission } from "@/lib/rbac";
+import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { resolveSessionStaff } from "@/lib/staffResolve";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { isRestrictedTeacher, useMyTeaching } from "@/components/staff/useMyTeaching";
@@ -79,6 +82,7 @@ function pct(v: number | null): string {
 
 export function TeachingWorkspace() {
   const session = useDemoSession();
+  const access = useAccessData();
   const [tab, setTab] = useState<TeachTab>("today");
 
   // The Nucleus bookmark opens this workspace straight at Nucleus progress, so the
@@ -87,7 +91,7 @@ export function TeachingWorkspace() {
   useEffect(() => {
     if (urlAsksForTab(window.location.search, "nucleus")) setTab("nucleus");
   }, []);
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
   const [timetable, setTimetable] = useState<TimetableState | null>(null);
   const [state, setState] = useState<TeachingState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +107,6 @@ export function TeachingWorkspace() {
   const ay = session.academicYearCode || DEFAULT_AY;
 
   const refresh = useCallback(() => {
-    setMasters(loadMasters());
     setTimetable(loadTimetable());
     setState(loadTeaching());
   }, []);
@@ -501,6 +504,9 @@ export function TeachingWorkspace() {
   /* Render                                                           */
   /* ---------------------------------------------------------------- */
 
+  if (mastersError) {
+    return <QueryError what="the school's classes, subjects and staff" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !timetable || !state) {
     return <p className="text-sm text-[var(--muted)]">Loading teaching desk…</p>;
   }
@@ -514,6 +520,15 @@ export function TeachingWorkspace() {
         u.subjectId === row.expected.subjectId,
     );
 
+  const teachTabs = [
+    { id: "today", label: "Period log" },
+    { id: "plan", label: "Syllabus" },
+    { id: "lessons", label: "Lesson plans" },
+    { id: "coverage", label: "Coverage" },
+    { id: "outcomes", label: "Learning outcomes" },
+    ...(showNucleus ? [{ id: "nucleus", label: "Nucleus progress" }] : []),
+  ];
+
   return (
     <ErpWorkspaceShell
       title="Teaching & syllabus"
@@ -523,14 +538,15 @@ export function TeachingWorkspace() {
       notice={notice}
       toolbar={
         <ModuleTabs
-          items={[
-            { id: "today", label: "Period log" },
-            { id: "plan", label: "Syllabus" },
-            { id: "lessons", label: "Lesson plans" },
-            { id: "coverage", label: "Coverage" },
-            { id: "outcomes", label: "Learning outcomes" },
-            ...(showNucleus ? [{ id: "nucleus", label: "Nucleus progress" }] : []),
-          ]}
+          // Every tab is whole-module (lib/rbacFeatureCatalog/academics.ts:
+          // the saves are /api/v1/teaching/* routes function grants do not
+          // reach), so this passes the list through for every module holder.
+          // Decided from the loaded roles + roster, never before.
+          items={
+            access.ready
+              ? visibleModuleTabs(teachTabs, session, access.masters, "teaching", access.rbac ?? undefined)
+              : []
+          }
           value={tab}
           onChange={(id) => setTab(id as TeachTab)}
           aria-label="Teaching sections"

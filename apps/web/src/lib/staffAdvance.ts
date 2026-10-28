@@ -8,6 +8,18 @@ import type { PayrollPaymentMode, PayrollRun } from "@/lib/payroll";
 import { assertStaffAdvancesPermission } from "@/lib/rbacGuard";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
 import { trackServerWork } from "@/lib/serverWork";
+import {
+  advancePickRows,
+  allocateAdvanceRecovery,
+  cleanAdvancePicks,
+  lineAdvancePicks,
+  type AdvancePickRow,
+} from "@/lib/payrollAdvancePick";
+import {
+  normalizeStaffAdvance,
+  outstandingOf,
+  recoveredTotal,
+} from "@/lib/staffAdvanceTotals";
 export type AdvanceStatus = "open" | "closed";
 
 export type AdvanceSource = "cash" | "with_salary" | "other";
@@ -97,63 +109,68 @@ export function advancesStateIsEmpty(state: AdvanceState): boolean {
   return (state.advances?.length ?? 0) === 0;
 }
 
-function normalizeRecovery(r: Partial<AdvanceRecovery>): AdvanceRecovery {
-  const method: AdvanceRecoveryMethod =
-    r.method === "return_to_school" ? "return_to_school" : "salary";
-  return {
-    id: String(r.id || nid("ar")),
-    advanceId: String(r.advanceId || ""),
-    method,
-    payrollRunId: String(r.payrollRunId || ""),
-    month: String(r.month || ""),
-    amount: Math.max(0, Number(r.amount) || 0),
-    recoveredAt: String(r.recoveredAt || ""),
-    recoveredBy: String(r.recoveredBy || ""),
-    note: String(r.note || ""),
-    returnMode: (r.returnMode as PayrollPaymentMode) || "",
-  };
-}
-
-function normalizeAdvance(a: Partial<StaffAdvance>): StaffAdvance {
-  const amount = Math.max(0, Number(a.amount) || 0);
-  const recoveries = (Array.isArray(a.recoveries) ? a.recoveries : []).map(
-    normalizeRecovery,
-  );
-  const recovered = recoveries.reduce((s, r) => s + r.amount, 0);
-  const status: AdvanceStatus =
-    recovered >= amount - 0.5 ? "closed" : "open";
-  const source: AdvanceSource =
-    a.source === "with_salary" || a.source === "other" ? a.source : "cash";
-  return {
-    id: String(a.id || nid("adv")),
-    staffId: String(a.staffId || ""),
-    empCode: String(a.empCode || ""),
-    fullName: String(a.fullName || ""),
-    amount,
-    givenDate: String(a.givenDate || "").slice(0, 10),
-    paymentMode: (a.paymentMode as PayrollPaymentMode) || "cash",
-    note: String(a.note || ""),
-    source,
-    payrollRunId: String(a.payrollRunId || ""),
-    status,
-    createdBy: String(a.createdBy || ""),
-    createdAt: String(a.createdAt || ""),
-    recoveries,
-  };
-}
-
-export function recoveredTotal(adv: StaffAdvance): number {
-  return adv.recoveries.reduce((s, r) => s + r.amount, 0);
-}
-
-export function outstandingOf(adv: StaffAdvance): number {
-  return Math.max(0, adv.amount - recoveredTotal(adv));
-}
+// The register's arithmetic lives in lib/staffAdvanceTotals (pure), shared
+// with the staff app's management view so both read the same figures.
+const normalizeAdvance = normalizeStaffAdvance;
+export { recoveredTotal, outstandingOf };
 
 export function outstandingForStaff(staffId: string): number {
   return loadAdvances()
     .advances.filter((a) => a.staffId === staffId)
     .reduce((s, a) => s + outstandingOf(a), 0);
+}
+
+/**
+ * Every staff member's outstanding total from ONE read of the register. The
+ * payroll desk used to call outstandingForStaff per line — each a full read
+ * and JSON parse of the register — on every render and every edit.
+ */
+export function outstandingByStaff(): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const a of loadAdvances().advances) {
+    const bal = outstandingOf(a);
+    if (bal > 0) out.set(a.staffId, (out.get(a.staffId) || 0) + bal);
+  }
+  return out;
+}
+
+/**
+ * The open advances of one person, oldest first, for the "Advance
+ * outstanding" note on a payroll line. `excludeRunId` reads them as they
+ * stood before that run's own salary recoveries (a posted run's view).
+ */
+export function advancePickRowsForStaff(
+  staffId: string,
+  opts: { excludeRunId?: string } = {},
+): AdvancePickRow[] {
+  return advancePickRows(loadAdvances().advances, staffId, opts);
+}
+
+/**
+ * Lines whose ticked advances can no longer absorb their deduction (another
+ * run or a return to school recovered them since they were ticked, or one
+ * was deleted). Publishing such a run would either recover an advance twice
+ * or move money onto an advance nobody chose — so it is refused.
+ */
+export function advanceAllocationProblems(
+  run: Pick<PayrollRun, "id" | "lines">,
+): string[] {
+  const advances = loadAdvances().advances;
+  const out: string[] = [];
+  for (const line of run.lines) {
+    const deduct = Math.max(0, Math.round(line.advanceDeduct || 0));
+    const picks = lineAdvancePicks(line.components);
+    if (deduct <= 0 || picks.length === 0) continue;
+    const rows = advancePickRows(advances, line.staffId, { excludeRunId: run.id });
+    const live = cleanAdvancePicks(rows, picks);
+    const { shortfall } = allocateAdvanceRecovery(rows, live, deduct);
+    if (shortfall > 0) {
+      out.push(
+        `${line.fullName || line.staffId}: the ticked advance${picks.length === 1 ? "" : "s"} now ${picks.length === 1 ? "has" : "have"} only ₹${(deduct - shortfall).toLocaleString("en-IN")} left to recover against a deduction of ₹${deduct.toLocaleString("en-IN")}`,
+      );
+    }
+  }
+  return out;
 }
 
 export function advancesForStaff(staffId: string): StaffAdvance[] {
@@ -314,7 +331,8 @@ export function recordAdvanceReturnToSchool(input: {
 
 /**
  * On payroll publish:
- * 1) salary recoveries for advanceDeduct (FIFO)
+ * 1) salary recoveries for advanceDeduct — on the advances ticked on the
+ *    line when there are any, else oldest first (FIFO)
  * 2) issue new advances for advanceNewWithSalary
  */
 export function syncAdvanceRecoveriesFromPayroll(input: {
@@ -342,8 +360,40 @@ export function syncAdvanceRecoveriesFromPayroll(input: {
   const at = new Date().toISOString();
   const payDate = `${input.run.month}-01`;
 
+  const recovery = (row: StaffAdvance, take: number): StaffAdvance =>
+    normalizeAdvance({
+      ...row,
+      recoveries: [
+        ...row.recoveries,
+        {
+          id: nid("ar"),
+          advanceId: row.id,
+          method: "salary",
+          payrollRunId: input.run.id,
+          month: input.run.month,
+          amount: take,
+          recoveredAt: at,
+          recoveredBy: input.by,
+          note: `Salary ${input.run.month}`,
+          returnMode: "",
+        },
+      ],
+    });
+
   for (const line of input.run.lines) {
     let remaining = Math.max(0, Math.round(line.advanceDeduct || 0));
+    // Advances ticked on the line (14 Oct 2026): the recovery goes on those
+    // only, oldest ticked first. This run's earlier recoveries were dropped
+    // above, so a re-post never recovers the same rupee twice; publish
+    // refuses a run whose ticked advances fall short (advanceAllocationProblems).
+    const picks = lineAdvancePicks(line.components);
+    if (remaining > 0 && picks.length > 0) {
+      const rows = advancePickRows(advances, line.staffId);
+      const { allocations } = allocateAdvanceRecovery(rows, picks, remaining);
+      const byId = new Map(allocations.map((x) => [x.advanceId, x.amount]));
+      advances = advances.map((row) => (byId.has(row.id) ? recovery(row, byId.get(row.id)!) : row));
+      remaining = 0;
+    }
     if (remaining > 0) {
       const open = advances
         .filter((a) => a.staffId === line.staffId)
@@ -355,27 +405,7 @@ export function syncAdvanceRecoveriesFromPayroll(input: {
         if (remaining <= 0) break;
         const take = Math.min(bal, remaining);
         remaining -= take;
-        advances = advances.map((row) => {
-          if (row.id !== a.id) return row;
-          return normalizeAdvance({
-            ...row,
-            recoveries: [
-              ...row.recoveries,
-              {
-                id: nid("ar"),
-                advanceId: row.id,
-                method: "salary",
-                payrollRunId: input.run.id,
-                month: input.run.month,
-                amount: take,
-                recoveredAt: at,
-                recoveredBy: input.by,
-                note: `Salary ${input.run.month}`,
-                returnMode: "",
-              },
-            ],
-          });
-        });
+        advances = advances.map((row) => (row.id === a.id ? recovery(row, take) : row));
       }
     }
 

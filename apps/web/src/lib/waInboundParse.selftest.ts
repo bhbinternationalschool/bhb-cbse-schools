@@ -72,6 +72,36 @@ assert.equal(typed.text, "भुगतान हो गया");
 assert.equal(typed.media, undefined);
 assert.equal(typed.profileName, "Mr. Dilip Kumar Dixit");
 
+/* ── A tapped reply button: id-first text for the bots, label + id for the log ── */
+const [tap] = parseMetaWebhookInbound(
+  envelope({
+    type: "interactive",
+    context: { id: "wamid.BUTTONS" },
+    interactive: { type: "button_reply", button_reply: { id: "approve-9", title: "Approve 9" } },
+  }),
+);
+assert.equal(tap.text, "approve-9", "bots keep matching on the button id");
+assert.equal(tap.buttonId, "approve-9");
+assert.equal(tap.buttonTitle, "Approve 9", "the chat log shows what the director tapped");
+assert.equal(tap.replyToWaMessageId, "wamid.BUTTONS");
+
+/* ── A template quick reply: the payload carries the value, the label is kept ── */
+const [quick] = parseMetaWebhookInbound(
+  envelope({ type: "button", button: { payload: "Reject 9", text: "❌ Reject" } }),
+);
+assert.equal(quick.text, "Reject 9", "the payload is the value the sender attached");
+assert.equal(quick.buttonId, "Reject 9");
+assert.equal(quick.buttonTitle, "❌ Reject");
+
+/* A quick reply sent without a payload: the label is all there is, on both. */
+const [bareQuick] = parseMetaWebhookInbound(envelope({ type: "button", button: { text: "Tell me more" } }));
+assert.equal(bareQuick.text, "Tell me more");
+assert.equal(bareQuick.buttonId, "Tell me more");
+
+/* A typed message carries no button at all. */
+assert.equal(typed.buttonId, undefined);
+assert.equal(typed.buttonTitle, undefined);
+
 /* ── Nothing at all is still dropped ── */
 assert.equal(parseMetaWebhookInbound(envelope({ type: "reaction" })).length, 0);
 assert.equal(parseMetaWebhookInbound({}).length, 0);

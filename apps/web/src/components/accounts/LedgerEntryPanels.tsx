@@ -16,9 +16,18 @@
  * House rules: amounts entered in rupees, stored in paise; a bank line must
  * say WHICH bank (the reconciliation depends on it); reversals carry a
  * reason.
+ *
+ * Fuel (14 Oct 2026): a debit to a fuel head (5031 Vehicle Fuel) is refused
+ * by /api/ledger from the Voucher entry grid and from Cheques — fuel goes in
+ * through Quick or Multi-line expense (or Transport → Fuel), which carry the
+ * vehicle, quantity and rate and write the Transport fill in the same
+ * transaction. A fuel voucher is voided, never amended or re-headed.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { VoucherPayLink } from "@/components/payments/VoucherPayLink";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SearchPick } from "@/components/ui/SearchPick";
+import { groupAccountsForPicker } from "@/lib/pickerSearch";
 import { UpiPayButton } from "@/components/payments/UpiPayButton";
 import { Check, FileText, Plus, Trash2, Undo2 } from "lucide-react";
 import { formatInr } from "@/lib/fees";
@@ -27,23 +36,17 @@ import {
   expenseTotalPaise,
 } from "@/lib/expenseSpread";
 import {
-  buildFuelRefill,
   checkFuelLine,
   fuelAmountPaise,
   fuelNarration,
   isFuelAccount,
 } from "@/lib/fuelExpenseLine";
 import {
-  loadTransport,
-  recordFuelRefill,
-  vehicleFuelOptions,
-  type FleetVehicle,
-} from "@/lib/transport";
-import {
   allocateExpensePayment,
   buildExpenseVoucherLines,
 } from "@/lib/expenseVoucherDraft";
-import { currentAcademicYearCode, loadMasters } from "@/lib/masters";
+import { currentAcademicYearCode } from "@/lib/masters";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { isPublishedHoliday } from "@/lib/foundationMasters";
 import {
   ErpTable,
@@ -52,6 +55,13 @@ import {
 } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { LastEntryStrip } from "@/components/accounts/LastEntryStrip";
+import { stableFillIds } from "@/lib/fuelLog";
+import {
+  FuelEntryForm,
+  useFuelFormContext,
+  type FuelFormVehicle,
+} from "@/components/transport/FuelEntryForm";
 
 const CARD = "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4";
 const BTN =
@@ -60,6 +70,9 @@ const BTN_OUTLINE =
   "rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-bold text-[var(--brand-deep)] disabled:opacity-50";
 const FIELD =
   "w-full rounded-xl border border-[var(--border)] px-3 py-2 text-sm";
+// FIELD plus room for the picker's clear / chevron icons.
+const PICK_FIELD =
+  "w-full min-w-0 rounded-xl border border-[var(--border)] bg-transparent py-2 pl-3 pr-8 text-sm disabled:opacity-60";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -128,51 +141,86 @@ function AccountSelect({
   onChange: (code: string) => void;
   disabled?: boolean;
 }) {
-  // A category that has sub-heads is a heading: it is never offered — its
-  // sub-heads are, grouped under the category's name so the clerk picks
-  // "Utilities → Electricity", not a flat code from a long list.
-  const { grouped, expenseGroups } = useMemo(() => {
-    const byCode = new Map(accounts.map((a) => [a.code, a]));
-    const g = new Map<string, CoaAccount[]>();
-    const eg: { label: string; children: CoaAccount[] }[] = [];
-    for (const a of accounts) {
-      if (a.hasChildren) continue;
-      const parent = a.parentCode ? byCode.get(a.parentCode) : undefined;
-      if (a.kind === "expense" && parent && parent.hasChildren) {
-        const label = `${parent.name}`;
-        const bucket = eg.find((x) => x.label === label);
-        if (bucket) bucket.children.push(a);
-        else eg.push({ label, children: [a] });
-        continue;
-      }
-      const k = g.get(a.kind) ?? [];
-      k.push(a);
-      g.set(a.kind, k);
-    }
-    return { grouped: g, expenseGroups: eg };
-  }, [accounts]);
+  // A category that has sub-heads is a heading: it is shown, so its sub-heads
+  // read "Utilities → Electricity", but never offered. Type a name or code to
+  // narrow; each level reads A→Z and this browser's recent accounts lead
+  // (director, 14 Oct 2026: "build in search heads").
+  const rowsFor = useCallback(
+    (q: string, recent: string[]) =>
+      groupAccountsForPicker(accounts, q, recent, {
+        groupOf: (a) => KIND_LABEL[a.kind] ?? a.kind,
+        groupOrder: KIND_ORDER.map((k) => KIND_LABEL[k] ?? k),
+        isSelectable: (a) => !a.hasChildren,
+      }),
+    [accounts],
+  );
+  const items = useMemo(
+    () => accounts.map((a) => ({ id: a.code, label: a.name, sub: a.code })),
+    [accounts],
+  );
   return (
-    <select className={FIELD} value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-      <option value="">Account…</option>
-      {KIND_ORDER.filter((k) => grouped.has(k)).map((k) => (
-        <optgroup key={k} label={KIND_LABEL[k] ?? k}>
-          {grouped.get(k)!.map((a) => (
-            <option key={a.code} value={a.code}>
-              {a.code} · {a.name}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-      {expenseGroups.map((x) => (
-        <optgroup key={x.label} label={`Expenses — ${x.label}`}>
-          {x.children.map((a) => (
-            <option key={a.code} value={a.code}>
-              {a.code} · {a.name}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-    </select>
+    <SearchPick
+      items={items}
+      rowsFor={rowsFor}
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      placeholder="Account — type a name or code…"
+      recentKey="accounts.voucher.account"
+      display={(it) => `${it.sub} · ${it.label}`}
+      inputClassName={PICK_FIELD}
+      aria-label="Account"
+    />
+  );
+}
+
+/**
+ * The expense head picker for Quick expense and the multi-line voucher: heads
+ * with their sub-heads indented beneath, searchable by name or code, A→Z,
+ * recent heads first. Picking a sub-head answers both questions at once
+ * (head + sub-head); picking a head that has sub-heads leaves the sub-head
+ * select beside it to answer, exactly as before.
+ */
+function ExpenseHeadPick({
+  accounts,
+  heads,
+  head,
+  subHead,
+  onPick,
+}: {
+  accounts: CoaAccount[];
+  heads: CoaAccount[];
+  head: string;
+  subHead: string;
+  onPick: (head: string, subHead: string) => void;
+}) {
+  const { pool, headCodes } = useMemo(() => {
+    const codes = new Set(heads.map((h) => h.code));
+    return {
+      headCodes: codes,
+      pool: [...heads, ...accounts.filter((a) => a.parentCode && codes.has(a.parentCode))],
+    };
+  }, [accounts, heads]);
+  const rowsFor = useCallback(
+    (q: string, recent: string[]) => groupAccountsForPicker(pool, q, recent),
+    [pool],
+  );
+  const items = useMemo(() => pool.map((a) => ({ id: a.code, label: a.name, sub: a.code })), [pool]);
+  return (
+    <SearchPick
+      items={items}
+      rowsFor={rowsFor}
+      value={subHead || head}
+      onChange={(code) => {
+        const a = pool.find((x) => x.code === code);
+        if (a?.parentCode && headCodes.has(a.parentCode)) onPick(a.parentCode, code);
+        else onPick(code, "");
+      }}
+      placeholder="Type a head or sub-head…"
+      recentKey="accounts.expense.head"
+      inputClassName={PICK_FIELD}
+      aria-label="Expense head"
+    />
   );
 }
 
@@ -254,10 +302,13 @@ export function VoucherEntryPanel({
   banks,
   actor,
   onPosted,
+  refreshKey,
 }: {
   banks: { id: string; name: string }[];
   actor: string;
   onPosted?: () => void;
+  /** Bumped by the workspace after any form posts — the "Entered up to" strip re-reads. */
+  refreshKey?: number;
 }) {
   const accounts = useChart();
   const [kind, setKind] = useState<VoucherKind>("payment");
@@ -445,6 +496,11 @@ export function VoucherEntryPanel({
         </div>
       </div>
 
+      {/* Follows the Type picker: a journal's progress is not a payment's. */}
+      <div className="mt-3">
+        <LastEntryStrip kind={kind} refreshKey={refreshKey} />
+      </div>
+
       <div className="mt-3 flex flex-wrap items-end gap-2">
         <label className="text-[11px] font-bold text-[var(--muted)]">
           Type
@@ -528,6 +584,33 @@ export function VoucherEntryPanel({
               setInstrumentMode("upi");
               setInstrumentRef(p.utr);
               setDate(p.paidOn);
+            }}
+          />
+        ) : null}
+        {/* Or a Cashfree pay link to the payee's phone (director, 10 Oct
+            2026). The server posts this voucher — the debit heads below,
+            Cr the wallet — when they collect; nothing is posted here. */}
+        {kind === "payment" ? (
+          <VoucherPayLink
+            payeeName={partyName}
+            narration={narration}
+            debitLines={lines
+              .filter((l) => {
+                const acc = byCode.get(l.accountCode);
+                return l.accountCode && paiseFromRupees(l.debit) > 0 && !acc?.isCash && !acc?.isBank && !acc?.bankAccountId;
+              })
+              .map((l) => ({
+                accountCode: l.accountCode,
+                amountPaise: paiseFromRupees(l.debit),
+                ...(spentOn ? { costCentreCode: spentOn } : {}),
+              }))}
+            onSent={(message) => {
+              setNotice({ tone: "ok", text: `${message} The voucher posts by itself when the payee collects — do not post it here.` });
+              setNarration("");
+              setPartyName("");
+              setInstrumentMode("");
+              setInstrumentRef("");
+              setLines(PRESETS.find((p) => p.kind === kind)?.lines() ?? PRESETS[3].lines());
             }}
           />
         ) : null}
@@ -976,10 +1059,13 @@ export function QuickExpensePanel({
   banks,
   actor,
   onPosted,
+  refreshKey,
 }: {
   banks: { id: string; name: string }[];
   actor: string;
   onPosted?: () => void;
+  /** Bumped by the workspace after any form posts — the "Entered up to" strip re-reads. */
+  refreshKey?: number;
 }) {
   const accounts = useChart();
   const [centres, setCentres] = useState<{ code: string; name: string }[]>([]);
@@ -1018,6 +1104,10 @@ export function QuickExpensePanel({
   // concessions. Money never goes to them by hand, so the quick form does
   // not offer them; the full voucher screen still can when a correction
   // genuinely needs it.
+  // Vehicle Fuel IS offered (director, 14 Oct 2026: "allow fuel entry in
+  // Accounts and sync both ways"): a fuel head takes the fill — vehicle,
+  // quantity, rate — and writes it to Transport → Fuel's register in the
+  // voucher's own transaction, so it is booked once and seen on both sides.
   const SYSTEM_HEADS = useMemo(() => new Set(["5060", "5065", "5066", "5100"]), []);
   const heads = useMemo(
     () =>
@@ -1042,6 +1132,13 @@ export function QuickExpensePanel({
 
   const amountPaise = paiseFromRupees(amount);
   const needsBank = payMode !== "cash";
+  /**
+   * A fuel head takes the fill instead of an amount: vehicle, quantity and
+   * rate, written to Transport → Fuel's register with its voucher in one
+   * transaction. A bare amount on 5031 is what left the book and Transport's
+   * log disagreeing.
+   */
+  const fuelHead = !!chosenHead && isFuelAccount({ code: chosenHead.code, name: chosenHead.name });
 
   /**
    * The days this amount actually lands on.
@@ -1052,9 +1149,15 @@ export function QuickExpensePanel({
    * school was shut. The school's own holiday calendar decides which days
    * are billable, so a Sunday or a gazetted holiday drops out by itself.
    */
+  // data-layer 2.1i: the holiday calendar from the Masters view (versions
+  // poll), not the page copy — an unread calendar is "loading", never "no
+  // holidays" (which would bill the shut days).
+  // Asked only once the daily-rate spread is ticked: a plain voucher makes
+  // no masters request.
+  const { masters: holidayBook, error: holidayError, retry: retryHolidays } = useScreenMasters({ enabled: spread });
   const plan = useMemo(() => {
-    if (!spread) return null;
-    const masters = loadMasters();
+    if (!spread || !holidayBook) return null;
+    const masters = holidayBook;
     // The holiday list is per academic year, and the library default is a
     // past one — ask about the running session.
     const ay = currentAcademicYearCode(masters);
@@ -1064,7 +1167,7 @@ export function QuickExpensePanel({
       holidayReason: (d: string) =>
         isPublishedHoliday(masters, d, ay)?.title ?? null,
     });
-  }, [spread, date, toDate]);
+  }, [spread, date, toDate, holidayBook]);
 
   // Which days are billed: the office's picks once they have clicked, the
   // working days until then.
@@ -1241,10 +1344,16 @@ export function QuickExpensePanel({
       <p className="text-[11px] text-[var(--muted)]">
         Head, amount, paid by — the balanced voucher is written for you. For
         anything unusual, the full voucher screen below still does everything.
+        Vehicle fuel takes its vehicle, quantity and rate, and lands in
+        Transport → Fuel as well.
       </p>
+      <div className="mt-2">
+        <LastEntryStrip kind="payment" refreshKey={refreshKey} />
+      </div>
 
       {/* The repeating daily expense — milk, newspapers — is the one the
           office most often shortcuts into a single lump on one date. */}
+      {fuelHead ? null : (
       <label className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-[var(--brand-deep)]">
         <input
           type="checkbox"
@@ -1266,8 +1375,9 @@ export function QuickExpensePanel({
           </span>
         ) : null}
       </label>
+      )}
 
-      {spread ? (
+      {spread && !fuelHead ? (
         <div className="mt-2 space-y-2">
           <div className="flex flex-wrap items-end gap-2">
             <label className="text-[11px] font-bold text-[var(--muted)]">
@@ -1298,7 +1408,18 @@ export function QuickExpensePanel({
               />
             </label>
             <p className="flex-1 rounded-lg bg-[var(--surface-sunken)] px-3 py-1.5 text-[11px]">
-              {!plan ? null : !plan.ok ? (
+              {!plan ? (
+                holidayError ? (
+                  <span className="font-semibold text-[var(--danger)]">
+                    Could not load the school&apos;s holiday calendar.{" "}
+                    <button type="button" className="underline" onClick={() => void retryHolidays()}>
+                      Try again
+                    </button>
+                  </span>
+                ) : (
+                  <span className="text-[var(--muted)]">Loading the school&apos;s holiday calendar…</span>
+                )
+              ) : !plan.ok ? (
                 <span className="font-semibold text-[var(--warning)]">
                   {plan.error}
                 </span>
@@ -1415,23 +1536,18 @@ export function QuickExpensePanel({
       ) : null}
 
       <div className="mt-3 flex flex-wrap items-end gap-2">
-        <label className="text-[11px] font-bold text-[var(--muted)]">
+        <label className="w-full min-w-0 text-[11px] font-bold text-[var(--muted)] sm:w-64">
           Head
-          <select
-            className={FIELD}
-            value={category}
-            onChange={(e) => {
-              setCategory(e.target.value);
-              setSubHead("");
+          <ExpenseHeadPick
+            accounts={accounts}
+            heads={heads}
+            head={category}
+            subHead={subHead}
+            onPick={(h, sh) => {
+              setCategory(h);
+              setSubHead(sh);
             }}
-          >
-            <option value="">Choose…</option>
-            {heads.map((h) => (
-              <option key={h.code} value={h.code}>
-                {h.name}
-              </option>
-            ))}
-          </select>
+          />
         </label>
         {subHeads.length > 0 ? (
           <label className="text-[11px] font-bold text-[var(--muted)]">
@@ -1450,6 +1566,8 @@ export function QuickExpensePanel({
             </select>
           </label>
         ) : null}
+        {fuelHead ? null : (
+        <>
         <label className="text-[11px] font-bold text-[var(--muted)]">
           Spent on
           <select className={FIELD} value={tag} onChange={(e) => setTag(e.target.value)}>
@@ -1476,8 +1594,19 @@ export function QuickExpensePanel({
           Date
           <input type="date" className={FIELD} value={date} onChange={(e) => setDate(e.target.value)} />
         </label>
+        </>
+        )}
       </div>
 
+      {fuelHead ? (
+        <div className="mt-3 rounded-xl bg-[var(--surface-sunken)] p-3">
+          <p className="mb-2 text-[11px] text-[var(--muted)]">
+            {chosenHead?.name} is fuel: the fill goes to the book and to Transport → Fuel together, tagged to Transport.
+          </p>
+          <FuelEntryForm initialDate={date} onSaved={() => onPosted?.()} />
+        </div>
+      ) : (
+      <>
       <div className="mt-2 flex flex-wrap items-end gap-2">
         <div className="text-[11px] font-bold text-[var(--muted)]">
           Paid by
@@ -1542,6 +1671,8 @@ export function QuickExpensePanel({
           it can post — that is what ties it to the bank statement later.
         </p>
       ) : null}
+      </>
+      )}
     </section>
   );
 }
@@ -2072,10 +2203,13 @@ export function MultiLineExpensePanel({
   banks,
   actor,
   onPosted,
+  refreshKey,
 }: {
   banks: { id: string; name: string }[];
   actor: string;
   onPosted?: () => void;
+  /** Bumped by the workspace after any form posts — the "Entered up to" strip re-reads. */
+  refreshKey?: number;
 }) {
   const accounts = useChart();
   const [centres, setCentres] = useState<{ code: string; name: string }[]>([]);
@@ -2152,6 +2286,10 @@ export function MultiLineExpensePanel({
 
   // Same rule as Quick expense: the store's automation owns these codes, so
   // money never goes to them by hand.
+  // Vehicle Fuel IS offered (director, 14 Oct 2026: "allow fuel entry in
+  // Accounts and sync both ways"): a fuel head takes the fill — vehicle,
+  // quantity, rate — and writes it to Transport → Fuel's register in the
+  // voucher's own transaction, so it is booked once and seen on both sides.
   const SYSTEM_HEADS = useMemo(() => new Set(["5060", "5065", "5066", "5100"]), []);
   const heads = useMemo(
     () =>
@@ -2171,34 +2309,24 @@ export function MultiLineExpensePanel({
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
   /**
-   * The fleet, read from the Transport desk rather than the chart.
+   * The fleet, read from the server (the Transport desk's vehicles, with the
+   * fuels each takes) — never from this browser's copy of Transport, which is
+   * empty on any machine that has not opened Transport.
    *
    * Vehicles are not sub-heads: the fleet changes when one is sold, and a
    * chart of accounts that grows an account per number plate is a chart
-   * nobody can read. The vehicle is recorded on the line and in Transport's
-   * own fuel log, which is where per-vehicle mileage already lives.
+   * nobody can read. The vehicle is recorded on the fill in Transport → Fuel,
+   * tied to its voucher line.
    */
-  const [fleet, setFleet] = useState<FleetVehicle[]>([]);
-  useEffect(() => {
-    try {
-      const t = loadTransport();
-      setFleet(t.vehicles ?? []);
-    } catch {
-      // Transport not opened in this browser yet — the fuel strip simply does
-      // not appear, and the expense can still be booked as a plain amount.
-      setFleet([]);
-    }
-  }, []);
+  const { ctx: fuelCtx } = useFuelFormContext(refreshKey ?? 0);
+  const fleet: FuelFormVehicle[] = fuelCtx?.vehicles ?? [];
 
   const isFuelRow = (r: Row) => {
     const a = accountOf(r);
     return !!a && isFuelAccount({ code: a.code, name: a.name });
   };
   const vehicleOf = (r: Row) => fleet.find((v) => v.id === r.vehicleId);
-  const fuelsOf = (r: Row) => {
-    const v = vehicleOf(r);
-    return v ? vehicleFuelOptions(v) : [];
-  };
+  const fuelsOf = (r: Row) => vehicleOf(r)?.fuels ?? [];
   /** On a fuel row the amount is rate × quantity, never a typed figure. */
   const rowAmountPaise = (r: Row) =>
     isFuelRow(r)
@@ -2280,7 +2408,7 @@ export function MultiLineExpensePanel({
           odometerKm: Number(r.odometer) || 0,
         },
         allowedFuels: fuelsOf(r),
-        lastOdometerKm: v?.odometerKm,
+        lastOdometerKm: v ? fuelCtx?.lastOdometer[v.id] : undefined,
       });
       problems.push(...res.problems);
       warnings.push(...res.warnings);
@@ -2300,8 +2428,17 @@ export function MultiLineExpensePanel({
     (totals.paidPaise === 0 || !needsBank || (!!bankId && ref.trim() !== "")) &&
     fuelIssues.problems.length === 0;
 
+  /**
+   * Fill ids, one per fuel row, kept until the post is confirmed — a retry or
+   * a double click re-sends the same ids and lands on the same voucher.
+   */
+  const fuelIdsRef = useRef(new Map<string, string>());
+  /** Set synchronously: a second click in the same tick sees it before React re-renders. */
+  const postingRef = useRef(false);
+
   async function post() {
-    if (!canPost || busy) return;
+    if (!canPost || busy || postingRef.current) return;
+    postingRef.current = true;
     setBusy(true);
     setNotice(null);
     try {
@@ -2326,6 +2463,46 @@ export function MultiLineExpensePanel({
                 date,
               },
       });
+      // Each fuel row names the voucher line it lands on, so the server can
+      // write the voucher and Transport → Fuel's fills in one transaction.
+      // buildExpenseVoucherLines emits, per line in order, the amount then its
+      // tax — the line numbers follow from that.
+      const lineOfRow = new Map<string, number>();
+      let lineNo = 0;
+      for (const l of totals.lines) {
+        if (l.amountPaise > 0) lineOfRow.set(l.id, ++lineNo);
+        if (l.taxPaise > 0) lineNo += 1;
+      }
+      const fuelRowIds = rows.filter((r) => isFuelRow(r) && lineOfRow.has(r.id)).map((r) => r.id);
+      const heldIds = stableFillIds(
+        fuelIdsRef.current,
+        fuelRowIds,
+        () => `fuela_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+      );
+      const fuelFills = rows
+        .filter((r) => isFuelRow(r) && lineOfRow.has(r.id))
+        .map((r) => {
+          const allocated = totals.lines.find((l) => l.id === r.id);
+          const odo = Number(r.odometer);
+          return {
+            id: heldIds.get(r.id)!,
+            lineNo: lineOfRow.get(r.id)!,
+            vehicleId: r.vehicleId,
+            fillDate: date,
+            fuelType: r.fuelType,
+            quantity: Math.round((Number(r.fuelQty) || 0) * 100) / 100,
+            ratePaise: paiseFromRupees(r.fuelRate),
+            odometerKm: r.odometer.trim() && Number.isFinite(odo) && odo > 0 ? odo : null,
+            dealerName: r.vendorName,
+            billNo: "",
+            // Left owing → fuel on credit from its dealer; paid today → the
+            // way the voucher paid (a cheque is a bank payment).
+            paymentMode: allocated && allocated.duePaise > 0 ? "on_account" : payMode === "cheque" ? "bank" : payMode,
+            bankAccountId: bankId,
+            paymentRef: ref.trim(),
+            note: r.description.trim(),
+          };
+        });
       const res = await ledgerApi<{ voucherNo?: string }>({
         action: "post",
         voucher: {
@@ -2335,62 +2512,20 @@ export function MultiLineExpensePanel({
           createdBy: actor,
           lines,
         },
+        ...(fuelFills.length ? { fuelFills } : {}),
       });
       if (res.ok) {
-        // The book has the money; Transport gets the litres. Written only
-        // AFTER the voucher posts, so a refused voucher cannot leave a fuel
-        // log behind claiming a fill that was never paid for. If a refill is
-        // rejected here the voucher still stands — it is real money — and the
-        // failure is said out loud rather than swallowed, because a silent
-        // miss is a mileage figure that is quietly wrong from then on.
-        const fuelRows = rows.filter((r) => isFuelRow(r));
-        const refillErrors: string[] = [];
-        for (const r of fuelRows) {
-          try {
-            const out = recordFuelRefill(
-              buildFuelRefill({
-                pick: {
-                  vehicleId: r.vehicleId,
-                  fuelType: r.fuelType,
-                  unit: r.fuelUnit,
-                  ratePaisePerUnit: paiseFromRupees(r.fuelRate),
-                  qty: Number(r.fuelQty) || 0,
-                  odometerKm: Number(r.odometer) || 0,
-                },
-                vendorName: r.vendorName,
-                billNo: ref.trim(),
-                filledAt: `${date}T12:00:00.000Z`,
-                paidInFull: totals.duePaise === 0,
-              }),
-            );
-            if (!out.ok) {
-              refillErrors.push(
-                `${vehicleOf(r)?.registrationNo ?? "vehicle"}: ${out.error}`,
-              );
-            }
-          } catch (e) {
-            refillErrors.push(
-              `${vehicleOf(r)?.registrationNo ?? "vehicle"}: ${
-                e instanceof Error ? e.message : "could not record the fill"
-              }`,
-            );
-          }
-        }
-
         setNotice({
-          tone: refillErrors.length ? "bad" : "ok",
+          tone: "ok",
           text:
             `${res.voucherNo ?? "Posted"} — ${formatInr(totals.grandTotalPaise)}` +
             (totals.duePaise > 0
               ? ` · ${formatInr(totals.duePaise)} left owing`
               : " · paid in full") +
-            (fuelRows.length && !refillErrors.length
-              ? ` · ${fuelRows.length} fill(s) logged in Transport`
-              : "") +
-            (refillErrors.length
-              ? ` · POSTED, but the fuel log was NOT written (${refillErrors.join("; ")}) — record it in Transport by hand`
-              : ""),
+            (fuelFills.length ? ` · ${fuelFills.length} fill(s) in Transport → Fuel, tied to this voucher` : ""),
         });
+        // Confirmed: only now do the next rows get fresh fill ids.
+        fuelIdsRef.current = new Map();
         setRows([blankRow()]);
         setNote("");
         setRef("");
@@ -2400,6 +2535,7 @@ export function MultiLineExpensePanel({
         setNotice({ tone: "bad", text: res.error || "The book refused this voucher" });
       }
     } finally {
+      postingRef.current = false;
       setBusy(false);
     }
   }
@@ -2412,8 +2548,12 @@ export function MultiLineExpensePanel({
       <p className="text-[11px] text-[var(--muted)]">
         One trip, one voucher: a head and sub-head per line, with its own
         vendor and tag. Pay all of it or part — whatever is left stays owing to
-        the vendor it belongs to.
+        the vendor it belongs to. A fuel line names its vehicle, quantity and
+        rate, and lands in Transport → Fuel in the same save.
       </p>
+      <div className="mt-2">
+        <LastEntryStrip kind="payment" refreshKey={refreshKey} />
+      </div>
 
       {notice ? (
         <p
@@ -2462,24 +2602,19 @@ export function MultiLineExpensePanel({
               <div className="flex flex-wrap items-end gap-2">
                 <label className="min-w-[10rem] flex-1 text-[10px] font-bold text-[var(--muted)]">
                   Head
-                  <select
-                    className={FIELD}
-                    value={r.head}
-                    onChange={(e) =>
+                  <ExpenseHeadPick
+                    accounts={accounts}
+                    heads={heads}
+                    head={r.head}
+                    subHead={r.subHead}
+                    onPick={(h, sh) =>
                       setRow(r.id, {
-                        head: e.target.value,
-                        subHead: "",
-                        ...suggestTag(r, e.target.value),
+                        head: h,
+                        subHead: sh,
+                        ...(sh ? suggestTag(r, h, sh) : suggestTag(r, h)),
                       })
                     }
-                  >
-                    <option value="">Choose…</option>
-                    {heads.map((h) => (
-                      <option key={h.code} value={h.code}>
-                        {h.name}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </label>
                 {subs.length > 0 ? (
                   <label className="min-w-[10rem] flex-1 text-[10px] font-bold text-[var(--muted)]">
@@ -2591,9 +2726,9 @@ export function MultiLineExpensePanel({
               {fuelRow ? (
                 fleet.length === 0 ? (
                   <p className="mt-2 rounded-lg bg-amber-500/10 px-2 py-1 text-[10px] text-amber-700">
-                    This is a fuel head, but no vehicles have loaded in this
-                    browser. Open Transport once, then come back — otherwise
-                    the fill cannot be logged against a vehicle.
+                    This is a fuel head, but the fleet has not loaded (or
+                    Transport has no vehicles), so the fill cannot be tied to a
+                    vehicle yet.
                   </p>
                 ) : (
                   <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg bg-[var(--surface-2)] p-2">
@@ -2604,7 +2739,7 @@ export function MultiLineExpensePanel({
                         value={r.vehicleId}
                         onChange={(e) => {
                           const v = fleet.find((x) => x.id === e.target.value);
-                          const opts = v ? vehicleFuelOptions(v) : [];
+                          const opts = v?.fuels ?? [];
                           // The fuel and its unit follow the vehicle: a
                           // CNG+Petrol bus offers both, everything else is
                           // settled the moment the vehicle is chosen.
@@ -2612,14 +2747,15 @@ export function MultiLineExpensePanel({
                             vehicleId: e.target.value,
                             fuelType: opts[0]?.fuelType ?? "",
                             fuelUnit: opts[0]?.unit ?? "",
-                            odometer: v?.odometerKm ? String(v.odometerKm) : "",
+                            odometer: "",
                           });
                         }}
                       >
                         <option value="">Choose…</option>
                         {fleet.map((v) => (
                           <option key={v.id} value={v.id}>
-                            {v.registrationNo} — {v.name}
+                            {v.primary}
+                            {v.secondary ? ` — ${v.secondary}` : ""}
                           </option>
                         ))}
                       </select>

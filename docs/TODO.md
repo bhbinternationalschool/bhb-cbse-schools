@@ -240,6 +240,11 @@ the concrete items. Check things off in the PR that fixes them.
 
 ## Phase 1 — server-authoritative data layer (in progress)
 
+> **12 Oct 2026:** this phase is superseded by the full plan in
+> [`data-layer-rebuild/COMMAND.md`](./data-layer-rebuild/COMMAND.md) — the root-cause
+> verdict, the seven rules, and the step-by-step command for executors.
+
+
 - [x] Masters overwrite guard: server rejects a regenerated class-id set
   (shipped 2026-08-09, `mastersWriteGuard.ts`, 409 + selftest).
 - [x] **Masters revision guard** — shipped, then rolled back the same night

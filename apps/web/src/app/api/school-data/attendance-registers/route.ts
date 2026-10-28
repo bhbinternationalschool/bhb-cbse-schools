@@ -1,6 +1,7 @@
-import { sectionKey, staffSectionScope } from "@/lib/api/v1/staffScope";
+import { sectionKey, readStaffScopeForDesk } from "@/lib/api/v1/staffScope";
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
+import { ATTENDANCE_REGISTERS_PROBE_TABLES } from "@/lib/deskProbeTables";
 import {
   authorizeSchoolDataDesk,
   SCHOOL_DATA_DESK_RBAC,
@@ -22,6 +23,7 @@ import { readNamedDeletes } from "@/lib/deskNamedDeletes.server";
 import { featureAuthorizedDeletes } from "@/lib/deskNamedDeletesFeature.server";
 import {
   deskFeatureGateFor,
+  deniedSliceGuard,
   featurePushOutcome,
   featureSavedResponse,
   stripDeskForFeatures,
@@ -83,14 +85,19 @@ function featureDeskBody(desk: DeskBody, gate: FeatureGate): DeskBody {
     exceptions: desk.ancillary?.exceptions ?? [],
   };
   const cut = stripDeskForFeatures("attendance", flat, gate);
+  // Attendance → Dashboard & reports (read only) owns no slice and reads
+  // every register this desk was already cut to (a teacher's own sections).
+  const registers = gate.access("attendance.reports", "view").allowed
+    ? flat.registers
+    : cut.registers;
   return {
     ...desk,
-    registers: cut.registers,
-    stamps: stampsOf(cut.registers, desk),
+    registers,
+    stamps: stampsOf(registers, desk),
     ancillary: desk.ancillary
       ? { ...desk.ancillary, absentNudges: cut.absentNudges, exceptions: cut.exceptions }
       : desk.ancillary,
-    count: cut.registers.length,
+    count: registers.length,
     functionOnly: true,
   };
 }
@@ -107,19 +114,21 @@ export async function GET(req: Request) {
   // A teacher gets only their own sections' registers (2026-09-29). Every
   // register carries student ids and marks, and the nudges/exceptions carry
   // parents' numbers — "attendance.view" alone handed a teacher's browser
-  // the whole school. Unknown scope (lookup failed) is treated as
-  // restricted with no sections, never as school-wide.
+  // the whole school. Unknown scope (lookup failed) is a 503 — never
+  // school-wide, and (since 13 Oct 2026) never an empty register list.
   // A function holder is cut the same way, then to their functions.
   let sections: Set<string> | null = null;
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) sections = scope?.sections ?? new Set<string>();
   }
   try {
     const result = await cachedDeskJson({
       cacheKey: "attendance-registers",
-      tables: ["attendance_desk_registers", "attendance_desk_marks"],
+      tables: [...ATTENDANCE_REGISTERS_PROBE_TABLES],
       // The shared cache and its ETag describe the WHOLE desk. A scoped
       // caller must never get a 304 against a whole-desk body its browser
       // may hold from an office login, so it always gets a fresh body.
@@ -179,7 +188,9 @@ export async function POST(req: Request) {
   // register still marks one register at a time through the mark route.
   const scopeCtx = gate ? gate.ctx : auth.ok && !auth.viaMirrorSecret ? auth.ctx : null;
   if (scopeCtx) {
-    const scope = await staffSectionScope(scopeCtx).catch(() => null);
+    const scopeRead = await readStaffScopeForDesk(scopeCtx);
+    if (!scopeRead.ok) return scopeRead.response;
+    const scope = scopeRead.scope;
     if (!scope?.unrestricted) {
       return NextResponse.json(
         {
@@ -214,6 +225,23 @@ export async function POST(req: Request) {
 
   // Function holders (e.g. Attendance → Exceptions): merged onto the stored
   // desk, only their functions' slices — never the body as sent.
+  // Whole-module holder: refused only where the office has turned one of
+  // this desk's functions off for them (Masters → Roles → Assign to user).
+  if (!gate) {
+    const refused = await deniedSliceGuard(
+      req,
+      "attendance",
+      async () => {
+        const [regs, anc] = await Promise.all([
+          fetchAttendanceRegistersFromDb(),
+          readAttendanceDeskAncillary(),
+        ]);
+        return regs.ok && anc.ok ? { registers: regs.registers, ...anc.ancillary } : null;
+      },
+      body,
+    );
+    if (refused) return refused;
+  }
   if (gate) {
     const [regs, anc] = await Promise.all([
       fetchAttendanceRegistersFromDb(),

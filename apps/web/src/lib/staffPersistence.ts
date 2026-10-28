@@ -3,6 +3,7 @@
  * Masters localStorage remains the working copy; Supabase overlays when configured.
  */
 
+import { rosterEmpKey } from "@/lib/staffProtectedFields";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 import {
@@ -22,13 +23,14 @@ import {
   staffDualWriteDbEnabled,
   staffReadFromDbEnabled,
 } from "@/lib/staffDbConfig";
-import { DESK_PUSH_DEBOUNCE_MS } from "@/lib/workspaceSyncPolicy";
 import {
+  dedupeHydration,
   isDeskHydrated,
   markDeskHydrated,
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
-import { trackServerWork } from "@/lib/serverWork";
+import type { RowConflicts, RowStamps } from "@/lib/rowStampClient";
+import { fetchAllPages } from "@/lib/supabase/pageAll";
 
 const MODULE = "staff";
 
@@ -36,6 +38,16 @@ export type StaffRemoteBundle = {
   departments: Department[];
   designations: Designation[];
   staff: StaffRecord[];
+  /** Each row's `updated_at` per list — the base of the next stamped save. */
+  stamps?: RowStamps;
+};
+
+/** The roster lists saved row by row with stamps (10 Oct 2026). */
+export const STAFF_STAMPED_SLICES = ["staff", "departments", "designations"] as const;
+const STAFF_STAMPED_TABLES: Record<(typeof STAFF_STAMPED_SLICES)[number], string> = {
+  staff: "sis_staff",
+  departments: "sis_departments",
+  designations: "sis_designations",
 };
 
 type DepartmentRow = {
@@ -71,9 +83,6 @@ export type StaffRow = {
   updated_at: string;
 };
 
-let pushTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingPush: MastersState | null = null;
-
 const DATA_URL_MAX = 8_000;
 
 export function staffRemoteEnabled() {
@@ -82,11 +91,6 @@ export function staffRemoteEnabled() {
 
 export function resetStaffPersistenceCache() {
   resetDeskHydrated(MODULE);
-  pendingPush = null;
-  if (pushTimer) {
-    clearTimeout(pushTimer);
-    pushTimer = null;
-  }
 }
 
 function photoForRemote(url: string): string {
@@ -181,17 +185,25 @@ export async function fetchStaffRemote(): Promise<StaffRemoteBundle | null> {
       departments?: Department[];
       designations?: Designation[];
       staff?: StaffRecord[];
+      stamps?: RowStamps;
     };
     if (!body.ok) return null;
     return {
       departments: body.departments ?? [],
       designations: body.designations ?? [],
       staff: body.staff ?? [],
+      stamps: body.stamps,
     };
   } catch (e) {
     console.warn("[staff] pull error", e);
     return null;
   }
+}
+
+function stampsOfRows(rows: Record<string, unknown>[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const r of rows) if (typeof r.id === "string" && r.updated_at) out[r.id] = String(r.updated_at);
+  return out;
 }
 
 /** Service-role pull for WhatsApp / server mirror (no browser session). */
@@ -201,26 +213,36 @@ export async function fetchStaffRemoteServer(): Promise<StaffRemoteBundle | null
   if (!ctx) return null;
   const { sb, tenantId } = ctx;
 
+  // Paged: PostgREST stops at 1,000 rows and calls the cut a success.
+  // A soft-removed member (deleted_at set — data-layer 2.2a/2.2b) is not on
+  // the roster: not listed, not resolved for permissions, and their session
+  // ends (revalidateStaffSession finds no record). Restoring clears deleted_at
+  // and they are back on the next read.
+  const page = (table: string) =>
+    fetchAllPages<Record<string, unknown>>((from, to) => {
+      const q = sb.from(table).select("*").eq("tenant_id", tenantId);
+      return (table === "sis_staff" ? q.is("deleted_at", null) : q).order("id").range(from, to);
+    });
   const [depRes, desRes, stfRes] = await Promise.all([
-    sb.from("sis_departments").select("*").eq("tenant_id", tenantId),
-    sb.from("sis_designations").select("*").eq("tenant_id", tenantId),
-    sb.from("sis_staff").select("*").eq("tenant_id", tenantId),
+    page("sis_departments"),
+    page("sis_designations"),
+    page("sis_staff"),
   ]);
 
   if (depRes.error || desRes.error || stfRes.error) {
-    console.warn(
-      "[staff] server pull failed",
-      depRes.error?.message || desRes.error?.message || stfRes.error?.message,
-    );
+    console.warn("[staff] server pull failed", depRes.error || desRes.error || stfRes.error);
     return null;
   }
 
   return {
-    departments: ((depRes.data ?? []) as DepartmentRow[]).map(rowToDepartment),
-    designations: ((desRes.data ?? []) as DesignationRow[]).map(
-      rowToDesignation,
-    ),
-    staff: ((stfRes.data ?? []) as StaffRow[]).map(rowToStaff),
+    departments: (depRes.rows as unknown as DepartmentRow[]).map(rowToDepartment),
+    designations: (desRes.rows as unknown as DesignationRow[]).map(rowToDesignation),
+    staff: (stfRes.rows as unknown as StaffRow[]).map(rowToStaff),
+    stamps: {
+      departments: stampsOfRows(depRes.rows),
+      designations: stampsOfRows(desRes.rows),
+      staff: stampsOfRows(stfRes.rows),
+    },
   };
 }
 
@@ -344,11 +366,36 @@ function dedupeByKey<T>(rows: T[], keyOf: (row: T) => string): T[] {
   return [...m.values()];
 }
 
+export type StaffPushResult = {
+  ok: boolean;
+  error?: string;
+  /** Stamped saves: rows written, at their new stamps. */
+  stamps?: RowStamps;
+  /** Stamped saves: rows refused because they changed elsewhere first. */
+  conflicts?: RowConflicts;
+  /** Unstamped saves: stored rows left exactly as they were. */
+  kept?: number;
+};
+
+/**
+ * Save the roster.
+ *
+ * Stamped (`stamps`, the browser since 10 Oct 2026): only the rows named,
+ * each only while the database still holds it at the stamp the browser
+ * loaded. A staff record changed elsewhere first — a phone number fixed from
+ * the staff app, a UDISE+ teacher sync — is a conflict, not overwritten.
+ *
+ * Unstamped (a tab from an older build, or a server caller handing over a
+ * whole cached Masters): new rows are added, stored rows are never replaced.
+ * Every Masters save used to re-send the whole roster this way, so a stale
+ * tab editing a fee head put back old phone numbers, salaries and banks.
+ */
 async function upsertStaffBundle(
   sb: SupabaseClient,
   tenantId: string,
   state: MastersState,
-): Promise<{ ok: boolean; error?: string }> {
+  stamps?: RowStamps,
+): Promise<StaffPushResult> {
   if (!staffDualWriteDbEnabled()) return { ok: true };
   const now = new Date().toISOString();
 
@@ -372,7 +419,10 @@ async function upsertStaffBundle(
   ): Map<string, string> => {
     const m = new Map<string, string>();
     for (const r of rows ?? []) {
-      const k = String((r as Record<string, unknown>)[key] ?? "").trim();
+      // Employee codes compare upper-cased and trimmed — the same key the
+      // protected-field guard judges a row by (staffProtectedFields.rosterEmpKey).
+      const raw = String((r as Record<string, unknown>)[key] ?? "");
+      const k = key === "emp_code" ? rosterEmpKey(raw) : raw.trim();
       if (k) m.set(k, String(r.id));
     }
     return m;
@@ -413,13 +463,15 @@ async function upsertStaffBundle(
     (d) => (d.code || "").trim() || d.id,
   );
 
+  const stfRemap = new Map<string, string>();
   const staff = dedupeByKey(
     (state.staff ?? []).map((raw) => {
       // The API route feeds request JSON straight through; normalize so a
       // partial record can't crash the row builders further down.
       const s = normalizeStaffRecord(raw);
-      const emp = (s.empCode || "").trim();
+      const emp = rosterEmpKey(s.empCode);
       const dbId = emp ? stfIdByEmp.get(emp) : undefined;
+      if (dbId && dbId !== s.id) stfRemap.set(s.id, dbId);
       return {
         ...s,
         id: dbId && dbId !== s.id ? dbId : s.id,
@@ -431,156 +483,102 @@ async function upsertStaffBundle(
           : s.designationId,
       };
     }),
-    (s) => (s.empCode || "").trim() || s.id,
+    (s) => rosterEmpKey(s.empCode) || s.id,
   );
 
-  const depRows = departments.map((d) => departmentToRow(d, tenantId, now));
-  if (depRows.length > 0) {
-    const { error } = await sb.from("sis_departments").upsert(depRows, {
-      onConflict: "id",
-    });
-    if (error) {
-      console.warn("[staff] push departments failed", error.message);
-      return { ok: false, error: error.message };
+  const rowsBySlice: Record<(typeof STAFF_STAMPED_SLICES)[number], Record<string, unknown>[]> = {
+    departments: departments.map((d) => departmentToRow(d, tenantId, now)),
+    designations: designations.map((d) => designationToRow(d, tenantId, now)),
+    staff: staff.map((x) => staffToRow(x, tenantId, now)),
+  };
+  const remaps = { departments: depRemap, designations: desRemap, staff: stfRemap };
+
+  const written: RowStamps = {};
+  const conflicts: RowConflicts = {};
+  let kept = 0;
+  // Departments before designations before staff: each refers to the last.
+  for (const slice of ["departments", "designations", "staff"] as const) {
+    const table = STAFF_STAMPED_TABLES[slice];
+    const rows = rowsBySlice[slice];
+    if (stamps) {
+      // The browser named rows by the ids it holds; follow any remap.
+      const named: Record<string, string> = {};
+      for (const [id, stamp] of Object.entries(stamps[slice] ?? {})) {
+        named[remaps[slice].get(id) ?? id] = stamp;
+      }
+      const changed = rows.filter((r) => String(r.id) in named);
+      if (!changed.length) continue;
+      const { writeStampedRows } = await import("@/lib/rowStampWrite.server");
+      const res = await writeStampedRows(sb, table, tenantId, changed, named);
+      if (!res.ok) {
+        console.warn(`[staff] push ${slice} failed`, res.error);
+        return { ok: false, error: res.error };
+      }
+      written[slice] = res.stamps;
+      if (res.conflicts.length) conflicts[slice] = res.conflicts;
+    } else {
+      for (let i = 0; i < rows.length; i += 40) {
+        const part = rows.slice(i, i + 40);
+        const { data, error } = await sb
+          .from(table)
+          .upsert(part, { onConflict: "id", ignoreDuplicates: true })
+          .select("id");
+        if (error) {
+          console.warn(`[staff] push ${slice} failed`, error.message);
+          return { ok: false, error: error.message };
+        }
+        kept += part.length - (data ?? []).length;
+      }
     }
   }
 
-  const desRows = designations.map((d) => designationToRow(d, tenantId, now));
-  if (desRows.length > 0) {
-    const { error } = await sb.from("sis_designations").upsert(desRows, {
-      onConflict: "id",
-    });
-    if (error) {
-      console.warn("[staff] push designations failed", error.message);
-      return { ok: false, error: error.message };
-    }
-  }
-
-  const staffRows = staff.map((s) => staffToRow(s, tenantId, now));
-  const chunk = 40;
-  for (let i = 0; i < staffRows.length; i += chunk) {
-    const slice = staffRows.slice(i, i + chunk);
-    const { error } = await sb.from("sis_staff").upsert(slice, {
-      onConflict: "id",
-    });
-    if (error) {
-      console.warn("[staff] push staff failed", error.message);
-      return { ok: false, error: error.message };
-    }
-  }
-
-  return { ok: true };
+  return { ok: true, stamps: written, conflicts, kept };
 }
 
 export async function pushStaffRemoteServer(
   state: MastersState,
-): Promise<{ ok: boolean; error?: string }> {
+  stamps?: RowStamps,
+): Promise<StaffPushResult> {
   if (!staffDualWriteDbEnabled()) return { ok: true };
   const { getServerTenantContext } = await import("@/lib/serverTenant");
   const ctx = await getServerTenantContext();
   if (!ctx) {
     return { ok: false, error: "Supabase tenant not configured" };
   }
-  return upsertStaffBundle(ctx.sb, ctx.tenantId, state);
+  return upsertStaffBundle(ctx.sb, ctx.tenantId, state, stamps);
 }
 
-/** Browser: push a Masters state's staff slice via the server API. */
-export async function pushStaffSlice(
-  state: MastersState,
-): Promise<{ ok: boolean; error?: string }> {
-  if (!staffRemoteEnabled()) return { ok: true };
-  if (typeof window === "undefined") return { ok: true };
-  try {
-    const res = await fetch("/api/school-data/staff-roster", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ state }),
-    });
-    const body = (await res.json().catch(() => null)) as {
-      ok?: boolean;
-      error?: string;
-    } | null;
-    if (!res.ok || !body?.ok) {
-      const message = body?.error || `HTTP ${res.status}`;
-      console.warn("[staff] push failed", message);
-      return { ok: false, error: message };
-    }
-    return { ok: true };
-  } catch (e) {
-    console.warn("[staff] push error", e);
-    return { ok: false, error: String(e) };
-  }
-}
-
-async function wipeStaffBundle(
-  sb: SupabaseClient,
-  tenantId: string,
-): Promise<{ ok: boolean; error?: string }> {
-  const { error: stfErr } = await sb
-    .from("sis_staff")
-    .delete()
-    .eq("tenant_id", tenantId);
-  if (stfErr) {
-    console.warn("[staff] wipe staff failed", stfErr.message);
-    return { ok: false, error: stfErr.message };
-  }
-  const { error: desErr } = await sb
-    .from("sis_designations")
-    .delete()
-    .eq("tenant_id", tenantId);
-  if (desErr) {
-    console.warn("[staff] wipe designations failed", desErr.message);
-    return { ok: false, error: desErr.message };
-  }
-  const { error: depErr } = await sb
-    .from("sis_departments")
-    .delete()
-    .eq("tenant_id", tenantId);
-  if (depErr) {
-    console.warn("[staff] wipe departments failed", depErr.message);
-    return { ok: false, error: depErr.message };
-  }
-  return { ok: true };
-}
-
-/** Service-role wipe — used by the API route (tenant reset flows). */
-export async function wipeRemoteStaffRosterServer(): Promise<{
+/**
+ * The old route's "wipe the roster" (DELETE /api/school-data/staff-roster),
+ * since data-layer 2.2b a SOFT remove: every staff row not already removed
+ * gets deleted_at = now and deleted_by = `by` (the session, set by the
+ * route), exactly as the kernel's Remove does — hidden everywhere, restorable
+ * one by one. Departments and designations are left as they are: they are
+ * the school's setup, and a restored member must find theirs. Nothing is
+ * hard-deleted any more (the director's decision, 20 Oct 2026).
+ */
+export async function softRemoveStaffRosterServer(by: string): Promise<{
   ok: boolean;
   error?: string;
+  removed?: number;
 }> {
+  if (!by.trim()) return { ok: false, error: "who removed the roster is required" };
   const { getServerTenantContext } = await import("@/lib/serverTenant");
   const ctx = await getServerTenantContext();
   if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
-  const result = await wipeStaffBundle(ctx.sb, ctx.tenantId);
-  if (result.ok) resetStaffPersistenceCache();
-  return result;
-}
-
-/** Browser: wipe staff roster via the server API. */
-export async function wipeRemoteStaffRoster(): Promise<{
-  ok: boolean;
-  error?: string;
-}> {
-  if (!staffRemoteEnabled()) return { ok: true };
-  if (typeof window === "undefined") return { ok: true };
-  try {
-    const res = await fetch("/api/school-data/staff-roster", {
-      method: "DELETE",
-      credentials: "same-origin",
-    });
-    const body = (await res.json().catch(() => null)) as {
-      ok?: boolean;
-      error?: string;
-    } | null;
-    if (!res.ok || !body?.ok) {
-      return { ok: false, error: body?.error || `HTTP ${res.status}` };
-    }
-    resetStaffPersistenceCache();
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: String(e) };
+  const now = new Date().toISOString();
+  const { data, error } = await ctx.sb
+    .from("sis_staff")
+    .update({ deleted_at: now, deleted_by: by.trim(), updated_at: now })
+    .eq("tenant_id", ctx.tenantId)
+    .is("deleted_at", null)
+    .select("id");
+  if (error) {
+    console.warn("[staff] soft remove failed", error.message);
+    return { ok: false, error: error.message };
   }
+  resetStaffPersistenceCache();
+  return { ok: true, removed: (data ?? []).length };
 }
 
 export function staffReadFromDbClientEnabled(): boolean {
@@ -601,35 +599,25 @@ export function stripStaffFromMastersForBlob(
   return stripped;
 }
 
-export function scheduleStaffSync(state: MastersState) {
-  if (!staffRemoteEnabled()) return;
-  if (typeof window === "undefined") {
-    void trackServerWork(pushStaffRemoteServer(state));
-    return;
-  }
-  pendingPush = state;
-  if (pushTimer) clearTimeout(pushTimer);
-  pushTimer = setTimeout(() => {
-    const payload = pendingPush;
-    pendingPush = null;
-    pushTimer = null;
-    if (!payload) return;
-    void trackServerWork(pushStaffSlice(payload));
-  }, DESK_PUSH_DEBOUNCE_MS);
+/**
+ * Pull staff slice once and lay it into the page copy (pull-only; the staff
+ * screens write rows through the kernel since data-layer 2.2d).
+ */
+export function ensureStaffHydrated(): Promise<boolean> {
+  if (!staffRemoteEnabled()) return Promise.resolve(false);
+  if (isDeskHydrated(MODULE)) return Promise.resolve(false);
+  // One load at a time: the hydrated mark now lands at the end, so it can no
+  // longer double as the guard against a second concurrent pull.
+  return dedupeHydration(MODULE, hydrateStaffOnce);
 }
 
-/**
- * Pull staff slice once, merge into Masters localStorage, then push desk.
- */
-export async function ensureStaffHydrated(): Promise<boolean> {
-  if (!staffRemoteEnabled()) return false;
+async function hydrateStaffOnce(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
 
   const readFromDb = staffReadFromDbEnabled();
   const remote = await fetchStaffRemote();
   if (!remote) return false;
 
-  markDeskHydrated(MODULE);
   const { loadMasters } = await import("@/lib/masters");
   const { writeMastersLocalRaw } = await import("@/lib/mastersPersistence");
   let next = loadMasters();
@@ -662,13 +650,6 @@ export async function ensureStaffHydrated(): Promise<boolean> {
     changed = true;
   }
 
-  const localStaffCount = next.staff?.length ?? 0;
-  const remoteStaffCount = remote?.staff.length ?? 0;
-  // DB-read mode: hydrate is pull-only; don't push stale browser demo roster back to server.
-  if (!readFromDb && localStaffCount > 0) {
-    await pushStaffSlice(next);
-  }
-
   if (changed) {
     // Local-only. saveMasters() here pushed masters AND re-pushed the staff
     // roster on every staff hydrate (269 POST /staff-roster a day, audit
@@ -679,6 +660,9 @@ export async function ensureStaffHydrated(): Promise<boolean> {
       window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
     }
   }
-
+  // Marked only once the roster is written: markDeskHydrated fires
+  // bhb-desk-first-hydrated, and access checks listening for it must find the
+  // roster already in masters (review of #574).
+  markDeskHydrated(MODULE);
   return changed;
 }

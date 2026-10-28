@@ -101,7 +101,7 @@ export function DocVerificationQueuePanel({
     }
   }
 
-  function decide(it: PendingDocItem, approve: boolean) {
+  async function decide(it: PendingDocItem, approve: boolean) {
     setError(null);
     const by = session?.fullName || session?.email || "Verifier";
     const k = itemKey(it);
@@ -110,6 +110,7 @@ export function DocVerificationQueuePanel({
       setError("Add a remark when rejecting so the parent/staff can re-upload.");
       return;
     }
+    if (it.subject === "staff") setNotice("Saving…");
     const r =
       it.subject === "student"
         ? decideStudentDocVerification({
@@ -119,7 +120,8 @@ export function DocVerificationQueuePanel({
             by,
             note,
           })
-        : decideStaffDocVerification({
+        : // A staff record write (data-layer 2.2d): said only after the server answered.
+          await decideStaffDocVerification({
             staffId: it.subjectId,
             docKey: it.docKey as StaffDocKey,
             approve,
@@ -127,6 +129,7 @@ export function DocVerificationQueuePanel({
             note,
           });
     if (!r.ok) {
+      setNotice(null);
       setError(r.error);
       return;
     }
@@ -292,14 +295,14 @@ export function DocVerificationQueuePanel({
                   <button
                     type="button"
                     className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white"
-                    onClick={() => decide(it, true)}
+                    onClick={() => void decide(it, true)}
                   >
                     Approve (correct)
                   </button>
                   <button
                     type="button"
                     className="rounded-lg bg-rose-700 px-3 py-1.5 text-xs font-semibold text-white"
-                    onClick={() => decide(it, false)}
+                    onClick={() => void decide(it, false)}
                   >
                     Reject (wrong)
                   </button>

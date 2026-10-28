@@ -1,8 +1,9 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { assertPermission, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
-import { loadTimetable, periodBell, teachingPeriods, WEEKDAY_SHORT } from "@/lib/timetable";
+import { readTimetableStateServer } from "@/lib/api/v1/teachingServer.server";
+import { staffPeriodsIn, staffWeekGrids } from "@/lib/api/v1/staffTimetableView";
+import { periodBell, teachingPeriods, WEEKDAY_SHORT } from "@/lib/timetable";
 
 export const runtime = "nodejs";
 
@@ -42,6 +43,10 @@ function weekDates(date: string): string[] {
  * GET /api/v1/staff/timetable — the signed-in staff member's week from the
  * published grids (working grids when nothing is published yet), with the
  * bell times, plus this week's substitutions that touch them either way.
+ *
+ * Reads the timetable desk slices (until 13 Oct 2026 it read loadTimetable(),
+ * which is empty on the server, so every teacher had an empty week). A failed
+ * read is a 503 — never an empty week.
  */
 export async function GET(request: Request) {
   try {
@@ -59,14 +64,10 @@ export async function GET(request: Request) {
     }
 
     await ensureSchoolMirrorHydrated();
-    await ensureTimetableHydratedServer();
+    const tt = await readTimetableStateServer();
 
     const ay = ctx.session.academicYearCode;
-    const tt = loadTimetable();
-    const published = tt.publishedGrids.length > 0;
-    const grids = (published ? tt.publishedGrids : tt.grids).filter(
-      (g) => !g.academicYearCode || g.academicYearCode === ay,
-    );
+    const { published, grids } = staffWeekGrids(tt, ay);
     // Each period's time comes from its own class's bell — Nursery–UKG may
     // keep a different timing from the rest of the school.
     const at = (classId: string, periodNo: number) => periodBell(tt, classId, periodNo);
@@ -91,24 +92,7 @@ export async function GET(request: Request) {
       weekday,
       short: WEEKDAY_SHORT[weekday],
       label: WEEKDAY_LONG[weekday],
-      periods: grids
-        .flatMap((g) =>
-          g.slots
-            .filter((s) => s.teacherId === staffId && s.weekday === weekday)
-            .map((s) => ({
-              periodNo: s.periodNo,
-              startTime: at(g.classId, s.periodNo)?.startTime || "",
-              endTime: at(g.classId, s.periodNo)?.endTime || "",
-              classId: g.classId,
-              sectionId: g.sectionId,
-              className: classNameOf(g.classId),
-              sectionName: sectionNameOf(g.sectionId),
-              subjectId: s.subjectId,
-              subjectName: subjectNameOf(s.subjectId),
-              roomId: s.roomId,
-            })),
-        )
-        .sort((a, b) => a.startTime.localeCompare(b.startTime) || a.periodNo - b.periodNo),
+      periods: staffPeriodsIn(tt, grids, ctx.masters, staffId, weekday),
     }));
 
     const today = istToday();

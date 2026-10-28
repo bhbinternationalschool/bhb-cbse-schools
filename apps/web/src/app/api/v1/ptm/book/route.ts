@@ -1,5 +1,6 @@
 import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
+import { assertParentOwnsChild } from "@/lib/api/v1/household";
 import { requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { bookPtmSlotServer } from "@/lib/ptmBook.server";
@@ -31,12 +32,7 @@ export async function POST(request: Request) {
     const sis = loadSis();
     const student = sis.students.find((s) => s.id === body.studentId);
     if (!student) throw new ApiError("not_found", "Student not found", 404);
-    if (
-      ctx.session.householdId &&
-      student.householdId !== ctx.session.householdId
-    ) {
-      throw new ApiError("forbidden", "Not your child", 403);
-    }
+    const householdId = assertParentOwnsChild(ctx, student);
 
     // The parent is doing this themselves, so there is nobody to notify.
     const result = await bookPtmSlotServer({
@@ -44,7 +40,7 @@ export async function POST(request: Request) {
       eventId: body.eventId,
       slotId: body.slotId,
       parentName: ctx.session.fullName,
-      householdId: ctx.session.householdId || student.householdId || "",
+      householdId,
     });
     if (!result.ok) throw new ApiError("bad_request", result.error, 400);
 

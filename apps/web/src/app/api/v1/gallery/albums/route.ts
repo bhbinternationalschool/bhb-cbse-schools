@@ -1,6 +1,7 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
-import { albumVisibleTo, parentMaySee } from "@/lib/classGallery";
+import { requireParentHousehold } from "@/lib/api/v1/household";
+import { albumVisibleTo, galleryViewUrl, officeGalleryFilePath, parentMaySee } from "@/lib/classGallery";
 import { parentSections } from "@/lib/classGallery.server";
 import { fetchGalleryDeskFromDb } from "@/lib/schoolCommsNormalized.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
@@ -35,7 +36,10 @@ export async function GET(request: Request) {
     let viewer: Parameters<typeof albumVisibleTo>[1] = { staff: true };
     if (ctx.session.persona !== "staff") {
       await ensureSisHydratedServer();
-      const hh = loadSis().students.filter((st) => st.householdId === ctx.session.householdId);
+      // A parent sees their own household's classes only; no household on
+      // the session is refused, never matched against unset ids.
+      const householdId = ctx.session.persona === "parent" ? requireParentHousehold(ctx) : ctx.session.householdId;
+      const hh = householdId ? loadSis().students.filter((st) => st.householdId === householdId) : [];
       viewer = { staff: false, sections: parentSections(hh, ctx.session.academicYearCode || "") };
     }
 
@@ -62,8 +66,11 @@ export async function GET(request: Request) {
           .sort((x, y) => (x.uploadedAt || "").localeCompare(y.uploadedAt || ""))
           .map((p) => ({
             id: p.id,
-            // A class item's url is the ERP route (relative): the app adds its base and login.
-            url: p.url,
+            // A class item's url is the ERP route (relative): the app adds its
+            // base and login. So is an office upload on the web ERP: its own
+            // /api/file url is staff-only and would show a parent nothing.
+            url: galleryViewUrl(p),
+            stored: p.url,
             caption: p.caption || "",
             kind: p.mediaKind === "video" ? "video" : "photo",
           }));
@@ -73,11 +80,18 @@ export async function GET(request: Request) {
           description: a.description || "",
           // Falls back to the first photo: an album whose cover was never
           // picked still deserves a face on the phone.
-          coverUrl: a.coverUrl || photos.find((p) => p.kind === "photo")?.url || "",
+          // An office-uploaded cover (/api/file) is shown through its photo's
+          // gallery route; one no listed photo carries is not shown at all.
+          coverUrl:
+            (officeGalleryFilePath(a.coverUrl)
+              ? photos.find((p) => p.stored === a.coverUrl)?.url
+              : a.coverUrl) ||
+            photos.find((p) => p.kind === "photo")?.url ||
+            "",
           classLabel: a.classLabel || "",
           publishedAt: a.publishedAt || a.createdAt || "",
           photoCount: photos.length,
-          photos,
+          photos: photos.map((p) => ({ id: p.id, url: p.url, caption: p.caption, kind: p.kind })),
         };
       })
       // An album with no pictures in it is a heading with nothing under it.

@@ -1,4 +1,7 @@
+import "dart:async" show TimeoutException, unawaited;
 import "dart:convert";
+import "dart:io" show File;
+import "dart:math" as math;
 import "dart:typed_data";
 
 import "package:flutter_secure_storage/flutter_secure_storage.dart";
@@ -10,9 +13,28 @@ import "../guide/screen_guides.dart";
 import "../popups/app_popups.dart";
 import "../i18n/locale_controller.dart";
 import "../update/app_build.dart";
+import "http_transport.dart";
+import "json_cache.dart";
+
+export "home_refresh.dart";
+export "json_cache.dart" show Cached, CachedJson, JsonCache;
 
 part "staff_api.dart";
 part "online_classes_api.dart";
+part "my_class_api.dart";
+part "self_service_api.dart";
+part "payroll_mgmt_api.dart";
+part "teacher_tools_api.dart";
+part "teacher_ai_api.dart";
+part "transport_register_api.dart";
+part "results_api.dart";
+part "notifications_api.dart";
+part "home_cards_api.dart";
+part "student_contact_api.dart";
+part "bus_routes_live_api.dart";
+part "broadcast_audience_api.dart";
+part "school_chat_api.dart";
+part "games_api.dart";
 
 /// Session cookie minted by the ERP (see web /api/auth/*).
 const _cookieName = "bhb_demo_session";
@@ -27,13 +49,22 @@ const _roleKey = "bhb_role_code";
 const _kindKey = "bhb_home_kind";
 
 class ApiException implements Exception {
-  ApiException(this.message, [this.statusCode, this.code = ""]);
+  ApiException(
+    this.message, [
+    this.statusCode,
+    this.code = "",
+    this.reason = "",
+  ]);
 
   final String message;
   final int? statusCode;
 
   /// The server's reason code, e.g. "unknown_number", "family_inactive".
   final String code;
+
+  /// The finer reason some routes add under error.details.reason, e.g. the
+  /// survey day's "not_registered" / "not_on_team".
+  final String reason;
 
   @override
   String toString() => message;
@@ -317,6 +348,7 @@ class StaffSummary {
     required this.periodsToday,
     required this.classes,
     this.homeKind = "",
+    this.photoUrl = "",
   });
 
   factory StaffSummary.fromJson(Map<String, dynamic> j) => StaffSummary(
@@ -334,9 +366,13 @@ class StaffSummary {
         .map((c) => ClassRef.fromJson(c as Map<String, dynamic>))
         .toList(),
     homeKind: (j["homeKind"] as String?) ?? "",
+    photoUrl: ((j["staff"] as Map?)?["photoUrl"] as String?) ?? "",
   );
 
   final String fullName;
+
+  /// The staff member's own photo — an ERP path (/api/file/…) or "".
+  final String photoUrl;
   final String date;
   final ClassTeacherInfo? classTeacherOf;
   final List<PeriodToday> periodsToday;
@@ -736,11 +772,15 @@ class ClassGallery {
     this.heldCount = 0,
   });
 
-  /// The principal and leadership decide on held items.
+  /// The principal and the office (with the Gallery grant) decide on held
+  /// items, and post to the whole school or any class.
   final bool canReview;
-  final int heldCount;
 
-  /// "classId|sectionId" of the class shown.
+  /// Items waiting for that decision; null = the count could not be read
+  /// (never shown as "nothing waiting").
+  final int? heldCount;
+
+  /// "classId|sectionId" of the class shown, or "school" for the whole school.
   final String section;
   final String classLabel;
   final List<({String section, String classLabel})> classes;
@@ -784,6 +824,7 @@ class EbookShelf {
     required this.configured,
     required this.shelfUrl,
     required this.shelfKey,
+    this.bookKey = "",
     required this.note,
     required this.books,
   });
@@ -792,6 +833,7 @@ class EbookShelf {
     configured: j["configured"] == true,
     shelfUrl: (j["shelfUrl"] as String?) ?? "",
     shelfKey: (j["shelfKey"] as String?) ?? "",
+    bookKey: (j["bookKey"] as String?) ?? "",
     note: (j["note"] as String?) ?? "",
     books: ((j["books"] as List?) ?? const [])
         .map((b) => LibraryEbook.fromJson(b as Map<String, dynamic>))
@@ -801,6 +843,10 @@ class EbookShelf {
   final bool configured;
   final String shelfUrl;
   final String shelfKey;
+
+  /// The password each book on a shelf asks for; typed in by the reader,
+  /// never shown.
+  final String bookKey;
   final String note;
   final List<LibraryEbook> books;
 }
@@ -1061,6 +1107,7 @@ class StudentProfile {
     required this.photoUrl,
     required this.completeness,
     required this.docs,
+    this.aadhaar = const [],
   });
 
   factory StudentProfile.fromJson(Map<String, dynamic> j) {
@@ -1117,6 +1164,17 @@ class StudentProfile {
       docs: ((j["docs"] as List?) ?? const [])
           .map((d) => StudentDocInfo.fromJson(d as Map<String, dynamic>))
           .toList(),
+      aadhaar: ((j["aadhaar"] as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(
+            (a) => (
+              who: (a["who"] as String?) ?? "",
+              last4: (a["last4"] as String?) ?? "",
+              status: (a["status"] as String?) ?? "missing",
+            ),
+          )
+          .where((a) => a.who.isNotEmpty)
+          .toList(),
     );
   }
 
@@ -1128,6 +1186,10 @@ class StudentProfile {
   final String photoUrl;
   final int completeness;
   final List<StudentDocInfo> docs;
+
+  /// The child's, father's and mother's Aadhaar as the school holds them:
+  /// last 4 digits and missing / received / verified (12 Oct 2026).
+  final List<({String who, String last4, String status})> aadhaar;
 
   int get requiredMissing =>
       docs.where((d) => d.required && (!d.hasFile || d.isRejected)).length;
@@ -1647,6 +1709,77 @@ class AttendanceHistory {
   final List<({String date, String status})> entries;
 }
 
+/// "Revise in the LEAD app": the publisher's animations, games and mind maps
+/// for the chapter a homework names, which the child opens in the LEAD Group
+/// Student App (the app plays them; this only says what to look for).
+class LeadRevision {
+  const LeadRevision({
+    required this.book,
+    required this.chapter,
+    required this.items,
+  });
+
+  static LeadRevision? fromJson(Object? raw) {
+    if (raw is! Map<String, dynamic>) return null;
+    final items = ((raw["items"] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(
+          (e) => (
+            type: (e["type"] as String?) ?? "",
+            title: (e["title"] as String?) ?? "",
+          ),
+        )
+        .where((e) => e.type.isNotEmpty)
+        .toList();
+    if (items.isEmpty) return null;
+    return LeadRevision(
+      book: (raw["book"] as String?) ?? "",
+      chapter: (raw["chapter"] as String?) ?? "",
+      items: items,
+    );
+  }
+
+  final String book;
+  final String chapter;
+  final List<({String type, String title})> items;
+}
+
+/// One file on a homework post — a scanned page, a photo or a PDF. [url] is
+/// what the reader opens: `/api/v1/homework/attachment?…` (checked against
+/// the reader's own child / sections), or a pasted https link.
+class HomeworkAttachment {
+  const HomeworkAttachment({
+    required this.id,
+    required this.label,
+    required this.kind,
+    required this.url,
+  });
+
+  static List<HomeworkAttachment> listFromJson(Object? raw) =>
+      ((raw as List?) ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(
+            (a) => HomeworkAttachment(
+              id: (a["id"] as String?) ?? "",
+              label: (a["label"] as String?) ?? "",
+              kind: (a["kind"] as String?) ?? "",
+              url: (a["url"] as String?) ?? "",
+            ),
+          )
+          .where((a) => a.url.isNotEmpty)
+          .toList();
+
+  final String id;
+  final String label;
+
+  /// "image", "pdf" or "link".
+  final String kind;
+  final String url;
+
+  bool get isLink => kind == "link";
+  bool get isPdf => kind == "pdf";
+}
+
 class HomeworkItem {
   const HomeworkItem({
     required this.date,
@@ -1656,7 +1789,15 @@ class HomeworkItem {
     required this.teacherName,
     required this.dueAt,
     required this.isDiary,
+    this.leadRevision,
+    this.attachments = const [],
   });
+
+  /// Files the teacher attached (scanned pages, photos, PDFs).
+  final List<HomeworkAttachment> attachments;
+
+  /// Publisher assets to revise this chapter with in the LEAD app, or null.
+  final LeadRevision? leadRevision;
 
   final String date;
   final String title;
@@ -1700,6 +1841,8 @@ class HomeworkFeed {
           teacherName: (p["teacherName"] as String?) ?? "",
           dueAt: p["dueAt"] as String?,
           isDiary: false,
+          leadRevision: LeadRevision.fromJson(p["leadRevision"]),
+          attachments: HomeworkAttachment.listFromJson(p["attachments"]),
         );
       }),
       ...((j["diary"] as List?) ?? const []).map((raw) {
@@ -1736,20 +1879,38 @@ class HomeworkFeed {
 
 class CommsItem {
   const CommsItem({
+    this.id = "",
     required this.title,
     required this.body,
     required this.publishedAt,
     required this.pinned,
     required this.isNews,
     required this.summary,
+    this.coverUrl = "",
+    this.sender = "",
   });
 
+  /// The ERP's notice / news id; empty for a broadcast opened from a push.
+  final String id;
   final String title;
   final String body;
   final String publishedAt;
   final bool pinned;
   final bool isNews;
   final String summary;
+
+  /// News cover image — a full URL (own-server paths are made absolute).
+  final String coverUrl;
+
+  /// Who sent it — set only for a broadcast opened from a notification.
+  final String sender;
+
+  /// Pinned first, then newest first — the order the running strip shows,
+  /// so the list opens on the same notice the strip led with.
+  static int stripOrder(CommsItem a, CommsItem b) {
+    if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
+    return b.publishedAt.compareTo(a.publishedAt);
+  }
 }
 
 class PtmSlotInfo {
@@ -1943,6 +2104,7 @@ class PrincipalSnapshot {
     required this.staffActive,
     required this.staffPresent,
     required this.staffAbsent,
+    this.staffCountsKnown = true,
     required this.admissionsPipeline,
     required this.admissionsEnrolled,
     required this.followUpsDue,
@@ -1989,6 +2151,9 @@ class PrincipalSnapshot {
       staffActive: n(staff, "activeCount"),
       staffPresent: n(staff, "presentToday"),
       staffAbsent: n(staff, "absentToday"),
+      // false = the server could not read who is exempt from attendance;
+      // the cards then say "not loaded". An older server sends nothing.
+      staffCountsKnown: staff["countsKnown"] != false,
       admissionsPipeline: n(adm, "pipeline"),
       admissionsEnrolled: n(adm, "enrolled"),
       followUpsDue: n(adm, "followUpsDue"),
@@ -2018,6 +2183,10 @@ class PrincipalSnapshot {
   final int staffActive;
   final int staffPresent;
   final int staffAbsent;
+
+  /// false = who is exempt from attendance could not be read on the
+  /// server; present / absent are then not shown as fact.
+  final bool staffCountsKnown;
   final int admissionsPipeline;
   final int admissionsEnrolled;
   final int followUpsDue;
@@ -2219,6 +2388,35 @@ class TeachingResource {
   final String locator;
 }
 
+/// The publisher's ready-made assets for a chapter on Pinnacle Smart Teach
+/// (animations, mind maps, games, worksheets), as the Office Robot indexed
+/// them. Titles only; [url] opens the book's Assets page with the teacher's
+/// own Smart Teach login.
+class PublisherAssets {
+  const PublisherAssets({required this.url, required this.items});
+
+  static PublisherAssets? fromJson(Object? raw) {
+    if (raw is! Map<String, dynamic>) return null;
+    final items = ((raw["items"] as List?) ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(
+          (e) => (
+            type: (e["type"] as String?) ?? "",
+            title: (e["title"] as String?) ?? "",
+          ),
+        )
+        .where((e) => e.type.isNotEmpty)
+        .toList();
+    final url = (raw["url"] as String?) ?? "";
+    return items.isEmpty || url.isEmpty
+        ? null
+        : PublisherAssets(url: url, items: items);
+  }
+
+  final String url;
+  final List<({String type, String title})> items;
+}
+
 /// One chapter or topic a period can be tagged with.
 class TeachingUnit {
   const TeachingUnit({
@@ -2227,6 +2425,7 @@ class TeachingUnit {
     required this.title,
     this.topics = const [],
     this.resources = const [],
+    this.publisherAssets,
   });
 
   factory TeachingUnit.fromJson(Map<String, dynamic> j) => TeachingUnit(
@@ -2239,11 +2438,15 @@ class TeachingUnit {
     resources: ((j["resources"] as List?) ?? const [])
         .map((e) => TeachingResource.fromJson(e as Map<String, dynamic>))
         .toList(),
+    publisherAssets: PublisherAssets.fromJson(j["publisherAssets"]),
   );
 
   final String id;
   final String code;
   final String title;
+
+  /// Smart Teach assets for this chapter; null when none are indexed.
+  final PublisherAssets? publisherAssets;
 
   /// Topics inside this chapter; empty when this is itself a topic.
   final List<TeachingUnit> topics;
@@ -2809,10 +3012,102 @@ class BroadcastResult {
 }
 
 class ApiClient {
-  ApiClient(this.config);
+  ApiClient(this.config, {http.Client? client, JsonCache? cache})
+    : _injectedClient = client,
+      cache = cache ?? JsonCache();
 
   final AppConfig config;
   final _storage = const FlutterSecureStorage();
+
+  /// data-layer 4.4: ONE long-lived client for the app's life, so calls
+  /// reuse the open connection (keep-alive) instead of a new TLS handshake
+  /// per call. Created on first use (inside http.runWithClient in tests).
+  final http.Client? _injectedClient;
+  late final http.Client _shared = _injectedClient ?? http.Client();
+
+  /// Every ERP call: 30 s for the headers and for each gap in the body
+  /// (see [TimeoutClient.standard] for why 30 and when it drops to 15).
+  late final http.Client _http = TimeoutClient(_shared, TimeoutClient.standard);
+
+  /// The server runs a model or sends to many families (see [_slowPaths]).
+  late final http.Client _slowHttp = TimeoutClient(
+    _shared,
+    TimeoutClient.slow,
+  );
+
+  /// Multipart uploads through the ERP (photo, document, receipt).
+  late final http.Client _uploadHttp = TimeoutClient(
+    _shared,
+    TimeoutClient.upload,
+  );
+
+  /// A class video straight to storage — minutes long on a school phone.
+  late final http.Client _mediaHttp = TimeoutClient(
+    _shared,
+    const Duration(minutes: 30),
+  );
+
+  /// POSTs whose server side legitimately takes longer than 30 s.
+  static const _slowPaths = {
+    "/api/v1/commands",
+    // A photo read by the vision model (gate ID / plate, fuel bill).
+    "/api/v1/staff/visitors/scan",
+    "/api/v1/staff/logbook/scan-bill",
+    "/api/v1/teaching/lesson-plan",
+    "/api/v1/teaching/syllabus-scan",
+    "/api/v1/teaching/syllabus-import",
+    "/api/v1/homework/post",
+    // The message is checked (rules, then the model, up to 15 s) before it is stored.
+    "/api/v1/school-chat/send",
+    "/api/v1/staff/class-gallery/complete",
+    "/api/v1/staff/broadcast",
+    "/api/v1/staff/broadcast/audience",
+    "/api/v1/owner/broadcast",
+    // 35 s once in production (7 days to 15 Oct). No screen calls it today;
+    // listed so a future caller does not inherit the 30 s deadline.
+    "/api/v1/comms/unknown-logins",
+  };
+
+  http.Client _clientFor(String path) =>
+      _slowPaths.contains(path.split("?").first) ? _slowHttp : _http;
+
+  /// The last good reply of each home call (data-layer 4.4) — see
+  /// [JsonCache]. Wiped on sign-in and sign-out.
+  final JsonCache cache;
+
+  /// The home calls whose last reply is kept so the home paints at once.
+  static const _cachedPaths = {
+    "/api/v1/parent/summary",
+    "/api/v1/staff/summary",
+    "/api/v1/staff/features",
+    "/api/v1/principal/snapshot",
+    "/api/v1/staff/approvals",
+    "/api/v1/comms/feed",
+    "/api/v1/transport/routes",
+  };
+
+  /// Whose saved copies these are: the app flavour and a hash of the session
+  /// (never the session itself). Empty when nobody is signed in.
+  Future<String> _cacheScope() async {
+    final cookie = await sessionCookie();
+    if (cookie == null || cookie.isEmpty) return "";
+    return "${AppBuild.flavor}|${JsonCache.hash(cookie)}";
+  }
+
+  /// The saved copy of [path] for the signed-in identity, parsed; null when
+  /// there is none or it no longer parses.
+  Future<Cached<T>?> peekCached<T>(
+    String path,
+    T Function(Map<String, dynamic> data) parse,
+  ) async {
+    try {
+      final hit = await cache.read(await _cacheScope(), path);
+      if (hit == null) return null;
+      return Cached(parse(hit.data), hit.savedAt);
+    } catch (_) {
+      return null;
+    }
+  }
 
   Uri _uri(String path) => Uri.parse("${config.apiBaseUrl}$path");
 
@@ -2827,7 +3122,7 @@ class ApiClient {
     String path,
     Map<String, dynamic> body,
   ) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri(path),
       headers: await _authHeaders(),
       body: jsonEncode(body),
@@ -2889,9 +3184,14 @@ class ApiClient {
     await _storage.delete(key: _personaKey);
     await _storage.delete(key: _roleKey);
     await _storage.delete(key: _kindKey);
+    // Nobody's saved home stays on the phone after sign-out.
+    await cache.wipe();
   }
 
   Future<void> _storeSession(Map<String, dynamic>? session) async {
+    // A new sign-in starts with no saved homes — whoever used the phone
+    // before (a sibling's parent, another teacher) leaves nothing behind.
+    await cache.wipe();
     final name = session?["fullName"] as String?;
     if (name != null) await _storage.write(key: _guardianKey, value: name);
     final persona = session?["persona"] as String?;
@@ -2913,6 +3213,74 @@ class ApiClient {
     };
   }
 
+  /// The home-screen calls whose duration the ERP records (data-layer 1.2,
+  /// web lib/clientMetrics.server.ts): one in five successes, every failure.
+  static const _timedHomePaths = {
+    "/api/v1/parent/summary",
+    "/api/v1/staff/summary",
+    "/api/v1/principal/snapshot",
+    "/api/v1/staff/approvals",
+    "/api/v1/comms/feed",
+    "/api/v1/app/popups",
+  };
+  static final _sample = math.Random();
+
+  /// GET with the session, exactly as before, timed for [_timedHomePaths].
+  Future<http.Response> _timedGet(String path) async {
+    final headers = await _authHeaders();
+    final watch = Stopwatch()..start();
+    try {
+      final res = await _http.get(_uri(path), headers: headers);
+      _noteTiming(
+        path,
+        watch.elapsedMilliseconds,
+        res.statusCode,
+        res.bodyBytes.length,
+      );
+      return res;
+    } catch (_) {
+      _noteTiming(path, watch.elapsedMilliseconds, null, null);
+      rethrow;
+    }
+  }
+
+  /// Sends one `/api/client-metrics` report in the background. Never awaited,
+  /// never throws, never changes what the caller gets.
+  void _noteTiming(String path, int ms, int? status, int? bytes) {
+    try {
+      final route = path.split("?").first;
+      if (!_timedHomePaths.contains(route)) return;
+      final failed = status == null || status >= 500;
+      if (!failed && _sample.nextInt(5) != 0) return;
+      final build = AppBuild.flavor.isNotEmpty && AppBuild.build > 0
+          ? "${AppBuild.flavor}-${AppBuild.build}"
+          : "unknown";
+      unawaited(() async {
+        try {
+          await _http
+              .post(
+                _uri("/api/client-metrics"),
+                headers: await _authHeaders(),
+                body: jsonEncode({
+                  "event": failed ? "query-error" : "query",
+                  "route": route,
+                  "key": "GET",
+                  "ms": ms,
+                  "bytes": ?bytes,
+                  "platform": "flutter",
+                  "build": build,
+                }),
+              )
+              .timeout(const Duration(seconds: 10));
+        } catch (_) {
+          /* telemetry is never worth an error on the phone */
+        }
+      }());
+    } catch (_) {
+      /* never */
+    }
+  }
+
   void _captureCookie(http.Response res) {
     final setCookie = res.headers["set-cookie"];
     if (setCookie == null) return;
@@ -2927,6 +3295,7 @@ class ApiClient {
       res.statusCode.toString(),
     );
     String code = "";
+    String reason = "";
     try {
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final err = body["error"];
@@ -2935,6 +3304,10 @@ class ApiClient {
         message = err["message"] as String;
       }
       code = "${(err is Map ? err["code"] : null) ?? body["code"] ?? ""}";
+      final details = err is Map ? err["details"] : null;
+      if (details is Map && details["reason"] is String) {
+        reason = details["reason"] as String;
+      }
     } catch (_) {
       /* keep default */
     }
@@ -2947,7 +3320,7 @@ class ApiClient {
     if (res.statusCode != 401 && res.statusCode != 426) {
       ScreenGuides.noteError(message);
     }
-    throw ApiException(message, res.statusCode, code);
+    throw ApiException(message, res.statusCode, code, reason);
   }
 
   /// Link a phone the school doesn't have: name the child (admission number
@@ -2960,7 +3333,7 @@ class ApiClient {
     required String dob,
     String className = "",
   }) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/link/start"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
@@ -2986,7 +3359,7 @@ class ApiClient {
 
   /// The code from the registered phone: links this number and signs in.
   Future<void> linkNumberVerify(String linkId, String code) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/link/verify"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"linkId": linkId, "code": code}),
@@ -3006,7 +3379,7 @@ class ApiClient {
     String className = "",
     String note = "",
   }) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/link/office"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
@@ -3025,7 +3398,7 @@ class ApiClient {
 
   /// Step 1 — send the WhatsApp OTP to a registered parent mobile.
   Future<String> requestOtp(String mobile) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/otp/request"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"mobile": mobile}),
@@ -3038,7 +3411,7 @@ class ApiClient {
 
   /// Step 2 — verify the OTP; the ERP mints the session cookie.
   Future<void> verifyOtp(String mobile, String code) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/otp/verify"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"mobile": mobile, "code": code}),
@@ -3051,7 +3424,7 @@ class ApiClient {
 
   /// Step 1 — send the WhatsApp OTP to a registered staff mobile.
   Future<String> requestStaffOtp(String mobile) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/staff-otp/request"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"mobile": mobile}),
@@ -3064,7 +3437,7 @@ class ApiClient {
 
   /// Step 2 — verify the staff OTP; the ERP mints the session cookie.
   Future<void> verifyStaffOtp(String mobile, String code) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/staff-otp/verify"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"mobile": mobile, "code": code}),
@@ -3080,7 +3453,7 @@ class ApiClient {
     if (!config.supabaseConfigured) {
       throw ApiException(LocaleController.strings.apiStaffLoginNotConfigured);
     }
-    final tokenRes = await http.post(
+    final tokenRes = await _http.post(
       Uri.parse("${config.supabaseUrl}/auth/v1/token?grant_type=password"),
       headers: {
         "Content-Type": "application/json",
@@ -3106,7 +3479,7 @@ class ApiClient {
       throw ApiException(LocaleController.strings.apiSignInFailedTryAgain);
     }
 
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/session"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"accessToken": token}),
@@ -3126,7 +3499,7 @@ class ApiClient {
     String? staffId,
     String? roleCode,
   }) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/auth/demo"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({
@@ -3144,15 +3517,11 @@ class ApiClient {
   }
 
   /// The parent home screen payload — real children + fee dues.
-  Future<ParentSummary> fetchParentSummary() async {
-    final res = await http.get(
-      _uri("/api/v1/parent/summary"),
-      headers: await _authHeaders(),
-    );
-    if (res.statusCode != 200) _throwFrom(res);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    return ParentSummary.fromJson(body["data"] as Map<String, dynamic>);
-  }
+  Future<ParentSummary> fetchParentSummary() async =>
+      ParentSummary.fromJson(await _getData("/api/v1/parent/summary"));
+
+  Future<Cached<ParentSummary>?> cachedParentSummary() =>
+      peekCached("/api/v1/parent/summary", ParentSummary.fromJson);
 
   /// The teacher home screen payload — identity, class-teacher section,
   /// today's periods, and the class/section list for attendance marking.
@@ -3163,14 +3532,13 @@ class ApiClient {
     return StaffCommandResult.fromJson(data);
   }
 
+  Future<Cached<StaffSummary>?> cachedStaffSummary() =>
+      peekCached("/api/v1/staff/summary", StaffSummary.fromJson);
+
   Future<StaffSummary> fetchStaffSummary() async {
-    final res = await http.get(
-      _uri("/api/v1/staff/summary"),
-      headers: await _authHeaders(),
+    final summary = StaffSummary.fromJson(
+      await _getData("/api/v1/staff/summary"),
     );
-    if (res.statusCode != 200) _throwFrom(res);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final summary = StaffSummary.fromJson(body["data"] as Map<String, dynamic>);
     if (summary.homeKind.isNotEmpty) {
       await _storage.write(key: _kindKey, value: summary.homeKind);
     }
@@ -3182,7 +3550,7 @@ class ApiClient {
     required String sectionId,
     required String date,
   }) async {
-    final res = await http.get(
+    final res = await _http.get(
       _uri(
         "/api/v1/attendance/roster?classId=$classId&sectionId=$sectionId&date=$date",
       ),
@@ -3194,17 +3562,25 @@ class ApiClient {
   }
 
   Future<Map<String, dynamic>> _getData(String path) async {
-    final res = await http.get(_uri(path), headers: await _authHeaders());
+    final cached = _cachedPaths.contains(path);
+    // Whose answer this will be — taken BEFORE the call, so a reply that
+    // lands after a sign-out or another sign-in is never saved as theirs.
+    final scope = cached ? await _cacheScope() : "";
+    final res = await _timedGet(path);
     if (res.statusCode != 200) _throwFrom(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
-    return body["data"] as Map<String, dynamic>;
+    final data = body["data"] as Map<String, dynamic>;
+    if (cached && scope.isNotEmpty && await _cacheScope() == scope) {
+      unawaited(cache.write(scope, path, data));
+    }
+    return data;
   }
 
   Future<Map<String, dynamic>> _postData(
     String path,
     Map<String, dynamic> body,
   ) async {
-    final res = await http.post(
+    final res = await _clientFor(path).post(
       _uri(path),
       headers: await _authHeaders(),
       body: jsonEncode(body),
@@ -3238,7 +3614,7 @@ class ApiClient {
   }
 
   Future<void> unregisterPushToken(String token) async {
-    final res = await http.delete(
+    final res = await _http.delete(
       _uri("/api/v1/push/register"),
       headers: await _authHeaders(),
       body: jsonEncode({"token": token}),
@@ -3326,7 +3702,7 @@ class ApiClient {
     required String message,
   }) async {
     try {
-      await http.post(
+      await _http.post(
         _uri("/api/v1/app-guide"),
         headers: await _authHeaders(),
         body: jsonEncode({
@@ -3374,7 +3750,7 @@ class ApiClient {
   /// Records "shown" / "dismissed" / "done". Best effort.
   Future<void> appPopupEvent(String popupId, String event) async {
     try {
-      await http.post(
+      await _http.post(
         _uri("/api/v1/app/popups"),
         headers: await _authHeaders(),
         body: jsonEncode({"popupId": popupId, "action": event}),
@@ -3386,13 +3762,18 @@ class ApiClient {
 
   /// Completes a pop-up's form (Aadhaar numbers, a consent answer). Throws
   /// [ApiException] with the server's reason if it was not saved.
-  Future<void> appPopupDone(String popupId, Map<String, dynamic> value) async {
-    await _postData("/api/v1/app/popups", {
-      "popupId": popupId,
-      "action": "done",
-      ...value,
-    });
-  }
+  ///
+  /// Returns the server's answer — for an Aadhaar form, `outcomes`: per
+  /// person `{key, who, status: saved|corrected|unchanged|kept_verified,
+  /// last4}`, so the pop-up can show what was stored and offer a correction.
+  Future<Map<String, dynamic>> appPopupDone(
+    String popupId,
+    Map<String, dynamic> value,
+  ) => _postData("/api/v1/app/popups", {
+    "popupId": popupId,
+    "action": "done",
+    ...value,
+  });
 
   /// Reports an AI reply as wrong, unsafe or offensive.
   ///
@@ -3581,7 +3962,7 @@ class ApiClient {
     Map<String, String> variables = const {},
     bool dryRun = true,
   }) async {
-    final res = await http.post(
+    final res = await _slowHttp.post(
       _uri("/api/v1/owner/broadcast"),
       headers: await _authHeaders(),
       body: jsonEncode({
@@ -3621,6 +4002,7 @@ class ApiClient {
     String text = "",
     Map<String, String> variables = const {},
     bool urgent = false,
+    bool textOnly = false,
   }) async {
     final envelope = await postJson("/api/v1/staff/wa/send", {
       "mobile": mobile,
@@ -3628,6 +4010,8 @@ class ApiClient {
       if (text.isNotEmpty) "text": text,
       if (variables.isNotEmpty) "variables": variables,
       if (urgent) "urgent": true,
+      // The words the staff member reviewed, not the template.
+      if (textOnly) "textOnly": true,
     });
 
     // postJson only throws on 5xx and hands back the raw envelope, so a 400 —
@@ -3731,6 +4115,23 @@ class ApiClient {
   Future<ParentProfile> fetchProfile() async =>
       ParentProfile.fromJson(await _getData("/api/v1/profile"));
 
+  /// Adds or corrects an Aadhaar number from the child's profile ("Correct
+  /// Aadhaar"). `who` is child, father or mother. Returns the outcome
+  /// `{status: saved|corrected|unchanged|kept_verified, last4}`; throws
+  /// [ApiException] with the server's reason when it was not saved.
+  Future<Map<String, dynamic>> correctAadhaar({
+    required String studentId,
+    required String who,
+    required String number,
+  }) async {
+    final data = await _postData("/api/v1/profile/aadhaar", {
+      "studentId": studentId,
+      "who": who,
+      "number": number,
+    });
+    return (data["outcome"] as Map<String, dynamic>?) ?? const {};
+  }
+
   /// Only the fields the server lists as editable are sent; it validates
   /// formats and returns the household as now stored.
   Future<HouseholdProfile> updateHousehold(Map<String, String> fields) async {
@@ -3764,7 +4165,7 @@ class ApiClient {
         contentType: MediaType.parse(mimeType),
       ),
     );
-    final streamed = await req.send();
+    final streamed = await _uploadHttp.send(req);
     final res = await http.Response.fromStream(streamed);
     if (res.statusCode != 200) _throwFrom(res);
     final decoded = jsonDecode(res.body) as Map<String, dynamic>;
@@ -3792,7 +4193,7 @@ class ApiClient {
   /// The receipt PDF's bytes, fetched with the session — the browser could
   /// not open the link on its own, it has no cookie.
   Future<List<int>> fetchReceiptPdf(String pdfUrl) async {
-    final res = await http.get(_uri(pdfUrl), headers: await imageHeaders());
+    final res = await _http.get(_uri(pdfUrl), headers: await imageHeaders());
     if (res.statusCode != 200) _throwFrom(res);
     return res.bodyBytes;
   }
@@ -3877,6 +4278,11 @@ class ApiClient {
   /// for storage or any other host — the session must not leave the school.
   bool isOwnServer(String url) => url.startsWith(config.apiBaseUrl);
 
+  /// An ERP-relative path ("/api/file/…") as a full URL; anything else as is.
+  /// Load it with [imageHeaders] when [isOwnServer] says it is ours.
+  String erpUrl(String url) =>
+      url.startsWith("/") ? "${config.apiBaseUrl}$url" : url;
+
   /// A ten-minute link to a class-gallery video, for the phone's player.
   Future<String> galleryVideoLink(String photoId) async {
     final data = await _getData(
@@ -3908,7 +4314,9 @@ class ApiClient {
           )
           .toList(),
       canReview: data["canReview"] == true,
-      heldCount: (data["heldCount"] as num?)?.toInt() ?? 0,
+      heldCount: data["heldCount"] == null && data["canReview"] == true
+          ? null
+          : (data["heldCount"] as num?)?.toInt() ?? 0,
     );
   }
 
@@ -3973,7 +4381,7 @@ class ApiClient {
       onError: (Object e) => req.sink.addError(e),
       cancelOnError: true,
     );
-    final res = await http.Response.fromStream(await req.send());
+    final res = await http.Response.fromStream(await _mediaHttp.send(req));
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw ApiException(
         "The file did not upload (${res.statusCode}) — check the connection and try again.",
@@ -4071,6 +4479,7 @@ class ApiClient {
     required String subjectId,
     required String title,
     required String bodyEn,
+    List<UploadedHomeworkFile> attachments = const [],
   }) async {
     await _postData("/api/v1/homework/post", {
       "classId": classId,
@@ -4078,15 +4487,26 @@ class ApiClient {
       "subjectId": subjectId,
       "title": title,
       "bodyEn": bodyEn,
+      if (attachments.isNotEmpty)
+        "attachments": [
+          for (final a in attachments)
+            {"id": a.id, "label": a.label, "url": a.ref},
+        ],
     });
   }
 
-  Future<List<CommsItem>> fetchCommsFeed() async {
-    final data = await _getData("/api/v1/comms/feed");
+  Future<List<CommsItem>> fetchCommsFeed() async =>
+      _commsFrom(await _getData("/api/v1/comms/feed"));
+
+  Future<Cached<List<CommsItem>>?> cachedCommsFeed() =>
+      peekCached("/api/v1/comms/feed", _commsFrom);
+
+  List<CommsItem> _commsFrom(Map<String, dynamic> data) {
     return [
       ...((data["notices"] as List?) ?? const []).map((raw) {
         final n = raw as Map<String, dynamic>;
         return CommsItem(
+          id: "${n["id"] ?? ""}",
           title: (n["title"] as String?) ?? "",
           body: (n["body"] as String?) ?? "",
           publishedAt: (n["publishedAt"] as String?) ?? "",
@@ -4098,12 +4518,14 @@ class ApiClient {
       ...((data["news"] as List?) ?? const []).map((raw) {
         final n = raw as Map<String, dynamic>;
         return CommsItem(
+          id: "${n["id"] ?? ""}",
           title: (n["title"] as String?) ?? "",
           body: (n["body"] as String?) ?? "",
           publishedAt: (n["publishedAt"] as String?) ?? "",
           pinned: false,
           isNews: true,
           summary: (n["summary"] as String?) ?? "",
+          coverUrl: erpUrl("${n["coverUrl"] ?? ""}"),
         );
       }),
     ];
@@ -4135,44 +4557,24 @@ class ApiClient {
   Future<PrincipalSnapshot> fetchPrincipalSnapshot() async =>
       PrincipalSnapshot.fromJson(await _getData("/api/v1/principal/snapshot"));
 
-  Future<List<TransportRouteInfo>> fetchTransportRoutes() async {
-    final data = await _getData("/api/v1/transport/routes");
+  Future<Cached<PrincipalSnapshot>?> cachedPrincipalSnapshot() =>
+      peekCached("/api/v1/principal/snapshot", PrincipalSnapshot.fromJson);
+
+  Future<Cached<List<TransportRouteInfo>>?> cachedTransportRoutes() =>
+      peekCached("/api/v1/transport/routes", _routesFrom);
+
+  Future<List<TransportRouteInfo>> fetchTransportRoutes() async =>
+      _routesFrom(await _getData("/api/v1/transport/routes"));
+
+  List<TransportRouteInfo> _routesFrom(Map<String, dynamic> data) {
     return ((data["routes"] as List?) ?? const [])
         .map((r) => TransportRouteInfo.fromJson(r as Map<String, dynamic>))
         .toList();
   }
 
-  /// Driver / attendant manifest: stops in boarding order with the children
-  /// due at each, and what has already been marked today.
-  Future<Map<String, dynamic>> fetchTransportManifest({
-    required String routeId,
-    required String trip,
-  }) async =>
-      _getData("/api/v1/transport/manifest?routeId=$routeId&trip=$trip");
-
-  /// Mark one child on or off the bus. Location is required by the server for
-  /// anything but "absent" — a mark with no pin is not evidence of anything.
-  Future<void> markBoarding({
-    required String routeId,
-    required String studentId,
-    required String trip,
-    required String kind,
-    double? lat,
-    double? lng,
-    double? accuracyM,
-    String note = "",
-  }) async {
-    await _postData("/api/v1/transport/boarding", {
-      "routeId": routeId,
-      "studentId": studentId,
-      "trip": trip,
-      "kind": kind,
-      "lat": ?lat,
-      "lng": ?lng,
-      "accuracyM": ?accuracyM,
-      "note": note,
-    });
-  }
+  // The driver's marking moved to the bus register (v2) in
+  // transport_register_api.dart — /api/v1/transport/manifest and
+  // /api/v1/transport/boarding are no longer called from the app.
 
   /// Staff (class teacher) inbox: one thread per student in their section.
   Future<List<ChatThreadInfo>> fetchChatThreads() async {
@@ -4252,8 +4654,13 @@ class ApiClient {
     String activities = "",
     String assessment = "",
     String homework = "",
+    /// "ai" / "ai_edited" when the plan started as an AI draft; "" = typed.
+    String source = "",
+    String aiModel = "",
   }) async {
     final data = await _postData("/api/v1/teaching/lesson-plan", {
+      if (source.isNotEmpty) "source": source,
+      if (aiModel.isNotEmpty) "aiModel": aiModel,
       "id": ?id,
       "classId": classId,
       "subjectId": subjectId,
@@ -4358,7 +4765,7 @@ class ApiClient {
     required String date,
     required Map<String, String> statusByStudent,
   }) async {
-    final res = await http.post(
+    final res = await _http.post(
       _uri("/api/v1/attendance/mark"),
       headers: await _authHeaders(),
       body: jsonEncode({

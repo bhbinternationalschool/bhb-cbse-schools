@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "BHB Office Robot",
-  "version": "1.4.1",
-  "description": "BHB International School staff: syncs UDISE+ students, teachers, APAAR and school profile with the school ERP. You check and save.",
+  "version": "1.7.1",
+  "description": "BHB International School staff: syncs UDISE+ and Propel with the ERP, and checks Pinnacle books' chapters. You check and save.",
   "permissions": [
     "storage"
   ],
@@ -43,6 +43,30 @@
       ],
       "js": [
         "content-profile.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://nucleus.leadgroup.co.in/*"
+      ],
+      "js": [
+        "content-propel.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://teacher.pinnaclelearning.in/*"
+      ],
+      "js": [
+        "content-pinnacle.js"
       ],
       "css": [
         "content.css"

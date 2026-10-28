@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { ModuleTabs } from "@/components/ui/ModuleTabs";
 import {
@@ -8,7 +8,9 @@ import {
   ErpTableBody,
   ErpTableHead,
 } from "@/components/ui/erp-roster";
-import { listSessionYearOptions, loadMasters, type MastersState } from "@/lib/masters";
+import { listSessionYearOptions } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import {
   adjustHalfDayLeave,
   adjustLeave,
@@ -37,6 +39,7 @@ import {
 import { hasFeaturePermission } from "@/lib/rbac";
 import { RowActionMenu } from "@/components/ui/erp-grid";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
+import { MonthGroupedTbody, useMonthGroups } from "@/components/ui/month-grouped-rows";
 import { LeaveAllotmentPanel } from "@/components/staff/LeaveAllotmentPanel";
 
 type LeaveTab =
@@ -47,9 +50,23 @@ type LeaveTab =
   | "halfday"
   | "allot";
 
-export function StaffLeavePanel({ ay }: { ay: string }) {
+export function StaffLeavePanel({
+  ay,
+  onOpenLeaveRules,
+}: {
+  ay: string;
+  /** In a year with a leave policy, "Allot leave days" opens Leave rules. */
+  onOpenLeaveRules?: () => void;
+}) {
   const session = useDemoSession();
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // Masters + the roster (data-layer 2.1c). Null = not known yet.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
+  // reload() also runs from async callbacks (after an approval): it reads
+  // the latest Masters, not the one its render closed over.
+  const mastersRef = useRef(masters);
+  useEffect(() => {
+    mastersRef.current = masters;
+  }, [masters]);
   const [hr, setHr] = useState<StaffHrState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,11 +90,14 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
   const [halfDayId, setHalfDayId] = useState("");
 
   function reload() {
-    const m = loadMasters();
-    setMasters(m);
     let state = loadStaffHr();
-    state = ensureBalancesForAy(state, m.staff ?? [], ay);
-    saveStaffHr(state);
+    // Balances are opened for the roster as it is KNOWN: with no roster yet
+    // nothing is written (it runs again when the roster arrives, below).
+    const m = mastersRef.current;
+    if (m) {
+      state = ensureBalancesForAy(state, m.staff ?? [], ay);
+      saveStaffHr(state);
+    }
     setHr(state);
   }
 
@@ -99,6 +119,13 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ay drives reload
   }, [ay]);
 
+  // The roster arrived or changed: open this year's balances for it.
+  const rosterStaff = masters?.staff;
+  useEffect(() => {
+    if (rosterStaff) reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the roster drives reload
+  }, [rosterStaff]);
+
   const selfStaff = useMemo(() => {
     if (!masters) return null;
     return resolveSessionStaff(session, masters);
@@ -113,6 +140,32 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       hasFeaturePermission(session, masters, "staff.leave", "edit")
     );
   }, [masters, session]);
+
+  // Does this year have a leave policy (Staff → Leave rules)? Then the
+  // policy owns allotments and the carry — the old "Allot leave days" tab
+  // and carry button step aside so there is one source of truth. "unknown"
+  // (still checking / could not check) keeps them disabled, never enabled.
+  const [policyState, setPolicyState] = useState<"none" | "policy" | "unknown">("unknown");
+  useEffect(() => {
+    if (!isManager) return;
+    let live = true;
+    setPolicyState("unknown");
+    // leave-book answers {policy: false} for a year without one; it is open
+    // to Staff (view) and to the "Leave approvals" function alike.
+    void fetch(`/api/staff/leave-book?ay=${encodeURIComponent(ay)}`, { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ ok?: boolean; policy?: boolean }>)
+      .then((j) => live && setPolicyState(j.ok ? (j.policy ? "policy" : "none") : "unknown"))
+      .catch(() => live && setPolicyState("unknown"));
+    return () => {
+      live = false;
+    };
+  }, [ay, isManager]);
+  const legacyLeaveNote =
+    policyState === "policy"
+      ? `${ay} has a leave policy — allot days and carry leave forward in Staff → Leave rules.`
+      : policyState === "unknown"
+        ? "Checking whether this year has a leave policy (Staff → Leave rules)…"
+        : null;
 
   useEffect(() => {
     if (!isManager && selfStaff) {
@@ -210,6 +263,18 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     "dates",
     "desc",
   );
+  // Folded by the IST month the leave starts in, newest open; the status
+  // filter opens every month with a match, and a month holding a pending
+  // request is never folded by default. The column sort orders the rows
+  // inside each month.
+  const leaveMonths = useMonthGroups({
+    rows: leaveSort.rows,
+    dateOf: (r) => r.fromDate,
+    filterActive: statusFilter !== "all",
+    filterKey: statusFilter,
+    storageKey: "staff.leave",
+    needsAttention: (r) => r.status === "pending" || r.status === "pending_l2",
+  });
 
   const balances = useMemo(() => {
     if (!hr || !masters) return [];
@@ -407,9 +472,53 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     flash(halfDay ? "Converted to half-day leave" : "Converted to full-day leave");
   }
 
+  /**
+   * Approving goes to the server, which applies the year's leave rules
+   * (Staff → Leave rules): balance with sandwich days, the half-day rule,
+   * and — when the type says so — files an over-balance part as LWP after
+   * asking. Then the desk is re-read so this screen shows what was saved.
+   */
+  async function approveOnServer(requestId: string) {
+    const before = hr?.leaveRequests.find((r) => r.id === requestId);
+    const send = (confirmLwp: boolean) =>
+      fetch("/api/staff/leave-decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: requestId, approve: true, confirmLwp }),
+      })
+        .then(async (r) => ({ status: r.status, body: (await r.json().catch(() => ({}))) as { ok?: boolean; error?: string; needsConfirm?: boolean; status?: string; notice?: string | null } }))
+        .catch(() => null);
+    let res = await send(false);
+    if (res && res.status === 409 && res.body.needsConfirm) {
+      if (!window.confirm(`${res.body.error || "The leave balance is short."}\n\nApprove like this?`)) return;
+      res = await send(true);
+    }
+    if (!res) {
+      flash("Could not reach the server — nothing was decided", true);
+      return;
+    }
+    if (!res.body.ok) {
+      flash(res.body.error || "Could not approve", true);
+      return;
+    }
+    const { resetStaffHrPersistenceCache, ensureStaffHrHydrated } = await import("@/lib/staffHrPersistence");
+    resetStaffHrPersistenceCache();
+    await ensureStaffHrHydrated();
+    reload();
+    if (before?.status === "pending" && res.body.status === "pending_l2") {
+      flash("Level 1 approved — awaiting Level 2");
+    } else {
+      flash(res.body.notice ? `Leave approved — ${res.body.notice}` : "Leave approved");
+    }
+  }
+
   function onDecide(requestId: string, decision: "approved" | "rejected") {
     if (!isManager) {
       flash("Only principal / admin can manage leave", true);
+      return;
+    }
+    if (decision === "approved") {
+      void approveOnServer(requestId);
       return;
     }
     const before = hr?.leaveRequests.find((r) => r.id === requestId);
@@ -440,6 +549,9 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
     return s ? `${s.empCode} · ${s.fullName}` : id;
   }
 
+  if (mastersError) {
+    return <QueryError what="the school's setup" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters || !hr) {
     return <p className="text-sm text-[var(--muted)]">Loading leave…</p>;
   }
@@ -503,10 +615,19 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
       <ModuleTabs
         aria-label="Leave actions"
         value={tab}
-        onChange={(id) => setTab(id as LeaveTab)}
+        onChange={(id) => {
+          // A policy year allots in Leave rules; the old tab here only showed
+          // a note above the same balances table Manage shows, so it looked
+          // like a duplicate of Manage (director, 11 Oct 2026).
+          if (id === "allot" && policyState === "policy" && onOpenLeaveRules) {
+            onOpenLeaveRules();
+            return;
+          }
+          setTab(id as LeaveTab);
+        }}
         items={tabs.map((t) => ({
           id: t.id,
-          label: t.label,
+          label: t.id === "allot" && policyState === "policy" && onOpenLeaveRules ? "Allot leave days → Leave rules" : t.label,
           tone:
             t.id === "request"
               ? ("teal" as const)
@@ -698,7 +819,10 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
         </div>
       ) : null}
 
-      {tab === "allot" && isManager ? (
+      {tab === "allot" && isManager && legacyLeaveNote ? (
+        <p className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] px-4 py-3 text-sm text-[var(--brand-deep)]">{legacyLeaveNote}</p>
+      ) : null}
+      {tab === "allot" && isManager && policyState === "none" ? (
         <LeaveAllotmentPanel
           ay={ay}
           hr={hr}
@@ -769,9 +893,11 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
           </h2>
           {isManager ? (
             <div className="flex flex-wrap gap-2">
+              {legacyLeaveNote ? <span className="self-center text-xs text-[var(--muted)]">{legacyLeaveNote}</span> : null}
               <button
                 type="button"
-                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)]"
+                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                disabled={policyState !== "none"}
                 onClick={() => {
                   const years = listSessionYearOptions(masters ?? undefined);
                   const idx = years.findIndex((y) => y.code === ay);
@@ -924,9 +1050,14 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                 <th className="w-10 px-2 py-2" aria-label="Actions" />
               </tr>
             </ErpTableHead>
-            <ErpTableBody>
-              {leaveSort.rows.map((r) => (
-                <tr key={r.id}>
+            <MonthGroupedTbody
+              month={leaveMonths}
+              colSpan={8}
+              rowKey={(r) => r.id}
+              countLabel={(n) => `${n} ${n === 1 ? "request" : "requests"}`}
+              summary={(rs) => `${rs.reduce((n, r) => n + (r.status === "approved" ? Number(r.days) || 0 : 0), 0)} days approved`}
+              renderRow={(r) => (
+                <tr>
                   <td className="px-4 py-2">{staffLabel(r.staffId)}</td>
                   <td className="px-3 py-2">{r.typeCode}</td>
                   <td className="px-3 py-2 text-xs text-[var(--muted)]">
@@ -951,18 +1082,18 @@ export function StaffLeavePanel({ ay }: { ay: string }) {
                     <RowActionMenu row={r} label="Staff actions" actions={[{ id: "open", label: "Open staff record", onSelect: (x) => { window.location.href = `/staff/${encodeURIComponent(String(x.staffId))}/edit`; } }]} />
                   </td>
                 </tr>
-              ))}
-              {history.length === 0 ? (
+              )}
+              empty={
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-4 py-8 text-center text-sm text-[var(--muted)]"
                   >
                     No leave requests for this year
                   </td>
                 </tr>
-              ) : null}
-            </ErpTableBody>
+              }
+            />
           </ErpTable>
         </div>
       </div>

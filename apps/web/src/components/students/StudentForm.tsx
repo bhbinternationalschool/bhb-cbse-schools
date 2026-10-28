@@ -8,13 +8,13 @@ import Link from "next/link";
 import {
   STUDENT_TYPES,
   STUDENT_TYPE_HINTS,
-  loadMasters,
   resolveFeeGroupId,
   suggestFeeStudentType,
   type FeeStudentType,
-  type MastersState,
 } from "@/lib/masters";
-import { bumpStudentSeriesUses } from "@/lib/numberSeries";
+import { bumpStudentSeriesUses, fetchSeriesNext } from "@/lib/numberSeries";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { StudentAttendanceCard } from "@/components/students/StudentAttendanceCard";
 import { StudentExamMarksCard } from "@/components/students/StudentExamMarksCard";
 import { StudentFeeDuesCard } from "@/components/students/StudentFeeDuesCard";
@@ -79,6 +79,11 @@ import {
 } from "@/lib/mapsPlaces";
 import { householdHasGeo } from "@/lib/mapsGeocode";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import {
+  CustomFieldsSection,
+  type CustomFieldsHandle,
+} from "@/components/custom-fields/CustomFieldsSection";
+import { studentAliasIds } from "@/lib/customFields";
 
 function householdPlaceGeoFromRecord(
   hh: Household,
@@ -96,7 +101,7 @@ function householdPlaceGeoFromRecord(
   };
 }
 
-type Tab = "basic" | "subjects" | "identity" | "family" | "ids" | "docs";
+type Tab = "basic" | "subjects" | "identity" | "family" | "ids" | "docs" | "more";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "basic", label: "Basic" },
@@ -105,6 +110,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "family", label: "Family" },
   { id: "ids", label: "IDs" },
   { id: "docs", label: "Documents" },
+  { id: "more", label: "More details" },
 ];
 
 /** Extended profile fields (string except isCwsn) grouped to keep state tidy. */
@@ -218,7 +224,18 @@ export function StudentForm({
   const [academicYearCode, setAcademicYearCode] = useState(
     session.academicYearCode,
   );
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  /**
+   * A teacher's Masters carry no fee groups: withheld, not "none". The fee
+   * group is then shown as not available and the student's own value is
+   * kept as loaded — never re-resolved to "" from an empty list.
+   */
+  const feesWithheld = mastersScope === "teaching";
+  /**
+   * Which (mode, student, year) the form was filled for. Filled from the
+   * first Masters answer; a later Masters refetch must not reset edits.
+   */
+  const filledFor = useRef("");
   const [notice, setNotice] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
   const [tab, setTab] = useState<Tab>("basic");
@@ -326,9 +343,11 @@ export function StudentForm({
   const [reviewNote, setReviewNote] = useState("");
 
   useEffect(() => {
-    const m = loadMasters();
+    const fillKey = `${mode}|${studentId ?? ""}|${session.academicYearCode}`;
+    if (!masters || filledFor.current === fillKey) return;
+    filledFor.current = fillKey;
+    const m = masters;
     const sis = loadSis();
-    setMasters(m);
 
     if (mode === "edit" && studentId) {
       const raw = sis.students.find((x) => x.id === studentId);
@@ -337,6 +356,7 @@ export function StudentForm({
         return;
       }
       const s = normalizeStudent(raw);
+      setCustomAliasIds(studentAliasIds(sis.students, s));
       setAcademicYearCode(s.academicYearCode || session.academicYearCode);
       const hh = householdOf(sis, s.householdId);
       setAdmissionNo(s.admissionNo);
@@ -424,9 +444,15 @@ export function StudentForm({
       return;
     }
 
-    setAdmissionNo(
-      suggestAdmissionNo(sis.students, m, session.academicYearCode),
-    );
+    const suggested = suggestAdmissionNo(sis.students, m, session.academicYearCode);
+    setAdmissionNo(suggested);
+    // The tab's copy can be behind the school's records (an import, another
+    // desk): ask the server for the next number NOT on record — it also lifts
+    // a lagging counter (data-layer 2.2c). Taken only if the field is untouched.
+    void fetchSeriesNext("ADMISSION", session.academicYearCode).then((srv) => {
+      if (!srv || !(srv.next > (Number((suggested.match(/(\d+)$/) ?? [])[1]) || 0))) return;
+      setAdmissionNo((cur) => (cur === suggested ? srv.formatted : cur));
+    });
     setLegacyErpAdmissionNo("");
     setImportedViaLegacyList(false);
     setSystemAdmissionPending(false);
@@ -459,7 +485,9 @@ export function StudentForm({
       ),
     );
     setPendingRequest(null);
-  }, [mode, studentId, session.academicYearCode]);
+    // Filled once per (mode, student, year) from the first Masters answer:
+    // re-running on a background refetch would wipe what the office has typed.
+  }, [masters, mode, studentId, session.academicYearCode]);
 
   const sectionsForClass = useMemo(() => {
     if (!masters || !classId) return [];
@@ -492,7 +520,7 @@ export function StudentForm({
   }, [masters, studentType, classId, academicYearCode]);
 
   useEffect(() => {
-    if (!masters || !classId) return;
+    if (!masters || !classId || feesWithheld) return;
     setFeeGroupId((prev) => {
       if (prev && feeGroupsForType.some((g) => g.id === prev)) return prev;
       return (
@@ -504,7 +532,7 @@ export function StudentForm({
         }) ?? ""
       );
     });
-  }, [masters, studentType, classId, feeGroupsForType, academicYearCode]);
+  }, [masters, feesWithheld, studentType, classId, feeGroupsForType, academicYearCode]);
 
   useEffect(() => {
     if (!masters || !classId) return;
@@ -590,6 +618,12 @@ export function StudentForm({
   }
 
   const dirtyRef = useRef(false);
+  /**
+   * "More details" (Masters → Custom fields). Saved on their own through
+   * /api/custom-fields/values after the record — never inside it.
+   */
+  const customFieldsRef = useRef<CustomFieldsHandle>(null);
+  const [customAliasIds, setCustomAliasIds] = useState<string[]>([]);
 
   const [liveDuplicate, setLiveDuplicate] = useState<{
     reasons: string[];
@@ -693,6 +727,14 @@ export function StudentForm({
       flash("Basic: name, admission no, class and section are required");
       setTab("basic");
       return;
+    }
+    {
+      const problems = customFieldsRef.current?.validate(mode === "create") ?? [];
+      if (problems.length) {
+        pushToast({ kind: "error", message: `More details: ${problems.join("; ")}`, durationMs: 9000 });
+        setTab("more");
+        return;
+      }
     }
     // Everything below is ADVISORY. It used to block the save: after the
     // UDISE+ import filled PENs, an unrelated address edit was refused until
@@ -1085,11 +1127,26 @@ export function StudentForm({
 
     bumpStudentSeriesUses(payload, academicYearCode);
 
-    if (mode === "edit" && studentId) {
-      router.push("/students");
+    const leave = () => {
+      if (mode === "edit" && studentId) router.push("/students");
+      else router.push(`/students/${payload.id}/edit`);
+    };
+    const custom = customFieldsRef.current;
+    if (custom?.isDirty()) {
+      // The record is saved; the extra fields go on their own. On a failed
+      // edit the page stays so nothing typed is lost. A new record always
+      // moves on to its edit page — staying would invite a second "Save"
+      // that admits the child twice.
+      void custom.saveFor(payload.id).then((r) => {
+        if (r.message) {
+          pushToast({ kind: r.ok ? "success" : "error", message: r.message, durationMs: r.ok ? 3000 : 12000 });
+        }
+        if (r.ok || mode === "create") leave();
+        else setTab("more");
+      });
       return;
     }
-    router.push(`/students/${payload.id}/edit`);
+    leave();
   }
 
   if (missing) {
@@ -1106,6 +1163,10 @@ export function StudentForm({
     );
   }
 
+  // A failed Masters read is a failure on screen — never a form with no classes (R6).
+  if (mastersError) {
+    return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
+  }
   if (!masters) {
     return <p className="text-sm text-[var(--muted)]">Loading…</p>;
   }
@@ -1172,6 +1233,7 @@ export function StudentForm({
           { id: "family", label: "Family", tone: "violet" },
           { id: "ids", label: "IDs", tone: "amber" },
           { id: "docs", label: "Documents", tone: "green" },
+          { id: "more", label: "More details", tone: "rose" },
         ]}
       />
 
@@ -1237,10 +1299,10 @@ export function StudentForm({
                     type="button"
                     className="rounded-lg bg-amber-800 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-amber-900"
                     onClick={() => {
-                      const m = loadMasters();
+                      if (!masters) return;
                       const sis = loadSis();
                       const sug = suggestSystemAdmissionForImport(
-                        m,
+                        masters,
                         sis.students,
                         academicYearCode || "2025-26",
                       );
@@ -1365,6 +1427,16 @@ export function StudentForm({
                 </select>
               </Field>
               <Field label="Fee group">
+                {feesWithheld ? (
+                  // Not sent to a teacher. The student's fee group is kept
+                  // exactly as loaded; nothing here can change it.
+                  <input
+                    className="field bg-[rgba(32,48,80,0.04)]"
+                    value="Not shown to your role"
+                    readOnly
+                    aria-label="Fee group"
+                  />
+                ) : (
                 <select
                   className="field"
                   value={feeGroupId}
@@ -1380,13 +1452,16 @@ export function StudentForm({
                     </option>
                   ))}
                 </select>
+                )}
               </Field>
             </div>
             <p className="mt-2 text-[11px] leading-snug text-[var(--muted)]">
               {STUDENT_TYPE_HINTS[studentType]}
-              {feeGroupId
-                ? " Fee group auto-fills from type + class; you can override."
-                : " No matching published group — create one under Masters → Fee groups."}
+              {feesWithheld
+                ? ""
+                : feeGroupId
+                  ? " Fee group auto-fills from type + class; you can override."
+                  : " No matching published group — create one under Masters → Fee groups."}
             </p>
             {mode === "edit" ? (
               <Field label="Status">
@@ -2599,6 +2674,19 @@ export function StudentForm({
           </div>
         ) : null}
 
+        {/* Mounted on every tab (hidden off its own) so what is typed here
+            survives moving between tabs until Save. */}
+        <div hidden={tab !== "more"}>
+          <CustomFieldsSection
+            ref={customFieldsRef}
+            entity="student"
+            mode={mode}
+            entityId={mode === "edit" ? (studentId ?? null) : null}
+            aliasIds={customAliasIds}
+            readOnly={readOnly}
+          />
+        </div>
+
         <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[rgba(32,48,80,0.08)] pt-4">
           <Link
             href="/students"
@@ -2619,7 +2707,7 @@ export function StudentForm({
                 Previous
               </button>
             ) : null}
-            {tab !== "docs" ? (
+            {tab !== "more" ? (
               <button
                 type="button"
                 className="rounded-xl border border-[rgba(32,48,80,0.2)] px-4 py-2.5 text-sm font-semibold text-[var(--brand-deep)]"

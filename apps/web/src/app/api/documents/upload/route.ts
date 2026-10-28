@@ -3,6 +3,7 @@ import { uploadFileToDrive } from "@/lib/googleDrive.server";
 import { fetchSisStudentDocsById } from "@/lib/sisNormalized.server";
 import { fetchStaffDocsById } from "@/lib/staffPersistence";
 import { authorizeDocumentAction } from "@/lib/documentsAuth.server";
+import { staffDocDriveReceipt } from "@/lib/staffDocReceipt.server";
 import {
   documentProxyUrl,
   isDocumentSubject,
@@ -111,6 +112,9 @@ export async function POST(request: Request) {
   return NextResponse.json({
     ok: true,
     driveFileId: uploaded.driveFileId,
+    // A staff member submits this on their own record (me/docs), which keeps
+    // the Drive id only with this receipt for the same member and document.
+    ...(subject === "staff" ? { driveReceipt: staffDocDriveReceipt(subjectId, docKey, uploaded.driveFileId) } : {}),
     fileUrl: documentProxyUrl(subject, subjectId, docKey),
     fileName: file.name,
     mimeType: file.type,

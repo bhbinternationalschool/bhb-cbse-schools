@@ -1,7 +1,7 @@
 "use client";
 // ratchet-allow: grids_without_row_menu — rows carry EditControl (which shows which row is open in the form beside it) and RemoveControl (which holds the check explaining why a row cannot be deleted); neither survives being folded into a menu
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { SlidersHorizontal } from "lucide-react";
 import {
@@ -13,8 +13,8 @@ import {
   checkFeeHeadRemoval,
   checkSectionRemoval,
   feeHeadCategoryLabel,
-  loadMasters,
   listConcessionPolicies,
+  normalizeMastersRead,
   newId,
   removeCampus,
   removeClass,
@@ -22,7 +22,6 @@ import {
   removeFeeHeadCategory,
   removeSection,
   resolveFeeHeadCategories,
-  saveMasters,
   type Campus,
   type FeeHead,
   type FeeHeadCategory,
@@ -35,7 +34,22 @@ import {
   classesInGroup,
   classGroupCodeForName,
 } from "@/lib/masters";
+import { CustomFieldsPanel } from "@/components/masters/CustomFieldsPanel";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { TutorPassesPanel } from "@/components/masters/TutorPassesPanel";
+import {
+  pendingAfterAnswer,
+  pendingAfterSave,
+  pendingRevision,
+  withPending,
+  type PendingElement,
+} from "@/components/masters/mastersElementPending";
+import { useMasters } from "@/lib/data/client/hooks";
+import { planMastersElementCommit, type MastersCommitOpts } from "@/lib/data/client/mastersElementPlan";
+import { useMastersElementWrites } from "@/lib/data/client/writeHooks";
+import { useStaffBookWrites } from "@/lib/data/client/staffBookWrites";
+import type { StaffBook } from "@/lib/data/client/staffBookPlan";
 import { EditControl } from "@/components/masters/EditControl";
 import { RemoveControl } from "@/components/masters/RemoveControl";
 import { SectionTeachersPanel } from "@/components/masters/SectionTeachersPanel";
@@ -84,6 +98,9 @@ import {
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import { SubjectRequestsCard } from "@/components/masters/SubjectRequestsCard";
 
+/** Masters keys owned by the Staff module: written as staff rows (data-layer 2.2d). */
+const STAFF_SETUP_KEYS = ["staff", "departments", "designations"] as const;
+
 type Tab =
   | "overview"
   | "school"
@@ -109,7 +126,8 @@ type Tab =
   | "wa-templates"
   | "automation"
   | "wa-chatbot"
-  | "brand";
+  | "brand"
+  | "custom-fields";
 
 const TAB_GROUPS: ModuleTabGroup[] = [
   {
@@ -131,6 +149,7 @@ const TAB_GROUPS: ModuleTabGroup[] = [
       { id: "leave", label: "Leave setup", tone: "coral" },
       { id: "salary", label: "Salary setup", tone: "green" },
       { id: "series", label: "Numbering", tone: "slate" },
+      { id: "custom-fields", label: "Custom fields", tone: "violet" },
     ],
   },
   {
@@ -204,15 +223,69 @@ export function MastersWorkspace() {
   const [rbac, setRbac] = useState(() =>
     typeof window === "undefined" ? null : loadRbac(),
   );
-  const [state, setState] = useState<MastersState | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      return loadMasters();
-    } catch {
-      return null;
-    }
-  });
+  // data-layer 2.1h — READS: the server's book + the access copy's staff side
+  // (useScreenMasters, kept fresh by the versions poll), normalised exactly as
+  // loadMasters() normalised the page copy, so every panel sees the same shape.
+  // data-layer 2.2c — WRITES of the Foundation (campuses, years, terms,
+  // classes, sections, subjects, streams, class subjects, numbering,
+  // holidays, school profile / timing / statutory setup) and of the class /
+  // subject teacher links are ELEMENT writes: commit() works out what the
+  // action changed (mastersElementPlan) and sends only those elements, each on
+  // the `_rev` the view served. Until an answer serves an element at the
+  // revision its save answered, the element as sent is laid over the answer
+  // (./mastersElementPending). Staff setup (departments, designations) is
+  // written as staff rows since 2.2d (useStaffBookWrites). Fee setup is
+  // element writes too since 2.2e (fee heads, groups, structure lines,
+  // instalments, late fee, special fees, concessions and grants, the mid-year
+  // policy): nothing in this editor saves the whole book any more.
+  const {
+    masters: screenMasters,
+    error: mastersError,
+    retry: retryMasters,
+  } = useScreenMasters();
+  const view = useMasters().data ?? null;
+  const read = useMemo(
+    () => (screenMasters ? normalizeMastersRead(screenMasters) : null),
+    [screenMasters],
+  );
+  const [pending, setPendingState] = useState<PendingElement[]>([]);
+  const pendingRef = useRef<PendingElement[]>([]);
+  const setPending = (next: PendingElement[]) => {
+    pendingRef.current = next;
+    setPendingState(next);
+  };
+  const saveSeq = useRef(0);
+  const writeElements = useMastersElementWrites();
+  const staffWrites = useStaffBookWrites();
+  const state = useMemo(() => {
+    if (!read) return null;
+    // Rows laid on from a save are the editor's own (normalised) elements, but
+    // a dropped key travels as null: normalise the result like every answer.
+    return pending.length ? normalizeMastersRead(withPending(read, pending)) : read;
+  }, [read, pending]);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Element saves: every answer drops the elements it serves at (or past)
+  // the revision their save answered. While some are unproven, ask again
+  // every 2.5 s (an identical answer keeps React Query's data object, so
+  // the tick — not the answer — re-runs this); an entry no answer proves
+  // within HOLD_MS goes anyway (mastersElementPending).
+  const [pendingTick, setPendingTick] = useState(0);
+  useEffect(() => {
+    if (!pendingRef.current.length) return;
+    const left = pendingAfterAnswer(pendingRef.current, view?.masters, view?.stamps, Date.now());
+    if (left !== pendingRef.current) setPending(left);
+    const unproven = left.some((p) => p.savedAt > 0 && p.kind !== "staff");
+    // A save still in flight is re-checked too (an answer that never comes
+    // is given up after SEND_TIMEOUT_MS), without asking for the view.
+    if (!unproven && !left.some((p) => p.savedAt === 0)) return;
+    const t = window.setTimeout(() => {
+      if (unproven) void retryMasters();
+      setPendingTick((n) => n + 1);
+    }, 2_500);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- retryMasters is React Query's refetch (stable)
+  }, [view, pending, pendingTick]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -243,30 +316,26 @@ export function MastersWorkspace() {
       "automation",
       "wa-chatbot",
       "brand",
+      "custom-fields",
     ];
     if (raw && (allowed as string[]).includes(raw)) setTab(raw as Tab);
   }, []);
 
   useEffect(() => {
-    setState(loadMasters());
     void (async () => {
       const [
-        { ensureMastersHydrated },
         { ensureStaffHydrated },
         { ensureRbacHydrated },
         { withHydrationSlot },
       ] = await Promise.all([
-        import("@/lib/mastersPersistence"),
         import("@/lib/staffPersistence"),
         import("@/lib/rbacPersistence"),
         import("@/lib/deskHydrateGuard"),
       ]);
       await Promise.all([
-        withHydrationSlot(() => ensureMastersHydrated()),
         withHydrationSlot(() => ensureStaffHydrated()),
         withHydrationSlot(() => ensureRbacHydrated()),
       ]);
-      setState(loadMasters());
       setRbac(loadRbac());
     })();
   }, []);
@@ -296,31 +365,148 @@ export function MastersWorkspace() {
     }
   }, [tab, session, state, rbac]);
 
-  function commit(next: MastersState, msg?: string) {
-    if (readOnly) {
-      setNotice("Selected session is closed — masters are read-only");
-      window.setTimeout(() => setNotice(null), 2800);
-      return;
-    }
-    setState(next);
-    // The success notice must wait for the database, not for React. Showing
-    // it synchronously is what made 16 refused writes look like 16 saves on
-    // 2026-08-09 — the screen said "session changed" every time while the
-    // server was rejecting the push. On failure we stay silent here: the
-    // push path raises a sticky error toast naming the actual reason.
-    if (msg) setNotice("Saving…");
-    void saveMasters(next).then((outcome) => {
-      if (!outcome.ok) {
-        setNotice(null);
-        return;
-      }
-      if (msg) {
-        setNotice(msg);
-        window.setTimeout(() => setNotice(null), 2200);
-      }
-    });
+  function flash(msg: string, ms = 2200) {
+    setNotice(msg);
+    window.setTimeout(() => setNotice((n) => (n === msg ? null : n)), ms);
   }
 
+  function commit(next: MastersState, msg?: string, opts?: MastersCommitOpts) {
+    const onDone = opts?.onDone;
+    if (readOnly) {
+      flash("Selected session is closed — masters are read-only", 2800);
+      onDone?.(false);
+      return;
+    }
+    if (!state) {
+      onDone?.(false);
+      return;
+    }
+    const plan = planMastersElementCommit({
+      shown: state,
+      next,
+      served: view?.masters,
+      stamps: view?.stamps,
+      revisionOf: (key, id) => pendingRevision(pendingRef.current, key, id),
+      objectBases: opts?.objectBases,
+    });
+    if (!plan.ok) {
+      flash(plan.reason, 5000);
+      onDone?.(false);
+      return;
+    }
+    if (opts?.guardEmptyYear) {
+      // A clone is always several lists → one batch; the guard rides on it.
+      for (const r of plan.requests) if (r.kind === "batch") r.guard = { noActiveFeeGroupsIn: opts.guardEmptyYear };
+    }
+    const elementWork = plan.requests.length > 0 || plan.staff.length > 0;
+    // Staff setup (departments, designations — and any other change to a
+    // staff record) is written as staff rows (data-layer 2.2d). Every other
+    // key is an element write (2.2e): a key with no element home (the fee
+    // back-dating switch, which has never had a place in the database) is
+    // refused, nothing sent — never the old whole-book save.
+    const staffRest = plan.rest.filter((k) => (STAFF_SETUP_KEYS as readonly string[]).includes(k));
+    const homeless = plan.rest.filter((k) => !(STAFF_SETUP_KEYS as readonly string[]).includes(k));
+    if (homeless.length) {
+      flash(
+        `Not saved — ${homeless.join(", ")} ${homeless.length === 1 ? "has" : "have"} no place in the school's database yet, so ${homeless.length === 1 ? "it" : "they"} cannot be saved from here.`,
+        7000,
+      );
+      onDone?.(false);
+      return;
+    }
+    if (!elementWork && plan.rest.length === 0) {
+      // Nothing changed: panels pass the book unchanged with a message
+      // ("Campus code already exists", "Already linked to V").
+      if (msg) flash(msg);
+      onDone?.(true);
+      return;
+    }
+    // The success notice must wait for the database, not for React. Showing
+    // it synchronously is what made 16 refused writes look like 16 saves on
+    // 2026-08-09.
+    if (msg) setNotice("Saving…");
+    let waiting = (elementWork ? 1 : 0) + (staffRest.length ? 1 : 0);
+    let failed = false;
+    const done = (ok: boolean, why?: string) => {
+      waiting -= 1;
+      if (!ok) failed = true;
+      if (!ok && why) flash(why, 6000);
+      if (waiting > 0) return;
+      if (!failed && msg) flash(msg);
+      onDone?.(!failed);
+    };
+
+    if (staffRest.length) {
+      const pick = (book: MastersState) =>
+        Object.fromEntries(staffRest.map((k) => [k, (book as unknown as Record<string, unknown>)[k]])) as StaffBook;
+      void staffWrites.commit(pick(state), pick(next)).then((r) => done(r.ok, r.ok ? undefined : r.message));
+    }
+
+    if (elementWork) {
+      const saveId = ++saveSeq.current;
+      const sent: PendingElement[] = [];
+      const sentAt = Date.now();
+      for (const r of plan.requests) {
+        r.ops.forEach((op, i) => {
+          const sliceKey = r.kind === "batch" ? (r.parts?.[i]?.sliceKey ?? r.sliceKey) : r.sliceKey;
+          sent.push({
+            sliceKey,
+            id: op.id,
+            kind: r.kind === "object" ? "object" : "slice",
+            value: op.op === "delete" ? null : ((r.kind === "object" ? (next as unknown as Record<string, unknown>)[r.sliceKey] : (op as { row: Record<string, unknown> }).row) as Record<string, unknown>),
+            revision: "",
+            saveId,
+            savedAt: 0,
+            sentAt,
+          });
+        });
+      }
+      for (const c of plan.staff) {
+        const member = (next.staff ?? []).find((s) => s.id === c.staffId) as unknown as Record<string, unknown> | undefined;
+        sent.push({
+          sliceKey: "staff",
+          id: c.staffId,
+          kind: "staff",
+          value: member ? { [c.field]: member[c.field] } : null,
+          revision: "",
+          saveId,
+          savedAt: 0,
+          sentAt,
+        });
+      }
+      setPending([...pendingRef.current, ...sent]);
+      void writeElements(plan.requests, plan.staff).then((outcome) => {
+        const now = Date.now();
+        let after = pendingRef.current;
+        // Staff link entries go once the roster was re-read (the write's own
+        // bridge); masters elements once an answer serves them.
+        after = after.filter((p) => !(p.saveId === saveId && p.kind === "staff"));
+        if (outcome.ok) {
+          after = pendingAfterSave(after, saveId, { ok: true, versions: outcome.versions }, now);
+        } else {
+          // What landed before the failure stays held until served; the rest
+          // was not stored and goes now.
+          const landed = new Set<string>();
+          plan.requests.slice(0, Math.max(0, outcome.failedAt)).forEach((r) => {
+            r.ops.forEach((op, i) => landed.add(`${r.kind === "batch" ? (r.parts?.[i]?.sliceKey ?? r.sliceKey) : r.sliceKey}|${op.id}`));
+          });
+          after = after
+            .filter((p) => p.saveId !== saveId || landed.has(`${p.sliceKey}|${p.id}`))
+            .map((p) =>
+              p.saveId === saveId
+                ? { ...p, revision: p.value === null ? "deleted" : String(outcome.versions[`${p.sliceKey}|${p.id}`] ?? ""), savedAt: now }
+                : p,
+            );
+        }
+        setPending(after);
+        done(outcome.ok, outcome.ok ? undefined : `Not saved — ${outcome.message}`);
+      });
+    }
+  }
+
+  if (!state && mastersError) {
+    return <QueryError what="the school's Masters" error={mastersError} retry={retryMasters} />;
+  }
   if (!state) {
     return (
       <p className="text-sm text-[var(--muted)]">Loading masters…</p>
@@ -375,10 +561,19 @@ export function MastersWorkspace() {
             <SubjectRequestsCard
               subjects={state.subjects ?? []}
               canEdit={!readOnly}
-              onMastersChanged={() => setState(loadMasters())}
+              onMastersChanged={() => {
+                // The card changed Masters on the server: ask now. An open
+                // element pending entries stay until an answer holds them.
+                void retryMasters();
+              }}
             />
             <SubjectsPanel state={state} commit={commit} />
           </div>
+        ) : null}
+        {tab === "custom-fields" ? (
+          <CustomFieldsPanel
+            canEdit={!readOnly && canAccessMastersTab(session, state, "custom-fields", rbac ?? undefined, "edit")}
+          />
         ) : null}
         {tab === "series" ? (
           <NumberSeriesPanel state={state} commit={commit} />

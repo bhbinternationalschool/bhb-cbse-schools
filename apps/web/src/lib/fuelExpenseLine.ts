@@ -35,12 +35,16 @@ export type FuelPick = {
  * Matched on the account's NAME rather than a hard-coded code, because the
  * chart of accounts is the office's to edit — they have already renamed heads
  * this year — and a code baked in here would silently stop matching the day
- * someone renumbers. A false positive costs one extra optional panel; a false
- * negative loses the mileage record.
+ * someone renumbers — plus 5031 Vehicle Fuel itself, whatever it is called.
+ *
+ * Since 14 Oct 2026 a fuel head REQUIRES a fill (vehicle, quantity, rate) and
+ * is refused as a bare amount, so a false positive now blocks a real expense:
+ * a bare "gas" (the kitchen cylinder) no longer counts. Same rule as the SQL
+ * ledger_is_fuel_account (migration 20261014150000).
  */
 export function isFuelAccount(a: { code?: string; name?: string }): boolean {
-  const hay = `${a.code ?? ""} ${a.name ?? ""}`.toLowerCase();
-  return /\b(fuel|diesel|petrol|cng|gas)\b/.test(hay);
+  if ((a.code ?? "").trim() === "5031") return true;
+  return /\b(fuel|diesel|petrol|cng)\b/.test((a.name ?? "").toLowerCase());
 }
 
 /**

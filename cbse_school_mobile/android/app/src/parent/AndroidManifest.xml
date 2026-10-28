@@ -35,7 +35,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove"/>
-    <uses-permission android:name="android.permission.WAKE_LOCK" tools:node="remove"/>
+    <!-- WAKE_LOCK is KEPT (12 Oct 2026). firebase_messaging takes a wake lock
+         to hand a push that arrives while the app is closed to its
+         JobIntentService; with the permission removed, PowerManager threw
+         SecurityException (ContextImpl.enforce → acquireWakeLock) — the
+         parent app's whole crash rate, on vivo phones above all, still in
+         1.0.30 after #556 dropped the background handler. It is a normal
+         permission: no prompt, no Play declaration, no device filter. -->
     <!-- RECORD_AUDIO is declared here on purpose: the AI tutor takes spoken
          questions through the phone's own speech service. It is a runtime
          prompt, not a Play declaration form, asked only when the mic is tapped. -->
@@ -51,8 +57,19 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
 
-    <!-- flutter_background_service registers this even when unused. -->
-    <application>
+    <!-- flutter_background_service registers this even when unused. The
+         homework "Scan page" scanner (cunning_document_scanner) is staff
+         only: its fallback camera activity and file provider are dropped
+         here, and CAMERA stays removed above. Its library manifest also sets
+         an app-wide theme and backup rules; the parent app keeps its own. -->
+    <application
+        tools:remove="android:theme,android:dataExtractionRules,android:fullBackupContent">
+        <activity
+            android:name="biz.cunning.cunning_document_scanner.fallback.DocumentScannerActivity"
+            tools:node="remove" />
+        <provider
+            android:name="biz.cunning.cunning_document_scanner.fallback.DocumentScannerFileProvider"
+            tools:node="remove" />
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
             tools:node="remove" />

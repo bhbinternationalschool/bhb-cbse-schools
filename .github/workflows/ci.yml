@@ -68,6 +68,10 @@ jobs:
 
       # Self-test harnesses (no test framework in this repo by design —
       # these run as plain tsx scripts and exit non-zero on failure).
+      - name: Test — school chat membership, blocks and the message check
+        working-directory: apps/web
+        run: npm run test:school-chat
+
       - name: Test — session cookie cannot be forged
         working-directory: apps/web
         run: npm run test:session-cookie
@@ -76,17 +80,18 @@ jobs:
         working-directory: apps/web
         run: npm run test:masters-write-guard
 
-      - name: Test — a stale masters push cannot overwrite a newer save
-        working-directory: apps/web
-        run: npm run test:masters-revision-guard
-
-      - name: Test — a refused client can recover and save again
-        working-directory: apps/web
-        run: npm run test:masters-revision-lifecycle
-
       - name: Test — a cold client does not invent a school
         working-directory: apps/web
         run: npm run test:masters-cold-client
+      - name: Test — a teacher's Masters keeps its staff without a fee structure
+        working-directory: apps/web
+        run: npm run test:masters-teacher-no-fees
+      - name: Test — screen Masters dues — raw vs normalised book; teaching scope refuses, never ₹0
+        working-directory: apps/web
+        run: npm run test:screen-masters-dues
+      - name: Test — certificates TC / no-dues gate — refuses on unknown dues, never ₹0
+        working-directory: apps/web
+        run: npm run test:certificate-dues-gate
 
       - name: Test — a stale wipe signal expires
         working-directory: apps/web
@@ -124,6 +129,9 @@ jobs:
       - name: "Test — the webhook parser never invents text a parent did not send"
         working-directory: apps/web
         run: npm run test:wa-inbound-parse
+      - name: "Test — dispatch reply buttons: Meta's limits, and a tap that names its draft"
+        working-directory: apps/web
+        run: npm run test:wa-reply-buttons
       - name: Self-test — when the WhatsApp bots speak, and when they stay quiet
         working-directory: apps/web
         run: npm run test:wa-bot-silence
@@ -138,6 +146,29 @@ jobs:
       - name: Self-test — an online class opens on the clock, and a link goes only where a class can be
         working-directory: apps/web
         run: npm run test:online-classes
+
+      - name: Self-test — learning games — limits hold, the score is the server's, only playable questions come in
+        working-directory: apps/web
+        run: npm run test:learning-games
+
+      - name: Self-test — a member of staff sets only their own signature, and only a real small image
+        working-directory: apps/web
+        run: npm run test:staff-signature
+      - name: Self-test — which staff signature goes on which printed signing line, and a doubtful one is blank
+        working-directory: apps/web
+        run: npm run test:print-signatures
+      - name: Self-test — the staff month register counts what the register holds, and only the owner changes a mark
+        working-directory: apps/web
+        run: npm run test:staff-month-register
+      - name: Self-test — the principal's staff cards count what their lists show, exempt staff in neither; staff today is what staff did
+        working-directory: apps/web
+        run: npm run test:staff-home-cards
+      - name: Self-test — the month register is filled only by those who may, one day at a time
+        working-directory: apps/web
+        run: npm run test:attendance-month-register-edit
+      - name: Self-test — a PTM scheduled from the app covers only the classes its scheduler teaches
+        working-directory: apps/web
+        run: npm run test:ptm-schedule
 
       - name: Self-test — an in-class answer is a child's work, and the note only says what the teacher said
         working-directory: apps/web
@@ -171,6 +202,14 @@ jobs:
         working-directory: apps/web
         run: npm run test:subject-masters
 
+      - name: Self-test — custom fields — day-first dates, typed values, no blanking by import
+        working-directory: apps/web
+        run: npm run test:custom-fields
+
+      - name: Self-test — custom fields only for lines the import wrote, never a built-in column name
+        working-directory: apps/web
+        run: npm run test:custom-fields-import
+
       - name: Self-test — UPI pay link and success-screenshot reading
         working-directory: apps/web
         run: npm run test:upi-pay
@@ -179,6 +218,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:upi-proof-match
 
+      - name: Self-test — only the owner number records payments by WhatsApp
+        working-directory: apps/web
+        run: npm run test:upi-proof-wa-senders
+
       - name: Self-test — dashboard expense periods (India days, Monday weeks)
         working-directory: apps/web
         run: npm run test:expense-range
@@ -186,6 +229,29 @@ jobs:
       - name: Self-test — payroll Mark paid uses the real pay date
         working-directory: apps/web
         run: npm run test:payroll-paid-on
+      - name: Test — payroll loss of pay and advance recoveries are not posted as statutory dues
+        working-directory: apps/web
+        run: npm run test:payroll-deduction-heads
+
+      - name: Self-test — staff and account pickers search, A→Z, recent first
+        working-directory: apps/web
+        run: npm run test:picker-search
+
+      - name: Self-test — salary paid on each person's own date; recall reverses the book
+        working-directory: apps/web
+        run: npm run test:payroll-per-date-pay
+
+      - name: Test — the live payroll_ledger_post keeps recall, re-post and per-day payments
+        working-directory: apps/web
+        run: npm run test:payroll-ledger-post-definer
+
+      - name: Self-test — payroll follows salary setup (no setup = no PF/ESI) and joining dates
+        working-directory: apps/web
+        run: npm run test:payroll-setup-sync
+
+      - name: Self-test — payroll adjust table — typed dates, advance ticks, recovery on the ticked advances
+        working-directory: apps/web
+        run: npm run test:payroll-adjust-table
 
       - name: Self-test — Masters function grants, own classes only
         working-directory: apps/web
@@ -257,6 +323,9 @@ jobs:
       - name: Test — idle logout is thirty minutes for every session (standing policy)
         working-directory: apps/web
         run: npm run test:workspace-policy
+      - name: Test — idle logout counts activity in every tab
+        working-directory: apps/web
+        run: npm run test:workspace-idle
       - name: Test — accent tone tokens are not used in each other's place
         working-directory: apps/web
         run: npm run test:tone-tokens
@@ -353,10 +422,14 @@ jobs:
           npm run test:erp-ask
           npm run test:erp-reports
           npm run test:fleet-live
+          npm run test:bus-route-eta
           npm run test:udise-doc-intake
           npm run test:homework-expand
           npm run test:homework-page-scan
+          npm run test:staff-scan
+          npm run test:staff-scan-route
           npm run test:homework-submission
+          npm run test:homework-attachments
           npm run test:exam-drill
           npm run test:drill-skills
           npm run test:fee-server-persistence
@@ -374,6 +447,7 @@ jobs:
           npm run test:village-market
           npm run test:lead-score
           npm run test:fuel-expense-line
+          npm run test:fuel-two-way
           npm run test:vendor-history
           npm run test:site-seo
           npm run test:approval-gate
@@ -382,6 +456,7 @@ jobs:
           npm run test:sibling-carry-over
           npm run test:sibling-separate
           npm run test:udise-upload-store
+          npm run test:udise-upload-server
           npm run test:udise-student-details
       - name: Test — PEN + APAAR is the whole of UDISE+ compliance
         working-directory: apps/web
@@ -410,6 +485,7 @@ jobs:
           npm run test:holiday-calendar-view
           npm run test:student-working-days
           npm run test:leave-allotment
+          npm run test:staff-leave-rules
           npm run test:class-group-message
           npm run test:comms-reach
           npm run test:udise-school-profile
@@ -424,11 +500,15 @@ jobs:
           npm run test:admissions-ai
           npm run test:admissions-enquiry-form
           npm run test:admissions-kb
+          npm run test:admission-entrance-test
           npm run test:birthday-cards
           npm run test:collections-ai
           npm run test:concession-per-due
           npm run test:concession-ground
           npm run test:fee-backdate
+          npm run test:month-groups
+          npm run test:month-range
+          npm run test:class-upgrade-fee-group
           npm run test:receipt-auto-wa
           npm run test:review-login
           npm run test:desk-sync-status
@@ -437,9 +517,12 @@ jobs:
           npm run test:exam-invigilation
           npm run test:exams
           npm run test:exam-date-sheet
+          npm run test:parent-results
+          npm run test:bus-mark-push
           npm run test:exams-sheet-safety
           npm run test:exam-schemes
           npm run test:exam-readiness
+          npm run test:exam-graded-parts
           npm run test:exam-report-templates
           npm run test:exam-paper-question-types
           npm run test:exam-paper-print-layout
@@ -450,6 +533,7 @@ jobs:
           npm run test:fleet-edge-link
           npm run test:fleet-edge-push
           npm run test:fleet-edge-fuel
+          npm run test:fleet-edge-windows
           npm run test:boarding-point-audit
           npm run test:halt-clustering
           npm run test:item-score-import
@@ -467,7 +551,11 @@ jobs:
           npm run test:closing-balance
           npm run test:accounts-position-rbac
           npm run test:voucher-filter
+          npm run test:pg-settlement-failed
           npm run test:voucher-amend
+          npm run test:transport-finance
+          npm run test:loans
+          npm run test:last-entry-cancelled-pairs
           npm run test:lesson-plan-ai
           npm run test:marketing-content-ai
           npm run test:module-filters
@@ -484,9 +572,16 @@ jobs:
           npm run test:nucleus-assessments
           npm run test:staff-home-kind
           npm run test:staff-teaching-scope
+          npm run test:staff-scope-timetable
+          npm run test:teaching-server-read
+          npm run test:timetable-server-callers
+          npm run test:teacher-contacts
           npm run test:staff-month-calendar
           npm run test:staff-roster-redact
+          npm run test:staff-profile-validate
           npm run test:sis-class-teacher
+          npm run test:student-contact
+          npm run test:student-doc-types
           npm run test:punch-code
           npm run test:wa-language-gate
           npm run test:answer-sheet-ai
@@ -500,6 +595,7 @@ jobs:
           npm run test:staff-day-status
           npm run test:payroll-no-register
           npm run test:mobile-features
+          npm run test:staff-payroll-mgmt
           npm run test:cashfree-checkout
           npm run test:gateway-fees
           npm run test:gateway-methods
@@ -508,6 +604,10 @@ jobs:
           npm run test:secure-id
           npm run test:payouts
           npm run test:cashgram
+          npm run test:fee-bulk-pdc-templates
+          npm run test:payout-requests
+          npm run test:visiting-pay
+          npm run test:visiting-exclusions
           npm run test:diksha-index
           npm run test:teacher-contact
           npm run test:parent-profile
@@ -522,8 +622,12 @@ jobs:
           npm run test:ptm-brief-ai
           npm run test:question-bank
           npm run test:rbac-infer
+          npm run test:rbac-assigned-roles
           npm run test:rbac-scope
           npm run test:rbac-user-grants
+          npm run test:rbac-catalog-complete
+          npm run test:rbac-function-grants
+          npm run test:rbac-editor
           npm run test:visitor-gate
           npm run test:play-billing
           npm run test:ai-content-report
@@ -541,10 +645,13 @@ jobs:
           npm run test:report-remark-ai
           npm run test:salary-additional
           npm run test:salary-gross-up
+          npm run test:payroll-not-on-payroll
           npm run test:school-receipt-no
+          npm run test:fee-tender-ref
           npm run test:session-cookie-edge
           npm run test:staff-geo
           npm run test:punch-screen-geofence
+          npm run test:punch-screen-keep
           npm run test:app-min-build
           npm run test:canva-birthday
           npm run test:standing-discount-change
@@ -553,8 +660,17 @@ jobs:
           npm run test:transport-shifts
           npm run test:transport-phone-empty-desk
           npm run test:transport-stop-links
+          npm run test:transport-paid-months
+          npm run test:transport-boarding-log
+          npm run test:transport-fuel-register
+          npm run test:transport-vehicle-costs
           npm run test:transport-seats
           npm run test:boarding-suggest
+          npm run test:wa-number-verify
+          npm run test:transport-gaps
+          npm run test:gps-stop-discovery
+          npm run test:run-stop-order
+          npm run test:transport-audit
           npm run test:defaulter-hold-policy
           npm run test:hold-resolve
           npm run test:live-bus-marker
@@ -566,6 +682,7 @@ jobs:
           npm run test:wa-failure-reason
           npm run test:wa-household-numbers
           npm run test:wa-audience-spec
+          npm run test:staff-app-broadcast
           npm run test:wa-audience-households
           npm run test:wa-tutor-bot
           npm run test:wa-student-link
@@ -576,6 +693,7 @@ jobs:
           npm run test:wa-number-gap
           npm run test:session-scoped-students
           npm run test:counter-discount-settled
+          npm run test:staff-fee-collect
           npm run test:student-attendance
           npm run test:student-homework
           npm run test:student-transport
@@ -589,6 +707,38 @@ jobs:
           npm run test:wa-real-chats-oct
           npm run test:class-channel-apply
           npm run test:office-assistant
+          npm run test:dashboard-no-refetch-loop
+          npm run test:short-promise-cache
+          npm run test:library-fine
+          npm run test:desk-conflict-reload
+          npm run test:masters-desk-read-failed
+          npm run test:server-masters-cache
+          npm run test:school-mirror-disk-off
+          npm run test:coalesced-refresh
+          npm run test:desk-probe-ancillary
+          npm run test:update-reload
+          npm run test:client-metrics-route
+          npm run test:client-metrics-sender
+          npm run test:stale-build
+          npm run test:erp-fetch
+          npm run test:reference-cache
+          npm run test:versions-route
+          npm run test:query-kernel
+          npm run test:reference-views
+          npm run test:masters-bridge
+          npm run test:masters-pending
+          npm run test:staff-kernel
+          npm run test:masters-writes
+          npm run test:masters-element-commit
+          npm run test:masters-lib-writes
+          npm run test:staff-book-commit
+          npm run test:staff-own-doc-url
+          npm run test:desk-feature-rev
+          npm run test:staff-requests
+          npm run test:notify
+          npm run test:push-voice
+          npm run test:survey-team-plan
+          npm run test:parent-api-scope
 
   build:
     name: Production build
@@ -642,3 +792,199 @@ jobs:
           # together, and raise the Cloud Build machineType before raising these.
           NODE_OPTIONS: --max-old-space-size=6144
         run: npm run build
+
+  # The local test stack (data-layer step 1.0): Postgres 17 with every
+  # migration, PostgREST, the /rest/v1 proxy, the seeded fixture school, the
+  # app built and started against it, and the acceptance check. See
+  # scripts/e2e-stack.sh and docs/data-layer-rebuild/COMMAND.md step 1.0.
+  #
+  # It uses no secret of any kind: every key is minted per run from a random
+  # secret, and every URL is 127.0.0.1.
+  e2e-stack:
+    name: E2E stack (Postgres 17 + PostgREST, seeded school) + Playwright gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    # Not a merge gate yet — the director makes it required once it has run green.
+    continue-on-error: true
+    steps:
+      # Any *SERVICE_ROLE* variable in the job's environment stops the job
+      # before checkout. This job references no secret at all (keys are minted
+      # per run), so nothing can put one there. An earlier version inspected
+      # toJSON(secrets); GitHub held every run of that version for manual
+      # approval, so the check reads only the job's own environment.
+      - name: Refuse production credentials
+        run: |
+          if env | cut -d= -f1 | grep -q SERVICE_ROLE; then
+            echo "The job environment carries a *SERVICE_ROLE* variable — refusing." >&2
+            exit 1
+          fi
+          echo "no SERVICE_ROLE secret or variable present"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Same Linux-binary install as the verify and build jobs.
+      - name: Install
+        run: |
+          npm ci
+          npm install --no-save --workspace=web \
+            lightningcss-linux-x64-gnu@1.32.0 \
+            @tailwindcss/oxide-linux-x64-gnu@4.3.2
+
+      # Production is Postgres 17; the runner's own Postgres is not.
+      - name: Install Postgres 17 (PostgreSQL apt repository)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -q postgresql-17
+          /usr/lib/postgresql/17/bin/postgres --version
+
+      # The release tarball pinned in scripts/e2e-stack.sh, sha256-verified.
+      - name: Install PostgREST (pinned, checksum-verified)
+        run: bash scripts/e2e-stack.sh install-postgrest "$RUNNER_TEMP/postgrest"
+
+      - name: Stack up — migrations, PostgREST, proxy, seed
+        env:
+          PGBIN: /usr/lib/postgresql/17/bin
+          POSTGREST_BIN: ${{ runner.temp }}/postgrest/postgrest
+        run: bash scripts/e2e-stack.sh up
+
+      # plpgsql behaviour against every migration: post, pay per day, regroup,
+      # recall, re-post. Rolls itself back before the app is built and seeded
+      # data is read.
+      - name: SQL test — payroll per-date pay, recall and re-post
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/payroll_per_date_pay.test.sql
+
+      # A fuel fill and its voucher land together; voiding in Transport
+      # reverses the voucher, reversing in Accounts voids the fill; rate × qty
+      # is the table's rule (14 Oct 2026).
+      - name: SQL test — fuel register tied to the book both ways
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/transport_fuel_two_way.test.sql
+
+      # data-layer 1.5: desk_write_guarded v3 — a null base on an existing row
+      # is refused, all-or-none, every applied op bumps its sync_meta.
+      - name: SQL test — desk_write_guarded v3
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/desk_write_guarded.test.sql
+
+      # data-layer 1.5: one slice element / one object slice per call, under a
+      # lock, with a base; masters rows synced in the same transaction.
+      - name: SQL test — desk_slice_row_write / desk_slice_object_write
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/desk_slice_row_write.test.sql
+
+      # data-layer 2.2a: Masters elements compare-and-set on their own _rev
+      # (two different elements both land), no writer resets a _rev (ABA),
+      # batches are all-or-none, number series only move up, staff Remove is
+      # soft and restorable, bank/Aadhaar/PAN/pay need payroll/accounts.
+      - name: SQL test — Masters element _rev, batch, series bump, staff kernel rows
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/masters_row_revs_staff_kernel.test.sql
+
+      # data-layer 2.2e follow-up: masters_series_claim reserves a RECEIPT /
+      # SRN number in the database — past the records, consecutive, never
+      # repeated; N claims from N connections at once get N numbers.
+      - name: SQL test — receipt / SRN numbers claimed in the database
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/masters_series_claim.test.sql
+      - name: SQL test — parallel number claims from separate connections
+        run: bash supabase/tests/masters_series_claim_parallel.sh
+
+      # A voided fee receipt stays voided: a stale whole-desk push can no
+      # longer clear voided_at and re-post the receipt (15 Oct 2026, R1).
+      - name: SQL test — a voided fee receipt stays voided
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/fee_voucher_void_is_final.test.sql
+      - name: SQL test — notifications are stored once per person, bursts fold, reads go through the kernel
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/erp_notify_deliver.test.sql
+      # Learning games: no grants to anon/authenticated; play never past
+      # 21:00; a competition window is at most an hour on one IST day.
+      - name: SQL test — learning games tables refuse what the rules refuse
+        run: bash scripts/e2e-stack.sh sql-test supabase/tests/learning_games.test.sql
+
+      # NEXT_PUBLIC_* are baked in at build time, so the build reads
+      # apps/web/.env.e2e (127.0.0.1 URL, this run's anon key) and nothing else.
+      - name: Build the app against the stack
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: bash scripts/e2e-stack.sh build
+
+      - name: Start the app on 127.0.0.1:3700
+        run: bash scripts/e2e-stack.sh app
+
+      - name: Acceptance check
+        run: bash scripts/e2e-stack.sh check
+
+      # The behavioural gate (data-layer step 1.1): Playwright, Chromium only,
+      # against the app started above. Version pinned in apps/web/package.json;
+      # the browser is cached on that version.
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./apps/web/node_modules/@playwright/test/package.json').version" 2>/dev/null || node -p "require('./node_modules/@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: Install Chromium (and its system libraries)
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      # Through with-env.mjs: the run gets apps/web/.env.e2e and nothing else,
+      # and playwright.config.ts refuses any URL that is not 127.0.0.1.
+      # Green = every spec passes or is an annotated expected failure
+      # (test.fail with its reason); see apps/web/e2e/scoreboard-reporter.ts.
+      - name: Playwright gate
+        working-directory: apps/web
+        run: node ../../scripts/e2e/with-env.mjs .env.e2e -- npx playwright test
+
+      - name: Scoreboard → job summary
+        if: always()
+        working-directory: apps/web
+        run: |
+          [ -f e2e/scoreboard.json ] || { echo "no scoreboard.json (the run did not finish)" >> "$GITHUB_STEP_SUMMARY"; exit 0; }
+          node -e '
+            const s = require("./e2e/scoreboard.json");
+            const esc = (t) => String(t ?? "").replace(/\|/g, "\\|").replace(/\n/g, " ");
+            const out = [];
+            out.push("## Playwright gate — scoreboard");
+            out.push("");
+            out.push(`pass ${s.summary.pass} · expected-fail ${s.summary.expectedFail} · fixme ${s.summary.fixme} · UNEXPECTED-PASS ${s.summary.unexpectedPass} · FAIL ${s.summary.fail}`);
+            out.push("");
+            out.push("| outcome | project | test | reason / failed at | numbers |");
+            out.push("|---|---|---|---|---|");
+            for (const t of s.tests) {
+              const why = [t.reasons.join(" / "), t.failedStep ? `failed at: ${t.failedStep}` : ""].filter(Boolean).join(" — ");
+              const m = t.metrics.budget ? `${t.metrics.budget.requests} req, ${t.metrics.budget.encodedKB} KB` :
+                        t.metrics.dom ? JSON.stringify(t.metrics.dom.seen) + " in " + JSON.stringify(t.metrics.dom.msToShow) :
+                        Object.keys(t.metrics).length ? JSON.stringify(t.metrics).slice(0, 200) : "";
+              out.push(`| ${t.outcome} | ${t.project} | ${esc(t.file + " › " + t.title)} | ${esc(why)} | ${esc(m)} |`);
+            }
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, out.join("\n") + "\n");
+          '
+
+      - name: Upload the Playwright report and scoreboard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-gate
+          path: |
+            apps/web/e2e/report
+            apps/web/e2e/scoreboard.json
+            apps/web/e2e/test-results
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stack logs (on failure)
+        if: failure()
+        run: |
+          S="${TMPDIR:-/tmp}/bhb-e2e-stack"
+          for f in migrations.log postgrest.log proxy.log app.log pg.log; do
+            echo "::group::$f"; tail -n 200 "$S/$f" 2>/dev/null || echo "(none)"; echo "::endgroup::"
+          done
+
+      - name: Stack down
+        if: always()
+        run: bash scripts/e2e-stack.sh down

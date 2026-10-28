@@ -1,5 +1,6 @@
 import { writeAudit } from "@/lib/audit.server";
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
+import { assertParentOwnsChild } from "@/lib/api/v1/household";
 import { requestMeta, resolveApiAuth } from "@/lib/api/v1/auth";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensurePtmHydratedServer } from "@/lib/ptmPersistence";
@@ -24,12 +25,9 @@ export async function POST(request: Request) {
 
     const booking = loadPtm().bookings.find((b) => b.id === bookingId);
     if (!booking) throw new ApiError("not_found", "Booking not found", 404);
-    if (
-      ctx.session.householdId &&
-      booking.householdId !== ctx.session.householdId
-    ) {
-      throw new ApiError("forbidden", "Not your booking", 403);
-    }
+    // The booking's own household must be the session's — a parent session
+    // with no household is refused (it used to skip this check).
+    assertParentOwnsChild(ctx, booking, "Not your booking");
 
     const result = cancelPtmBooking(bookingId);
     if (!result.ok) throw new ApiError("bad_request", result.error, 400);

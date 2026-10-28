@@ -20,16 +20,18 @@
 import "server-only";
 
 import { getServerTenantContext } from "@/lib/serverTenant";
+import { claimMayBeTakenOver, SEND_CLAIM_STALE_MS } from "@/lib/waSendClaimPolicy";
 
 /**
- * How long a claim may sit before another caller may take it over.
+ * How long a claim may sit before another caller may take it over
+ * (defined in lib/waSendClaimPolicy, re-exported for existing callers).
  *
  * A process that dies mid-dispatch leaves its claim behind, and a card
  * nobody can ever retry is its own kind of failure. Ten minutes is longer
  * than any dispatch this ERP performs (100 recipients per chunk, a few
  * seconds each) and shorter than a person's patience.
  */
-export const SEND_CLAIM_STALE_MS = 10 * 60_000;
+export { SEND_CLAIM_STALE_MS };
 
 export type SendClaimVerdict =
   /** The claim is ours. Send. `stolen` = taken over from a dead caller. */
@@ -73,6 +75,12 @@ export async function claimSendOnce(
   key: string,
   by: string,
   note = "",
+  /**
+   * `neverStale`: an existing claim is held whatever its age — for keys whose
+   * row is the lasting record of a real send (the default lets a claim older
+   * than SEND_CLAIM_STALE_MS be taken over from a dead caller).
+   */
+  opts?: { neverStale?: boolean },
 ): Promise<SendClaimVerdict> {
   const claimKey = String(key || "").trim();
   if (!claimKey) {
@@ -129,7 +137,7 @@ export async function claimSendOnce(
 
   const claimedAt = String(existing.data.claimed_at || "");
   const claimedBy = String(existing.data.claimed_by || "");
-  if (!sendClaimIsStale(claimedAt, now)) {
+  if (!claimMayBeTakenOver(claimedAt, now, opts)) {
     return {
       ok: false,
       reason: "held",

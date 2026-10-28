@@ -7,8 +7,8 @@ import {
   saveStaffHrServer,
 } from "@/lib/api/v1/staffLeave";
 import { applyLeave, loadStaffHr, normalizeHalfDaySession } from "@/lib/staffHr";
-import { leadershipStaffIds } from "@/lib/staffHomeKind.server";
-import { sendPushToSubjects } from "@/lib/webPush.server";
+import { staffLeaveRequested } from "@/lib/notify/events";
+import { notify } from "@/lib/notify/notify.server";
 
 export const runtime = "nodejs";
 
@@ -57,6 +57,17 @@ export async function POST(request: Request) {
       throw new ApiError("bad_request", "Reason is too long (500 characters)", 400);
     }
 
+    if (halfDay) {
+      // The year's leave rules may not allow this type as a half day. A
+      // failed policy read does not refuse here — approving checks again.
+      const { readLeavePolicy } = await import("@/lib/staffLeaveRules.server");
+      const pol = await readLeavePolicy(ctx.session.academicYearCode);
+      const pt = pol.ok ? pol.value?.types.find((t) => t.typeCode === typeCode) : undefined;
+      if (pt && !pt.halfDayAllowed) {
+        throw new ApiError("bad_request", `${typeCode} cannot be taken as a half day`, 400);
+      }
+    }
+
     await loadStaffHrServer();
     const result = applyLeave({
       academicYearCode: ctx.session.academicYearCode,
@@ -86,13 +97,21 @@ export async function POST(request: Request) {
     });
 
     if (result.request.status === "pending") {
-      const approvers = leadershipStaffIds(ctx.masters).filter((id) => id !== staffId);
-      await sendPushToSubjects("staff", approvers, {
-        title: `Leave request · ${ctx.session.fullName}`,
-        body: `${typeCode} ${fromDate}${toDate !== fromDate ? ` to ${toDate}` : ""} · ${reason.slice(0, 80)}`,
-        url: "/leave-approvals",
-        data: { kind: "staff_leave", requestId: result.request.id },
-      }).catch(() => undefined);
+      // Whoever decides staff leave, by role (lib/notify/events.ts) — bell + phone.
+      const { approversToNotify } = await import("@/lib/staffLeaveRules.server");
+      const named = await approversToNotify(ctx.masters, staffId).catch(() => [] as string[]);
+      await notify(
+        staffLeaveRequested({
+          requestId: result.request.id,
+          staffId,
+          staffName: ctx.session.fullName,
+          typeCode,
+          fromDate,
+          toDate,
+          reason,
+          namedApproverIds: named,
+        }),
+      );
     }
 
     return apiOk(leaveRequestJson(ctx, result.request, loadStaffHr()));

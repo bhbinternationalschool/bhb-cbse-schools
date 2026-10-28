@@ -349,11 +349,6 @@ async function hydrateSisOnce(): Promise<boolean> {
   );
   await ensureCurriculumHydrated();
 
-  const { applyFeeDiscountSeedNow } = await import(
-    "@/lib/feeDiscountImportHydrate"
-  );
-  applyFeeDiscountSeedNow();
-
   return changed;
 }
 

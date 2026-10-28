@@ -86,7 +86,7 @@ const req = (id: string, status: StudentLeaveRequest["status"], extra: Partial<S
   assert.ok(/return \{ ok: true, kept \}/.test(body));
   const route = read("../app/api/school-data/student-leave-desk/route.ts");
   assert.ok(/const kept = result\.kept \?\? \[\];/.test(route) && /ok: true,\s*kept,/.test(route), "the desk route reports kept requests");
-  assert.ok(/body\.kept\?\.length/.test(read("studentLeaveNormalizedClient.ts")) && /resetDeskHydrated\("student_leave"\)/.test(read("studentLeaveNormalizedClient.ts")), "the browser reloads on kept");
+  assert.ok(/body\.kept\?\.length/.test(read("studentLeaveNormalizedClient.ts")) && /reloadDeskAfterConflict\("student_leave"\)/.test(read("studentLeaveNormalizedClient.ts")), "the browser reloads on kept");
   assert.ok(/pushed\.kept\?\.includes\(id\)/.test(read("../app/api/v1/leave/cancel/route.ts")), "a parent's late cancel is told the decision stands");
 }
 

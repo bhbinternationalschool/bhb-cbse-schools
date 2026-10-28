@@ -13,7 +13,7 @@ import {
 
 export type CommsStripAudience = "staff" | "parents";
 
-type StripItem = {
+export type StripItem = {
   id: string;
   kind: "notice" | "news";
   label: string;
@@ -42,7 +42,7 @@ function buildItems(audience: CommsStripAudience): StripItem[] {
     href:
       audience === "parents"
         ? "/parent"
-        : "/comms?tab=notices",
+        : `/comms?tab=notices&notice=${encodeURIComponent(n.id)}`,
   }));
 
   const newsItems: StripItem[] = news.slice(0, 5).map((n: SchoolNewsItem) => ({
@@ -61,18 +61,25 @@ export function CommsRunningStrip({
   audience = "staff",
   compact = false,
   onParentNavigate,
+  items: given,
 }: {
   audience?: CommsStripAudience;
   /** Tighter strip for parent sticky header */
   compact?: boolean;
   /** Parent portal: switch tab instead of /parent navigation */
   onParentNavigate?: (tab: "notices" | "news") => void;
+  /**
+   * Items read elsewhere (the parent portal reads them from the server, see
+   * ParentRunningStrip). Given, this component reads no desk of its own.
+   */
+  items?: StripItem[];
 }) {
   const [ready, setReady] = useState(false);
   const [tick, setTick] = useState(0);
   const [paused, setPaused] = useState(false);
 
   useEffect(() => {
+    if (given) return;
     let cancelled = false;
     void (async () => {
       const [{ ensureSchoolCommsHydrated }, { withHydrationSlot }] =
@@ -95,15 +102,16 @@ export function CommsRunningStrip({
       window.removeEventListener("bhb-school-comms", refresh);
       window.removeEventListener("storage", refresh);
     };
-  }, []);
+  }, [given]);
 
-  const items = useMemo(
-    () => (ready ? buildItems(audience) : []),
+  const built = useMemo(
+    () => (ready && !given ? buildItems(audience) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tick forces reload
-    [ready, audience, tick],
+    [ready, audience, tick, given],
   );
+  const items = given ?? built;
 
-  if (!ready || items.length === 0) return null;
+  if ((!given && !ready) || items.length === 0) return null;
 
   // Duplicate for seamless loop
   const loop = items.length === 1 ? [...items, ...items, ...items] : [...items, ...items];

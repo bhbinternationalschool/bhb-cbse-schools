@@ -2,6 +2,7 @@
  * School comms — jsonb blob on school_comms_state + normalized school_comms_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   loadSchoolComms,
@@ -60,6 +61,8 @@ const blob = createDomainBlobPersistence<SchoolCommsState>({
 
 export const schoolCommsRemoteEnabled = blob.remoteEnabled;
 export const scheduleSchoolCommsSync = (state: SchoolCommsState) => {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureSchoolCommsHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushSchoolCommsRemoteServer(state));
     return;

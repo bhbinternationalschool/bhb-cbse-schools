@@ -12,7 +12,7 @@
  * there is no session here to check one against.
  */
 
-import type { CommsAudience, SchoolCommsState, SchoolNotice } from "@/lib/schoolComms";
+import type { CommsAudience, SchoolCommsState, SchoolNewsItem, SchoolNotice } from "@/lib/schoolComms";
 import {
   loadSchoolCommsStateServer,
   persistSchoolCommsStateServer,
@@ -64,5 +64,58 @@ export async function publishNoticeServer(input: {
       error: e instanceof Error ? e.message : "Could not save the notice",
     };
   }
+  // Phones (WhatsApp class-channel drafts publish here): once per notice.
+  const { pushPublishedNotice } = await import("@/lib/noticePush.server");
+  await pushPublishedNotice(notice);
   return { ok: true, notice };
+}
+
+export type PublishNewsResult =
+  | { ok: true; item: SchoolNewsItem }
+  | { ok: false; error: string };
+
+/**
+ * Publish a news item from the server (the staff app's "Create notice /
+ * news", request mr_mv9y435vx6e5) — the same loader and persist as
+ * publishNoticeServer, the same shape `upsertNews` builds in the browser.
+ * The caller checks News · create.
+ */
+export async function publishNewsServer(input: {
+  title: string;
+  summary?: string;
+  body: string;
+  academicYearCode: string;
+  createdBy: string;
+}): Promise<PublishNewsResult> {
+  const title = (input.title || "").trim();
+  const body = (input.body || "").trim();
+  if (!title) return { ok: false, error: "Title is required" };
+  if (!body) return { ok: false, error: "Body is required" };
+
+  const state = await loadSchoolCommsStateServer();
+  const now = nowIso();
+  const item: SchoolNewsItem = {
+    id: `nws_${Math.random().toString(36).slice(2, 10)}`,
+    title,
+    summary: (input.summary || "").trim(),
+    body,
+    coverUrl: "",
+    status: "published",
+    academicYearCode: input.academicYearCode,
+    publishedAt: now,
+    scheduledPublishAt: "",
+    createdAt: now,
+    createdBy: input.createdBy || "School",
+    updatedAt: now,
+  };
+  const next: SchoolCommsState = { ...state, news: [item, ...state.news] };
+  try {
+    await persistSchoolCommsStateServer(next);
+  } catch (e) {
+    return {
+      ok: false,
+      error: e instanceof Error ? e.message : "Could not save the news",
+    };
+  }
+  return { ok: true, item };
 }

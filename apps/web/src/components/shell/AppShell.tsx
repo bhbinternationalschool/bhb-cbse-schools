@@ -1,5 +1,6 @@
 "use client";
 
+import { CoreDataGate } from "@/components/shell/CoreDataGate";
 import Image from "next/image";
 import Link from "next/link";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -32,10 +33,11 @@ import {
   setSessionWriteLock,
   setWorkspaceBootstrapPending,
 } from "@/lib/sessionWriteGuard";
-import { applyFeeDiscountSeedNow } from "@/lib/feeDiscountImportHydrate";
 import { consumeFreshLoginSession, flushAllDeskSyncPending, resetAllWorkspacePersistenceCaches } from "@/lib/workspaceClientSession";
 import { useWorkspaceInactivityLogout } from "./useWorkspaceInactivityLogout";
 import { ToastHost } from "./Toast";
+import { useClientMetrics } from "./useClientMetrics";
+import { ErpQueryProvider } from "@/lib/data/client/hooks";
 
 export function AppShell({
   session,
@@ -46,6 +48,8 @@ export function AppShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  // page-ready per route + desk-hydrate per desk (data-layer 1.2).
+  useClientMetrics(pathname);
   const mobileApp = useMobileAppShell();
   const standalone = usePwaStandalone();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -158,10 +162,43 @@ export function AppShell({
         });
       });
     }
+    function onDeskNotLoaded(e: Event) {
+      const d = (e as CustomEvent<{ id?: string }>).detail;
+      const extra: Record<string, string> = {
+        staff: "staff records",
+        staff_attendance: "the staff register and punch settings",
+        homework: "homework",
+        exams: "exams",
+        fees: "the fee book",
+        payments: "payments",
+        accounts: "accounts",
+        library: "the library",
+        payroll: "payroll",
+        vault: "the document vault",
+        timetable: "the timetable",
+        teaching: "lesson plans and syllabus",
+        notifications: "notifications",
+        school_comms: "notices",
+        student_leave: "student leave",
+        salary_setup: "salary setup",
+        curriculum: "the curriculum",
+        rte: "RTE",
+      };
+      const what = extra[d?.id ?? ""] || labels[d?.id ?? ""] || d?.id || "this screen";
+      void import("@/components/shell/Toast").then(({ pushToast }) => {
+        pushToast({
+          kind: "error",
+          message: `Still loading ${what} from the server, so that change was NOT saved. The screen now shows the saved version — please make your change again.`,
+          durationMs: 12000,
+        });
+      });
+    }
+    window.addEventListener("bhb-desk-not-loaded", onDeskNotLoaded);
     window.addEventListener("bhb-desk-conflict", onDeskConflict);
     window.addEventListener("bhb-sync-error", onSyncError);
     window.addEventListener("bhb:sync-status", onSyncStatus);
     return () => {
+      window.removeEventListener("bhb-desk-not-loaded", onDeskNotLoaded);
       window.removeEventListener("bhb-desk-conflict", onDeskConflict);
       window.removeEventListener("bhb-sync-error", onSyncError);
       window.removeEventListener("bhb:sync-status", onSyncStatus);
@@ -197,7 +234,6 @@ export function AppShell({
 
       bootstrapAyRef.current = session.academicYearCode;
       setYears(listSessionYearOptions());
-      applyFeeDiscountSeedNow();
       setWorkspaceBootstrapPending(false);
       setBootReady(true);
 
@@ -351,7 +387,11 @@ export function AppShell({
     );
   }
 
+  // The query kernel (data-layer 1.4): one React Query client per tab for the
+  // screens that read through useErpQuery / useMasters / …; its versions poll
+  // runs only while such a query is mounted (lib/data/client/hooks).
   return (
+    <ErpQueryProvider>
     <SessionProvider session={session} readOnly={readOnly}>
       <SchoolFavicon />
       <div className="flex h-screen overflow-hidden bg-[var(--surface)]">
@@ -439,7 +479,7 @@ export function AppShell({
             mobileApp ? "max-sm:px-3 max-sm:py-4" : ""
           }`}
         >
-          {children}
+          <CoreDataGate bootReady={bootReady}>{children}</CoreDataGate>
         </main>
         {mobileApp ? (
           <StaffBottomNav onOpenMenu={() => setMobileNavOpen(true)} />
@@ -449,5 +489,6 @@ export function AppShell({
         </div>
       </div>
     </SessionProvider>
+    </ErpQueryProvider>
   );
 }

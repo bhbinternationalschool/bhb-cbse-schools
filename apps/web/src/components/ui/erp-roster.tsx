@@ -9,11 +9,11 @@ import { ExportMenu } from "@/components/ui/erp-grid";
 
 export type ErpMetricTone = "green" | "rose" | "sky" | "violet" | "amber" | "navy";
 
-// "title" is the same accent blue across every tone — it equals --chart-1,
-// so route it through the token rather than a repeated literal. The icon
-// colors below are a genuine categorical tone system (unrelated to
-// danger/success semantics), so they're left as-is.
-const METRIC_TITLE_CLASS = "text-[var(--chart-1)]";
+// Operate-mode (director, 2026-10-27): the label is a quiet caption so the
+// NUMBER reads first — muted, not the old accent blue that competed with the
+// value on every tile. One muted token for all tones (the category signal
+// lives in the icon tint below, a genuine categorical system left as-is).
+const METRIC_TITLE_CLASS = "text-[var(--muted)]";
 const METRIC_TONES: Record<
   ErpMetricTone,
   { title: string; icon: string }
@@ -97,9 +97,10 @@ export function ErpMetricCard({
   const content = (
     <>
       <div className="min-w-0">
-        <div className={cn("text-sm font-semibold", t.title)}>{title}</div>
-        <div className="mt-1 flex items-baseline gap-2">
-          <span className="text-3xl font-bold tabular-nums text-[var(--foreground)]">
+        <div className={cn("text-sm font-medium", t.title)}>{title}</div>
+        <div className="mt-1.5 flex items-baseline gap-2">
+          {/* data-testid: the e2e gate reads a dashboard number here (step 1.1). */}
+          <span data-testid="metric-value" className="text-3xl font-bold leading-none tracking-tight tabular-nums text-[var(--foreground)]">
             {value}
           </span>
           {delta ? (
@@ -121,7 +122,11 @@ export function ErpMetricCard({
       {icon ? (
         <span
           className={cn(
-            "inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full",
+            // Smaller, calmer badge (was h-14/28px icon): a decorative icon
+            // shouldn't out-weigh the number. The svg size is normalised here
+            // so every caller's icon renders at 20px regardless of what it
+            // passed (director, 2026-10-27, operate-mode pass).
+            "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full [&_svg]:h-5 [&_svg]:w-5",
             t.icon,
           )}
         >
@@ -338,7 +343,7 @@ export function ErpTableShell({
             compact
             title={exportTitle || exportAs.replace(/[_-]+/g, " ")}
             fileBaseName={exportAs}
-            columns={domTableColumns(shellRef)}
+            columns={() => domTableColumns(shellRef)}
             rows={() => domTableRows(shellRef)}
           />
         </div>
@@ -363,7 +368,10 @@ function domHeaders(ref: { current: HTMLDivElement | null }) {
     .map((c) => ({ key: `c${c.index}`, header: c.header, index: c.index }));
 }
 function domTableColumns(ref: { current: HTMLDivElement | null }) {
-  // Resolved when the menu opens, so an empty first paint costs nothing.
+  // Read when an export is chosen. It used to be read while the shell
+  // rendered, when the ref is still empty on a first render — a table whose
+  // screen did not re-render after mounting exported rows with no columns
+  // (blank CSV / Excel). Found 15 Oct 2026 by the month-groups export test.
   return domHeaders(ref).map(({ key, header }) => ({ key, header }));
 }
 function domTableRows(ref: { current: HTMLDivElement | null }) {
@@ -371,15 +379,26 @@ function domTableRows(ref: { current: HTMLDivElement | null }) {
   if (!table) return [];
   const cols = domHeaders(ref);
   const out: Record<string, string>[] = [];
-  for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
-    const tds = Array.from(tr.querySelectorAll("td"));
-    if (tds.length === 0 || (tds.length === 1 && tds[0]!.hasAttribute("colspan"))) continue;
-    const row: Record<string, string> = {};
-    for (const c of cols) {
-      const td = tds[c.index] as HTMLElement | undefined;
-      row[c.key] = td ? (td.innerText || td.textContent || "").replace(/\s+/g, " ").trim() : "";
+  // Month-grouped tables (ui/month-grouped-rows.tsx) keep folded months
+  // mounted but `hidden`. Un-hide them for the instant of the read so a
+  // folded month exports exactly as an open one would, then fold them back
+  // in the same task — nothing paints in between.
+  const folded = Array.from(table.querySelectorAll<HTMLElement>("tbody[data-month-rows][hidden]"));
+  for (const tb of folded) tb.hidden = false;
+  try {
+    for (const tr of Array.from(table.querySelectorAll("tbody tr"))) {
+      if (tr.hasAttribute("data-month-group")) continue;
+      const tds = Array.from(tr.querySelectorAll("td"));
+      if (tds.length === 0 || (tds.length === 1 && tds[0]!.hasAttribute("colspan"))) continue;
+      const row: Record<string, string> = {};
+      for (const c of cols) {
+        const td = tds[c.index] as HTMLElement | undefined;
+        row[c.key] = td ? (td.innerText || td.textContent || "").replace(/\s+/g, " ").trim() : "";
+      }
+      out.push(row);
     }
-    out.push(row);
+  } finally {
+    for (const tb of folded) tb.hidden = true;
   }
   return out;
 }

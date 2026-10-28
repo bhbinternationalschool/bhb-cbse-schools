@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { reportAiOutcome } from "@/lib/aiOutcomeClient";
 import { Award, Sparkles } from "lucide-react";
 import {
@@ -8,6 +9,7 @@ import {
   categoryForTc,
   certificateEligibility,
   certificateKindLabel,
+  certificateNeedsDuesCheck,
   classLabelForStudent,
   classToWords,
   defaultSubjectsForClass,
@@ -21,16 +23,22 @@ import {
   suggestNextCertificateNumber,
   uidaiFormUrl,
   voidCertificate,
+  type CertificateDuesAnswer,
+  type CertificateDuesView,
   type CertificateIssue,
   type CertificateKind,
   type TcDetails,
 } from "@/lib/certificates";
+import { ErpQueryError, useErpQuery } from "@/lib/data/client/hooks";
+import { readView } from "@/lib/data/client/query";
 import {
   formatInr,
   searchFeeStudents,
   type StudentSearchHit,
 } from "@/lib/fees";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY } from "@/lib/masters";
+import { QueryError } from "@/components/data/QueryError";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   designationName,
@@ -41,7 +49,8 @@ import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { ErpTableShell } from "@/components/ui/erp-roster";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
-import { ModuleTabs } from "@/components/ui/ModuleTabs";
+import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
+import { visibleModuleTabs } from "@/lib/rbac";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { CertificatesReportsRunner } from "@/components/reports/ModuleReportRunners";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -51,6 +60,9 @@ import {
   printCertificate,
 } from "@/components/certificates/CertificateSheet";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { PrintWithSignaturesButton } from "@/components/shared/PrintWithSignaturesButton";
+import { usePrintSignatures } from "@/components/shared/usePrintSignatures";
+import { certificateSignatureRequest } from "@/lib/printSignatures";
 import {
   HoldStatusBanner,
   PrincipalHoldOverrideDialog,
@@ -63,12 +75,19 @@ import {
 import type { HoldCode } from "@/lib/types";
 import { useHoldDecisions } from "@/lib/useHoldDecisions";
 import { useModuleStateHydration } from "@/lib/useModuleStateHydration";
+import { MonthGroupedList, useMonthGroups } from "@/components/ui/month-grouped-rows";
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
 type Tab = "dashboard" | "desk" | "reports";
+
+const CERT_TABS: ModuleTabItem[] = [
+  { id: "dashboard", label: "Dashboard", tone: "navy" },
+  { id: "desk", label: "Issue & register", tone: "amber" },
+  { id: "reports", label: "Reports", tone: "teal" },
+];
 
 type CertStep = "student" | "type" | "details" | "draft" | "issue";
 
@@ -106,10 +125,27 @@ export function CertificatesWorkspace() {
   const holdDecisions = useHoldDecisions();
   const session = useDemoSession();
   const [tab, setTab] = useState<Tab>("desk");
+  // ?tab=reports (Reports Center "Open module") — read once, on the client.
+  useEffect(() => {
+    const asked = new URLSearchParams(window.location.search).get("tab");
+    if (asked === "reports" || asked === "dashboard" || asked === "desk") setTab(asked);
+  }, []);
   const [certStep, setCertStep] = useState<CertStep>("student");
-  const [masters, setMasters] = useState<MastersState | null>(null);
+  // data-layer 2.1i: the server's book + the roster (class teacher, principal,
+  // the officer's designation), kept fresh by the versions poll.
+  const { masters, scope: mastersScope, error: mastersError, retry: retryMasters } = useScreenMasters();
+  // Teaching-scope Masters (no Masters grant): fee lists are withheld, so a
+  // balance computed from this book is unknown, never ₹0 (2.1i review).
+  const feesWithheld = mastersScope !== "full";
   const [sis, setSis] = useState<SisState | null>(null);
   const [issues, setIssues] = useState<CertificateIssue[]>([]);
+  // Every issue, folded by the IST month it was issued (newest open) — the
+  // list used to stop at the latest 25.
+  const issueMonths = useMonthGroups({
+    rows: issues,
+    dateOf: (iss) => iss.issuedOn,
+    storageKey: "certificates.issues",
+  });
   const [query, setQuery] = useState("");
   const [classId, setClassId] = useState("");
   const [sectionId, setSectionId] = useState("");
@@ -156,10 +192,26 @@ export function CertificatesWorkspace() {
   const [customIsAi, setCustomIsAi] = useState(false);
   const [aiGenerationId, setAiGenerationId] = useState("");
 
+  // The tabs this person may open: the whole module, or a Certificates
+  // function (lib/rbacFeatureCatalog/people.ts) opening its tabs.
+  // Decided from the loaded roles + roster (assignments count), never before.
+  const access = useAccessData();
+  const shownTabs = useMemo(
+    () =>
+      access.ready
+        ? visibleModuleTabs(CERT_TABS, session, access.masters, "certificates", access.rbac ?? undefined)
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
+  );
+  useEffect(() => {
+    if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
+      setTab(shownTabs[0]!.id as Tab);
+    }
+  }, [shownTabs, tab]);
+
   function refresh() {
-    const m = loadMasters();
     const s = loadSis();
-    setMasters(m);
     setSis(s);
     setIssues(listCertificates(loadCertificates()));
     setTick((x) => x + 1);
@@ -212,12 +264,31 @@ export function CertificatesWorkspace() {
 
   const student = selected?.student ?? null;
 
+  // The child's open dues as the server counts them from the whole fee book.
+  // A TC / fee clearance is issued only on this answer: this tab's copy is
+  // the teaching subset for someone without the Masters grant (no fee
+  // structure — every child ₹0), and its fees / transport copies are partial
+  // for a role that cannot read those desks.
+  const duesQuery = useErpQuery<CertificateDuesView>(
+    ["certificate-dues", student?.id ?? ""],
+    `/api/data/views/certificate-dues?studentId=${encodeURIComponent(student?.id ?? "")}`,
+    {
+      desk: ["fee", "sis", "masters", "transport", "module_state:fee_adjustments"],
+      enabled: !!student,
+    },
+  );
+  const duesAnswer = duesAnswerOf(duesQuery.data, duesQuery.error);
+
   const eligibility = useMemo(() => {
     if (!student) return null;
-    return certificateEligibility(student, kind);
+    return certificateEligibility(student, kind, {
+      server: duesAnswer,
+      bookIsFull: mastersScope === "full",
+    });
     // holdDecisions.version: eligibility folds in checkHold, which reads a
     // snapshot that lands after the first render.
-  }, [student, kind, tick, holdDecisions.version]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- duesAnswer is rebuilt from the query each render; its parts are the deps
+  }, [student, kind, tick, holdDecisions.version, mastersScope, duesQuery.data, duesQuery.error]);
 
   useEffect(() => {
     const code = holdCodeForCertificate(kind);
@@ -250,21 +321,30 @@ export function CertificatesWorkspace() {
       subjectsStudied: defaultSubjectsForClass(label),
       applicationDate: leavingDate || todayIso(),
       checkedByName: prev.checkedByName || session.fullName,
-      checkedByDesignation:
-        prev.checkedByDesignation ||
-        (() => {
-          const m = loadMasters();
-          const me = m.staff.find(
-            (s) =>
-              s.fullName === session.fullName ||
-              s.loginUsername === session.email,
-          );
-          return me
-            ? designationName(m, me.designationId)
-            : prev.checkedByDesignation;
-        })(),
     }));
+    // The form resets per student only; session/leavingDate are read at that
+    // moment on purpose (a later edit of either must not wipe the TC form).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [student?.id]);
+
+  // "Checked by" designation: the signer's, from the staff roster — once per
+  // student, as soon as Masters has answered. Keyed on `masters` so a book
+  // that lands after the student was picked still fills it; the ref stops a
+  // background refetch (versions poll) from re-filling a field the clerk
+  // cleared or changed.
+  const designationFilledFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!student || !masters || designationFilledFor.current === student.id) return;
+    designationFilledFor.current = student.id;
+    const me = masters.staff.find(
+      (s) => s.fullName === session.fullName || s.loginUsername === session.email,
+    );
+    if (!me) return;
+    const designation = designationName(masters, me.designationId);
+    setTcForm((prev) =>
+      prev.checkedByDesignation ? prev : { ...prev, checkedByDesignation: designation },
+    );
+  }, [student, masters, session.fullName, session.email]);
 
   // Show resolved class teacher hint when student selected
   const resolvedClassTeacher = useMemo(() => {
@@ -296,6 +376,17 @@ export function CertificatesWorkspace() {
     () => issues.find((i) => i.id === previewId) ?? null,
     [issues, previewId],
   );
+  // The preview's signatures; Print waits for them (PrintWithSignaturesButton).
+  const previewSigRequest = useMemo(
+    () => (preview && !isUidaiFormKind(preview.kind) ? certificateSignatureRequest(preview) : null),
+    [preview],
+  );
+  const previewSigs = usePrintSignatures(previewSigRequest);
+  const [printRequested, setPrintRequested] = useState(false);
+  const clearPrintRequest = useCallback(() => setPrintRequested(false), []);
+  const printPreview = useCallback(() => {
+    if (preview) printCertificate(preview.id);
+  }, [preview]);
 
   const voidTarget = useMemo(
     () => issues.find((i) => i.id === voidTargetId) ?? null,
@@ -372,13 +463,17 @@ export function CertificatesWorkspace() {
     window.setTimeout(() => setNotice(null), 3200);
   }
 
-  function onIssue() {
+  async function onIssue() {
     if (!student) {
       setCertStep("student");
       setError("Pick a student first — step 1 · Student");
       return;
     }
-    const mastersNow = masters ?? loadMasters();
+    if (!masters) {
+      setError("The school's setup is still loading — try again in a moment.");
+      return;
+    }
+    const mastersNow = masters;
     const ay = session.academicYearCode || DEFAULT_AY;
     const classTeacherName = resolveClassTeacherName(
       mastersNow,
@@ -388,7 +483,22 @@ export function CertificatesWorkspace() {
     );
     const principal = resolvePrincipal(mastersNow);
     const issuedBy = principal?.fullName || session.fullName;
+    // A certificate that states the fees are clear is decided on a fresh
+    // answer, not one read when the student was picked.
+    // The server re-reads the fee book for this one call (fresh=1). A failed
+    // re-check is a failed check, even with an older answer on screen.
+    const dues: CertificateDuesAnswer = certificateNeedsDuesCheck(kind)
+      ? await readView<CertificateDuesView>(
+          `/api/data/views/certificate-dues?studentId=${encodeURIComponent(student.id)}&fresh=1`,
+        ).then((r) =>
+          r.ok
+            ? duesAnswerOf(r.data, null)
+            : duesAnswerOf(undefined, new ErpQueryError(r.status, r.error)),
+        )
+      : duesAnswer;
+    if (certificateNeedsDuesCheck(kind)) void duesQuery.refetch();
     const result = issueCertificate({
+      dues: { server: dues, bookIsFull: mastersScope === "full" },
       kind,
       studentId: student.id,
       issuedBy,
@@ -472,7 +582,8 @@ export function CertificatesWorkspace() {
     if (isUidaiFormKind(result.issue.kind)) {
       window.open(uidaiFormUrl(result.issue.studentId, result.issue.issuedOn), "_blank", "noopener");
     } else {
-      window.setTimeout(() => printCertificate(result.issue.id), 200);
+      // Printed once its signatures have answered (PrintWithSignaturesButton).
+      setPrintRequested(true);
     }
   }
 
@@ -494,11 +605,7 @@ export function CertificatesWorkspace() {
         aria-label="Certificates sections"
         value={tab}
         onChange={(id) => setTab(id as Tab)}
-        items={[
-          { id: "dashboard", label: "Dashboard", tone: "navy" },
-          { id: "desk", label: "Issue & register", tone: "amber" },
-          { id: "reports", label: "Reports", tone: "teal" },
-        ]}
+        items={shownTabs}
       />
 
       {tab === "dashboard" ? (
@@ -516,7 +623,15 @@ export function CertificatesWorkspace() {
         </div>
       ) : null}
 
-      {tab === "desk" ? (
+      {tab === "desk" && !masters ? (
+        mastersError ? (
+          <QueryError what="the school's classes and staff" error={mastersError} retry={retryMasters} />
+        ) : (
+          <p className="mt-6 text-sm text-[var(--muted)]">Loading the school&apos;s classes…</p>
+        )
+      ) : null}
+
+      {tab === "desk" && masters ? (
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
         <div className="space-y-4">
           <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-4">
@@ -597,6 +712,7 @@ export function CertificatesWorkspace() {
 
             <div className="mt-2 flex justify-end">
               <StudentHitsFilterExport
+              balanceWithheld={feesWithheld}
                 title="Certificates · student search"
                 hits={hits}
                 query={query}
@@ -635,7 +751,10 @@ export function CertificatesWorkspace() {
                         ) : null}
                       </div>
                       <div className="text-[11px] text-[var(--muted)]">
-                        {h.classLabel} · open dues {formatInr(h.balancePaise)}
+                        {h.classLabel} ·{" "}
+                        {feesWithheld
+                          ? "dues: not shown for your role"
+                          : `open dues ${formatInr(h.balancePaise)}`}
                       </div>
                     </button>
                   </li>
@@ -1258,13 +1377,34 @@ export function CertificatesWorkspace() {
 
             {eligibility ? (
               <div className="mt-3 space-y-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-sunken)] px-3 py-2 text-[11px]">
-                <p className="text-[var(--brand-deep)]">
-                  Open dues:{" "}
-                  <span className="font-bold">
-                    {formatInr(eligibility.openBalancePaise)}
-                  </span>{" "}
-                  ({eligibility.openDueCount} line
-                  {eligibility.openDueCount === 1 ? "" : "s"})
+                <p className="text-[var(--brand-deep)]" data-testid="cert-open-dues">
+                  {eligibility.openBalancePaise === null || eligibility.openDueCount === null ? (
+                    eligibility.duesUnknown === "role" ? (
+                      "Open dues: not shown for your role"
+                    ) : eligibility.duesUnknown === "failed" ? (
+                      <>
+                        Open dues: could not load{" "}
+                        <button
+                          type="button"
+                          className="font-bold underline"
+                          onClick={() => void duesQuery.refetch()}
+                        >
+                          Try again
+                        </button>
+                      </>
+                    ) : (
+                      "Open dues: checking…"
+                    )
+                  ) : (
+                    <>
+                      Open dues:{" "}
+                      <span className="font-bold">
+                        {formatInr(eligibility.openBalancePaise)}
+                      </span>{" "}
+                      ({eligibility.openDueCount} line
+                      {eligibility.openDueCount === 1 ? "" : "s"})
+                    </>
+                  )}
                 </p>
                 {eligibility.blockers.map((b) => (
                   <p key={b} className="font-semibold text-[var(--danger)]">
@@ -1301,7 +1441,7 @@ export function CertificatesWorkspace() {
                 (kind === "fees_paid" &&
                   (!!feesPaidPreview && "error" in feesPaidPreview))
               }
-              onClick={onIssue}
+              onClick={() => void onIssue()}
             >
               Issue & print
             </button>
@@ -1321,70 +1461,72 @@ export function CertificatesWorkspace() {
               </p>
             ) : (
               <ErpTableShell className="mt-2">
-                <ul className="max-h-72 divide-y divide-[var(--border)] overflow-y-auto">
-                {issues.slice(0, 25).map((iss) => {
-                  const voided = !!iss.voidedAt;
-                  return (
-                    <li
-                      key={iss.id}
-                      className={`flex flex-wrap items-start justify-between gap-2 px-4 py-2.5 ${
-                        voided ? "opacity-55" : ""
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        className="min-w-0 flex-1 text-left"
-                        onClick={() => setPreviewId(iss.id)}
+                <div className="max-h-72 overflow-y-auto">
+                <MonthGroupedList
+                  month={issueMonths}
+                  rowKey={(iss) => iss.id}
+                  countLabel={(n) => `${n} ${n === 1 ? "certificate" : "certificates"}`}
+                  renderItem={(iss) => {
+                    const voided = !!iss.voidedAt;
+                    return (
+                      <li
+                        className={`flex flex-wrap items-start justify-between gap-2 px-4 py-2.5 ${
+                          voided ? "opacity-55" : ""
+                        }`}
                       >
-                        <div className="text-sm font-semibold text-[var(--brand-deep)]">
-                          {iss.certNo}
-                          {voided ? " · void" : ""}
-                          {iss.aiGenerated ? (
-                            <span
-                              className="ml-1.5 rounded-full bg-[rgba(197,160,40,0.15)] px-1.5 py-0.5 text-[9px] font-semibold text-[#8a6400]"
-                              title="Initial text drafted by the AI assistant, reviewed before issue — internal note, never printed on the certificate"
-                            >
-                              AI-drafted
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="text-[11px] text-[var(--muted)]">
-                          {certificateKindLabel(iss.kind)} · {iss.studentName} ·{" "}
-                          {formatCertDate(iss.issuedOn)}
-                        </div>
-                      </button>
-                      <div className="flex gap-1.5">
                         <button
                           type="button"
-                          className="text-[11px] font-semibold text-[var(--brand-mid)]"
-                          onClick={() => {
-                            setPreviewId(iss.id);
-                            if (isUidaiFormKind(iss.kind)) {
-                              window.open(uidaiFormUrl(iss.studentId, iss.issuedOn), "_blank", "noopener");
-                              return;
-                            }
-                            window.setTimeout(
-                              () => printCertificate(iss.id),
-                              100,
-                            );
-                          }}
+                          className="min-w-0 flex-1 text-left"
+                          onClick={() => setPreviewId(iss.id)}
                         >
-                          Print
+                          <div className="text-sm font-semibold text-[var(--brand-deep)]">
+                            {iss.certNo}
+                            {voided ? " · void" : ""}
+                            {iss.aiGenerated ? (
+                              <span
+                                className="ml-1.5 rounded-full bg-[rgba(197,160,40,0.15)] px-1.5 py-0.5 text-[9px] font-semibold text-[#8a6400]"
+                                title="Initial text drafted by the AI assistant, reviewed before issue — internal note, never printed on the certificate"
+                              >
+                                AI-drafted
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="text-[11px] text-[var(--muted)]">
+                            {certificateKindLabel(iss.kind)} · {iss.studentName} ·{" "}
+                            {formatCertDate(iss.issuedOn)}
+                          </div>
                         </button>
-                        {!voided ? (
+                        <div className="flex gap-1.5">
                           <button
                             type="button"
-                            className="text-[11px] font-semibold text-[var(--danger)]"
-                            onClick={() => setVoidTargetId(iss.id)}
+                            className="text-[11px] font-semibold text-[var(--brand-mid)]"
+                            onClick={() => {
+                              setPreviewId(iss.id);
+                              if (isUidaiFormKind(iss.kind)) {
+                                window.open(uidaiFormUrl(iss.studentId, iss.issuedOn), "_blank", "noopener");
+                                return;
+                              }
+                              // Printed once its signatures have answered.
+                              setPrintRequested(true);
+                            }}
                           >
-                            Void
+                            Print
                           </button>
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-                </ul>
+                          {!voided ? (
+                            <button
+                              type="button"
+                              className="text-[11px] font-semibold text-[var(--danger)]"
+                              onClick={() => setVoidTargetId(iss.id)}
+                            >
+                              Void
+                            </button>
+                          ) : null}
+                        </div>
+                      </li>
+                    );
+                  }}
+                />
+                </div>
               </ErpTableShell>
             )}
           </div>
@@ -1395,17 +1537,23 @@ export function CertificatesWorkspace() {
                 <h2 className="text-sm font-bold text-[var(--brand-deep)]">
                   Preview
                 </h2>
-                <button
-                  type="button"
-                  className="btn-accent rounded-lg px-3 py-1.5 text-xs font-bold"
-                  onClick={() =>
-                    isUidaiFormKind(preview.kind)
-                      ? window.open(uidaiFormUrl(preview.studentId, preview.issuedOn), "_blank", "noopener")
-                      : printCertificate(preview.id)
-                  }
-                >
-                  Print
-                </button>
+                {isUidaiFormKind(preview.kind) ? (
+                  <button
+                    type="button"
+                    className="btn-accent rounded-lg px-3 py-1.5 text-xs font-bold"
+                    onClick={() => window.open(uidaiFormUrl(preview.studentId, preview.issuedOn), "_blank", "noopener")}
+                  >
+                    Print
+                  </button>
+                ) : (
+                  <PrintWithSignaturesButton
+                    status={previewSigs.status}
+                    onPrint={printPreview}
+                    onRetry={previewSigs.retry}
+                    requested={printRequested}
+                    onRequestHandled={clearPrintRequest}
+                  />
+                )}
               </div>
               {isUidaiFormKind(preview.kind) ? (
                 <iframe
@@ -1414,7 +1562,7 @@ export function CertificatesWorkspace() {
                   className="h-[720px] w-full rounded-lg border border-[var(--border)] bg-white"
                 />
               ) : (
-                <CertificateSheet issue={preview} />
+                <CertificateSheet issue={preview} signatures={previewSigs.signatures} />
               )}
             </div>
           ) : null}
@@ -1464,4 +1612,23 @@ export function CertificatesWorkspace() {
       />
     </ErpWorkspaceShell>
   );
+}
+
+/** The certificate-dues query as the gate reads it (lib/certificates.ts). */
+function duesAnswerOf(
+  data: CertificateDuesView | undefined,
+  error: Error | null,
+): CertificateDuesAnswer {
+  if (data) {
+    return {
+      state: "known",
+      openBalancePaise: data.openBalancePaise,
+      openDueCount: data.openDueCount,
+    };
+  }
+  if (error) {
+    const status = error instanceof ErpQueryError ? error.status : null;
+    return status === 401 || status === 403 ? { state: "role" } : { state: "failed" };
+  }
+  return { state: "checking" };
 }

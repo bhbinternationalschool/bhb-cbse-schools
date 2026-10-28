@@ -1139,6 +1139,22 @@ async function replyStaffFallback(opts: {
     });
     return { replied: false, escalate: false, audience: "staff_quiet", stub: false };
   }
+  // "Randhir singh salary" just after a UPI screenshot that could not be
+  // recorded (15 Oct 2026): say what to send instead of "didn't understand".
+  const { upiFollowUpHelp } = await import("@/lib/waUpiProof.server");
+  const upiHelp = upiFollowUpHelp(mobile10, said);
+  if (upiHelp) {
+    const ok = await sendBotReply({
+      mobile10,
+      displayName,
+      category,
+      audience: "upi_proof_followup",
+      flow,
+      text: upiHelp,
+      inbound: { text: said, waMessageId: opts.waMessageId },
+    });
+    return { replied: ok, escalate: false, audience: "upi_proof_followup", stub: !ok };
+  }
   const staffRole =
     identity.roles.find((r) => r.kind === flow && r.staff) ?? identity.roles.find((r) => r.staff);
   const ok = await sendBotReply({
@@ -1561,6 +1577,31 @@ async function submitLeave(opts: {
     return `✅ ${leaveTypeLabel(req.typeCode)} on ${dates} is approved and marked.`;
   }
 
+  // The ERP bell and the apps of whoever decides staff leave, by role.
+  {
+    const [{ notify }, { staffLeaveRequested }, { approversToNotify }] = await Promise.all([
+      import("@/lib/notify/notify.server"),
+      import("@/lib/notify/events"),
+      import("@/lib/staffLeaveRules.server"),
+    ]);
+    const { loadServerMasters } = await import("@/lib/api/v1/auth");
+    const named = await loadServerMasters()
+      .then((m) => approversToNotify(m, staff.id))
+      .catch(() => [] as string[]);
+    await notify(
+      staffLeaveRequested({
+        requestId: req.id,
+        staffId: staff.id,
+        staffName: staff.fullName || "Staff",
+        typeCode: req.typeCode,
+        fromDate: req.fromDate,
+        toDate: req.toDate,
+        reason: draft.reason || "",
+        namedApproverIds: named,
+      }),
+    );
+  }
+
   // A code the approvers answer with.
   const store = await readStore();
   // Codes of long-past leave are dropped, so the list stays small.
@@ -1669,12 +1710,22 @@ export async function handleLeaveCodeDecision(opts: { fromWaId: string; text: st
     return { handled: true };
   }
 
-  const { decideLeave } = await import("@/lib/staffHr");
-  const result = decideLeave({
+  // The year's leave rules (balance, sandwich days, half-day rule) apply
+  // here exactly as in the ERP.
+  const { decideLeaveWithRules } = await import("@/lib/staffLeaveRules.server");
+  const result = await decideLeaveWithRules({
+    state,
+    masters,
     requestId: req.id,
-    decision: decision.approve ? "approved" : "rejected",
+    approve: decision.approve,
+    note: `Decided on WhatsApp by ${byName}`,
     decidedBy: byName,
-    decisionNote: `Decided on WhatsApp by ${byName}`,
+    approverStaffId: approverStaff!.id,
+    isLeadership: true,
+    // WhatsApp never files unpaid leave on its own: a short balance under
+    // an "LWP" rule is refused with "decide it on the web".
+    channel: "whatsapp",
+    confirmLwp: false,
   });
   if (!result.ok) {
     await releaseSendClaim(claimKey);
@@ -1688,21 +1739,42 @@ export async function handleLeaveCodeDecision(opts: { fromWaId: string; text: st
     await say("The decision could not be saved just now. Please try again in a minute.");
     return { handled: true };
   }
-  const after = result.state.leaveRequests.find((r) => r.id === req.id) ?? req;
+  const after = result.after;
   const label = leaveTypeLabel(req.typeCode);
+  {
+    const [{ notify }, { staffLeaveDecided }] = await Promise.all([
+      import("@/lib/notify/notify.server"),
+      import("@/lib/notify/events"),
+    ]);
+    await notify(
+      staffLeaveDecided({
+        requestId: req.id,
+        staffId: req.staffId,
+        status: after.status,
+        typeCode: req.typeCode,
+        fromDate: req.fromDate,
+        toDate: req.toDate,
+        decidedBy: byName,
+      }),
+    );
+  }
 
   if (after.status === "approved") {
     const { markApprovedLeaveOnRegisters } = await import("@/lib/staffAttendance.server");
-    await markApprovedLeaveOnRegisters({
-      staffId: req.staffId,
-      fromDate: req.fromDate,
-      toDate: req.toDate,
-      halfDay: req.halfDay,
-      halfDaySession: req.halfDaySession,
-      typeCode: req.typeCode,
-      by: `Leave approved by ${byName}`,
-    });
-    await say(`✅ Approved and posted to the ERP: ${whoName} · ${label} · ${dates}. The day is marked as leave.`);
+    for (const part of result.approved) {
+      await markApprovedLeaveOnRegisters({
+        staffId: part.staffId,
+        fromDate: part.fromDate,
+        toDate: part.toDate,
+        halfDay: part.halfDay,
+        halfDaySession: part.halfDaySession,
+        typeCode: part.typeCode,
+        by: `Leave approved by ${byName}`,
+      });
+    }
+    await say(
+      `✅ Approved and posted to the ERP: ${whoName} · ${label} · ${dates}. The day is marked as leave.`,
+    );
     await sendWhatsAppText({
       toMobile: entry.staffMobile10,
       body: `✅ Your ${label} for ${dates} is approved by ${byName}, and marked in attendance.`,

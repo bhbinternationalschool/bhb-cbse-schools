@@ -6,6 +6,7 @@ import "../../core/api/api_client.dart";
 import "../../core/theme/app_theme.dart";
 import "lesson_plan_editor_screen.dart";
 import "module_shell.dart";
+import "smart_teach_screen.dart";
 import "../../core/i18n/locale_controller.dart";
 
 /// Sentinel returned by the plan picker to mean "write a new one".
@@ -392,7 +393,8 @@ IconData _resourceIcon(String kind) {
   }
 }
 
-/// Opens a content link in the device browser / e-book app.
+/// Opens a content link in the device browser / e-book app (Smart Teach
+/// links in the app's own Smart Teach screen).
 Future<void> _openResource(
   BuildContext context,
   TeachingResource resource,
@@ -404,6 +406,17 @@ Future<void> _openResource(
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(context.l10n.thatLinkIsNotAValid)));
+    return;
+  }
+  // Smart Teach links open inside the app, sharing the one Smart Teach
+  // sign-in the teacher made there.
+  if (SmartTeachScreen.isSmartTeachUrl(resource.url)) {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            SmartTeachScreen(title: resource.title, url: resource.url),
+      ),
+    );
     return;
   }
   final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -475,6 +488,23 @@ class _PeriodCard extends StatelessWidget {
       }
     }
     return names.join(", ");
+  }
+
+  /// Chapters this period is about — tagged on it (a tagged topic counts
+  /// for its chapter) or covered by its linked lesson plan — that have
+  /// publisher assets on Smart Teach.
+  List<TeachingUnit> get _publisherChapters {
+    final ids = {...period.unitIds};
+    for (final plan in period.lessonPlans) {
+      if (plan.id == period.lessonPlanId) ids.addAll(plan.unitIds);
+    }
+    return [
+      for (final chapter in period.chapters)
+        if (chapter.publisherAssets != null &&
+            (ids.contains(chapter.id) ||
+                chapter.topics.any((t) => ids.contains(t.id))))
+          chapter,
+    ];
   }
 
   String get _planTitle {
@@ -612,6 +642,83 @@ class _PeriodCard extends StatelessWidget {
                               color: AppColors.info,
                               fontWeight: FontWeight.w500,
                             ),
+                          ),
+                        ),
+                        const Icon(
+                          Icons.open_in_new,
+                          size: 15,
+                          color: AppColors.muted,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+            if (_publisherChapters.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+              Text(
+                context.l10n.publisherAssetsHeading,
+                style: AppText.labelSmallMuted.copyWith(
+                  letterSpacing: 0.6,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              for (final chapter in _publisherChapters)
+                InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  // Inside the app, where the teacher's Smart Teach sign-in
+                  // is kept between visits.
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => SmartTeachScreen(
+                        title: chapter.label,
+                        url: chapter.publisherAssets!.url,
+                      ),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.movie_outlined,
+                          size: 17,
+                          color: AppColors.info,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                chapter.label,
+                                style: AppText.bodySmall.copyWith(
+                                  color: AppColors.info,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                chapter.publisherAssets!.items
+                                    .take(5)
+                                    .map(
+                                      (a) =>
+                                          a.title.isEmpty || a.title == a.type
+                                          ? a.type
+                                          : "${a.type}: ${a.title}",
+                                    )
+                                    .join(" · "),
+                                style: AppText.labelSmallMuted,
+                              ),
+                              Text(
+                                context.l10n.openInSmartTeach,
+                                style: AppText.labelSmallMuted.copyWith(
+                                  color: AppColors.info,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         const Icon(

@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import * as probeTables from "./deskProbeTables";
 
 const root = join(__dirname, "..", "..", "..", "..");
 const migDir = join(root, "supabase", "migrations");
@@ -41,6 +42,10 @@ for (const dir of readdirSync(routes)) {
   for (const block of text.matchAll(/tables:\s*\[([^\]]*)\]/g)) {
     for (const m of block[1].matchAll(/"([a-z_]+)"/g)) used.set(m[1], `school-data/${dir}`);
   }
+}
+// Lists shared through lib/deskProbeTables (routes spread them into `tables`).
+for (const [name, list] of Object.entries(probeTables)) {
+  for (const t of list as readonly string[]) used.set(t, `deskProbeTables.${name}`);
 }
 assert.ok(used.size > 10, "found the probed tables");
 const missing = [...used].filter(([t]) => !allowed.has(t));

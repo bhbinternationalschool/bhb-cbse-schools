@@ -36,6 +36,20 @@ import {
 import { ledgerListAccounts, ledgerPost, ledgerReverse } from "@/lib/ledger/ledger.server";
 import { planAmend, planVoid, type AmendLine } from "@/lib/ledger/voucherAmend";
 import {
+  cancelledPairKeys,
+  dropCancelledVouchers,
+  statementTies,
+  type VoucherLink,
+} from "@/lib/ledger/cancelledPairs";
+import {
+  firstLiveVoucher,
+  lastEntriesByKind,
+  type HandVoucher,
+  type LastEntriesByKind,
+} from "@/lib/ledger/lastEntries";
+import { fetchAllPages, fetchByIds } from "@/lib/supabase/pageAll";
+import type { VoucherDetail } from "@/lib/ledger/drillDown";
+import {
   buildVendorStatement,
   type VendorLine,
   type VendorStatement,
@@ -75,26 +89,68 @@ export async function periodBalances(input: {
 async function cashMovements(input: {
   from: string;
   to: string;
-}): Promise<CashMovementRow[]> {
+}): Promise<{ rows: CashMovementRow[]; error: string | null }> {
   const ctx = await getServerTenantContext();
-  if (!ctx) return [];
-  const { data } = await ctx.sb.rpc("ledger_cash_movements", {
-    p_tenant_id: ctx.tenantId,
-    p_from: input.from,
-    p_to: input.to,
-  });
-  return ((data ?? []) as Record<string, unknown>[]).map<CashMovementRow>((r) => ({
-    voucherId: String(r.voucher_id ?? ""),
-    voucherDate: String(r.voucher_date ?? ""),
+  if (!ctx) return { rows: [], error: "Supabase tenant not configured" };
+  // Paged: one row per voucher PER HEAD — 4,092 for 2026-27 on 13 Oct 2026 —
+  // and PostgREST stops at 1,000 without saying so. The statement then
+  // covered April and May and did not tie to cash.
+  const res = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    ctx.sb
+      .rpc("ledger_cash_movements", {
+        p_tenant_id: ctx.tenantId,
+        p_from: input.from,
+        p_to: input.to,
+      })
+      .range(from, to),
+  );
+  return {
+    error: res.error,
+    rows: res.rows.map<CashMovementRow>((r) => ({
+      voucherId: String(r.voucher_id ?? ""),
+      voucherDate: String(r.voucher_date ?? ""),
+      voucherNo: String(r.voucher_no ?? ""),
+      narration: String(r.narration ?? ""),
+      cashSignedPaise: Number(r.cash_signed_paise ?? 0),
+      headCode: String(r.head_code ?? ""),
+      headName: String(r.head_name ?? ""),
+      headScheduleGroup: String(r.head_schedule_group ?? ""),
+      headKind: String(r.head_kind ?? "expense") as LedgerAccountKind,
+      headSignedPaise: Number(r.head_signed_paise ?? 0),
+    })),
+  };
+}
+
+/**
+ * Id, number and `reverses_voucher_id` for exactly the vouchers at hand — the
+ * pairs are worked out from these by cancelledPairs.ts. The book keeps no
+ * "reversed" flag: the reversal is the record. A pair is only a pair when
+ * both halves are among the vouchers asked about.
+ */
+async function voucherLinks(
+  by: { column: "voucher_no" | "id"; values: string[] },
+): Promise<{ links: VoucherLink[]; error: string | null }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { links: [], error: "Supabase tenant not configured" };
+  const values = [...new Set(by.values.filter(Boolean))];
+  if (values.length === 0) return { links: [], error: null };
+  type Row = { id: string; voucher_no: string; reverses_voucher_id: string | null };
+  const own = await fetchByIds<Row>(values, (chunk, from, to) =>
+    ctx.sb
+      .from("ledger_vouchers")
+      .select("id, voucher_no, reverses_voucher_id")
+      .eq("tenant_id", ctx.tenantId)
+      .in(by.column, chunk)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  if (own.error) return { links: [], error: own.error };
+  const toLink = (r: Row): VoucherLink => ({
+    id: String(r.id),
     voucherNo: String(r.voucher_no ?? ""),
-    narration: String(r.narration ?? ""),
-    cashSignedPaise: Number(r.cash_signed_paise ?? 0),
-    headCode: String(r.head_code ?? ""),
-    headName: String(r.head_name ?? ""),
-    headScheduleGroup: String(r.head_schedule_group ?? ""),
-    headKind: String(r.head_kind ?? "expense") as LedgerAccountKind,
-    headSignedPaise: Number(r.head_signed_paise ?? 0),
-  }));
+    reversesVoucherId: r.reverses_voucher_id ? String(r.reverses_voucher_id) : "",
+  });
+  return { links: own.rows.map(toLink), error: null };
 }
 
 /** Cash and bank accounts, which the R&P opens and closes on. */
@@ -141,12 +197,23 @@ export async function balanceSheetReport(input: { from: string; to: string }) {
 }
 
 export async function receiptsPaymentsReport(input: { from: string; to: string }) {
-  const [bal, movements, cashCodes] = await Promise.all([
+  const [bal, moved, cashCodes] = await Promise.all([
     periodBalances(input),
     cashMovements(input),
     cashAccountCodes(),
   ]);
   if (!bal.ok) return { ok: false as const, error: bal.error };
+  if (moved.error) return { ok: false as const, error: moved.error };
+
+  // A payment and its reversal would read as a payment AND a receipt of the
+  // same sum under the same head. Both halves of a pair inside the period go;
+  // the cash they moved nets to zero, so the statement still ties.
+  const links = await voucherLinks({
+    column: "id",
+    values: moved.rows.map((m) => m.voucherId),
+  });
+  if (links.error) return { ok: false as const, error: links.error };
+  const { movements, droppedVouchers } = dropCancelledVouchers(moved.rows, links.links);
 
   const cashRows = bal.rows.filter((r) => cashCodes.has(r.code));
   const openingCashPaise = cashRows.reduce((n, r) => n + r.openingPaise, 0);
@@ -160,6 +227,7 @@ export async function receiptsPaymentsReport(input: { from: string; to: string }
       closingCashPaise,
       movements,
     }),
+    cancelledVouchersLeftOut: droppedVouchers,
   };
 }
 
@@ -214,29 +282,85 @@ export type AccountStatementRow = {
   debitPaise: number;
   creditPaise: number;
   runningPaise: number;
+  /**
+   * Set when this line belongs to a voucher that was reversed, or to the
+   * reversal itself, with the other half also in the period — the pair key
+   * cancelledPairs.ts groups by. "" for a live line.
+   */
+  cancelledPair: string;
 };
 
+export type AccountStatement = {
+  ok: boolean;
+  rows: AccountStatementRow[];
+  error?: string;
+  /** Balance before the first day of the period, in the account's direction. */
+  openingPaise: number;
+  /** Balance at the end of the period — the same with or without the pairs. */
+  closingPaise: number;
+  /** Assets and expenses run debit-positive; the rest credit-positive. */
+  debitNormal: boolean;
+  /** Lines that belong to a reversed pair (both halves in the period). */
+  cancelledLines: number;
+};
+
+/**
+ * One account's lines for a period, with a running balance.
+ *
+ * Every line is returned, cancelled pairs included and flagged, so the
+ * figures are the book's and the screen decides what to show: Book reports
+ * hides the pairs by default (hideCancelledLines), the Cheques panel groups
+ * every line by cheque number and needs a bounce's reversal to close it.
+ *
+ * Paged — Cash in Hand carried 1,831 lines for 2026-27 on 13 Oct 2026, and a
+ * single call stops at 1,000 without an error, so the statement ended in
+ * early autumn and its last running figure was not the closing balance.
+ */
 export async function accountStatement(input: {
   code: string;
   from: string;
   to: string;
-}): Promise<{ ok: boolean; rows: AccountStatementRow[]; error?: string }> {
+}): Promise<AccountStatement> {
+  const blank = { rows: [], openingPaise: 0, closingPaise: 0, debitNormal: true, cancelledLines: 0 };
   const ctx = await getServerTenantContext();
-  if (!ctx) return { ok: false, rows: [], error: "Supabase tenant not configured" };
+  if (!ctx) return { ok: false, ...blank, error: "Supabase tenant not configured" };
 
-  const { data, error } = await ctx.sb.rpc("ledger_account_statement", {
-    p_tenant_id: ctx.tenantId,
-    p_code: input.code,
-    p_from: input.from,
-    p_to: input.to,
+  // Opening and closing come from the book's period balances, not off the
+  // first line: an account with a balance and no movement in the period has
+  // no first line, and read that way showed ₹0 → ₹0 (Suspense — Vehicles
+  // Pending Valuation, ₹30.48 lakh, for 1–13 Oct).
+  const [bal, page] = await Promise.all([
+    periodBalances({ from: input.from, to: input.to }),
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      ctx.sb
+        .rpc("ledger_account_statement", {
+          p_tenant_id: ctx.tenantId,
+          p_code: input.code,
+          p_from: input.from,
+          p_to: input.to,
+        })
+        .range(from, to),
+    ),
+  ]);
+  if (page.error) return { ok: false, ...blank, error: page.error };
+  if (!bal.ok) return { ok: false, ...blank, error: bal.error };
+  const acct = bal.rows.find((r) => r.code === input.code);
+  if (!acct) return { ok: false, ...blank, error: `No account ${input.code} in the chart` };
+  // Same rule as the SQL's running balance.
+  const debitNormal = acct.kind === "asset" || acct.kind === "expense";
+
+  const links = await voucherLinks({
+    column: "voucher_no",
+    values: page.rows.map((r) => String(r.voucher_no ?? "")),
   });
-  if (error) return { ok: false, rows: [], error: error.message };
+  if (links.error) return { ok: false, ...blank, error: links.error };
+  const pairs = cancelledPairKeys(links.links);
 
-  return {
-    ok: true,
-    rows: ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+  const rows: AccountStatementRow[] = page.rows.map((r) => {
+    const voucherNo = String(r.voucher_no ?? "");
+    return {
       date: String(r.voucher_date ?? ""),
-      voucherNo: String(r.voucher_no ?? ""),
+      voucherNo,
       voucherType: String(r.voucher_type ?? ""),
       narration: String(r.narration ?? ""),
       partyName: String(r.party_name ?? ""),
@@ -244,8 +368,214 @@ export async function accountStatement(input: {
       debitPaise: Number(r.debit_paise ?? 0),
       creditPaise: Number(r.credit_paise ?? 0),
       runningPaise: Number(r.running_paise ?? 0),
-    })),
+      cancelledPair: pairs.get(voucherNo) ?? "",
+    };
+  });
+
+  const openingPaise = acct.openingPaise;
+  const closingPaise = acct.closingPaise;
+  // The lines must carry the book from one to the other; if a page went
+  // missing they would not, and the statement must say so, not show it.
+  if (!statementTies({ openingPaise, closingPaise, rows, debitNormal })) {
+    return {
+      ok: false,
+      ...blank,
+      error: "The statement's lines do not add up to the book's closing balance — build it again.",
+    };
+  }
+  return {
+    ok: true,
+    rows,
+    openingPaise,
+    closingPaise,
+    debitNormal,
+    cancelledLines: rows.filter((r) => r.cancelledPair).length,
   };
+}
+
+/* ─── One voucher, whole ───────────────────────────────────── */
+
+/**
+ * Everything one voucher says — header, every line, and whether it stands —
+ * for the drill-down from the day sheet, the statements and the voucher list.
+ *
+ * Its own lines only: no account balance is read, so it is safe behind view
+ * rights alone, like `find-voucher` (the day sheet's counter has no
+ * accounts_position).
+ */
+export async function ledgerVoucherDetail(by: {
+  voucherId?: string;
+  voucherNo?: string;
+}): Promise<{ ok: boolean; error?: string; voucher?: VoucherDetail }> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured" };
+  const cols =
+    "id, voucher_no, voucher_type, voucher_date, narration, created_by, created_at, source_type, reverses_voucher_id";
+  let q = ctx.sb.from("ledger_vouchers").select(cols).eq("tenant_id", ctx.tenantId);
+  if (by.voucherId) q = q.eq("id", by.voucherId);
+  else if (by.voucherNo?.trim()) q = q.eq("voucher_no", by.voucherNo.trim());
+  else return { ok: false, error: "Say which voucher" };
+  const { data: v, error } = await q.maybeSingle();
+  if (error) return { ok: false, error: error.message };
+  if (!v) return { ok: false, error: "No voucher with that number" };
+  const row = v as Record<string, unknown>;
+  const id = String(row.id);
+
+  const [linesRes, revByRes, revOfRes] = await Promise.all([
+    ctx.sb
+      .from("ledger_lines")
+      .select(
+        "line_no, debit_paise, credit_paise, narration, instrument_mode, instrument_ref, ledger_accounts!inner(code, name), ledger_parties(name)",
+      )
+      .eq("tenant_id", ctx.tenantId)
+      .eq("voucher_id", id)
+      .order("line_no", { ascending: true }),
+    ctx.sb
+      .from("ledger_vouchers")
+      .select("id, voucher_no, voucher_date, narration")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("reverses_voucher_id", id)
+      .limit(1)
+      .maybeSingle(),
+    row.reverses_voucher_id
+      ? ctx.sb
+          .from("ledger_vouchers")
+          .select("id, voucher_no, voucher_date")
+          .eq("tenant_id", ctx.tenantId)
+          .eq("id", String(row.reverses_voucher_id))
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+  const err = linesRes.error ?? revByRes.error ?? revOfRes.error;
+  if (err) return { ok: false, error: err.message };
+
+  const revBy = revByRes.data as Record<string, unknown> | null;
+  const revOf = revOfRes.data as Record<string, unknown> | null;
+  return {
+    ok: true,
+    voucher: {
+      id,
+      voucherNo: String(row.voucher_no ?? ""),
+      voucherType: String(row.voucher_type ?? ""),
+      date: String(row.voucher_date ?? ""),
+      narration: String(row.narration ?? ""),
+      createdBy: String(row.created_by ?? ""),
+      createdAt: String(row.created_at ?? ""),
+      sourceType: String(row.source_type ?? ""),
+      lines: ((linesRes.data ?? []) as Record<string, unknown>[]).map((l) => {
+        const acct = l.ledger_accounts as { code?: string; name?: string } | null;
+        const party = l.ledger_parties as { name?: string } | null;
+        return {
+          lineNo: Number(l.line_no ?? 0),
+          accountCode: String(acct?.code ?? ""),
+          accountName: String(acct?.name ?? ""),
+          partyName: String(party?.name ?? ""),
+          debitPaise: Number(l.debit_paise ?? 0),
+          creditPaise: Number(l.credit_paise ?? 0),
+          narration: String(l.narration ?? ""),
+          instrumentMode: String(l.instrument_mode ?? ""),
+          instrumentRef: String(l.instrument_ref ?? ""),
+        };
+      }),
+      reversedBy: revBy
+        ? {
+            id: String(revBy.id),
+            voucherNo: String(revBy.voucher_no ?? ""),
+            date: String(revBy.voucher_date ?? ""),
+            narration: String(revBy.narration ?? ""),
+          }
+        : null,
+      reverses: revOf
+        ? { id: String(revOf.id), voucherNo: String(revOf.voucher_no ?? ""), date: String(revOf.voucher_date ?? "") }
+        : null,
+    },
+  };
+}
+
+/* ─── Entered up to ────────────────────────────────────────── */
+
+/** The voucher types the entry forms key by hand. */
+const HAND_KEYED_TYPES = ["payment", "receipt", "contra", "journal"] as const;
+
+/**
+ * The latest live hand-keyed voucher per type, by date and by keying time —
+ * the "Entered up to" strip on the voucher forms.
+ *
+ * Hand-keyed is `source_type = ''`: the entry forms send no source, every
+ * projector and import stamps one. Reversals are excluded by type and by
+ * `reverses_voucher_id`; a voucher some reversal points at is skipped.
+ *
+ * Asked per type and per ordering, newest first, a page at a time until the
+ * first live one — so a busy type cannot push a quiet one out of view (a
+ * single top-200 across all types said "no journals" once payments passed
+ * 200), and a run of cancelled entries cannot hide the live one behind them.
+ * Almost always one page per question.
+ */
+export async function ledgerLastEntries(): Promise<{
+  ok: boolean;
+  error?: string;
+  kinds: LastEntriesByKind;
+}> {
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, error: "Supabase tenant not configured", kinds: {} };
+  const PAGE = 100;
+  const MAX_PAGES = 20;
+
+  const firstLive = async (
+    type: string,
+    order: "date" | "keyed",
+  ): Promise<{ row: HandVoucher | null; error?: string }> => {
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      let q = ctx.sb
+        .from("ledger_vouchers")
+        .select("id, voucher_no, voucher_type, voucher_date, created_at, created_by, reverses_voucher_id")
+        .eq("tenant_id", ctx.tenantId)
+        .eq("source_type", "")
+        .eq("voucher_type", type)
+        .is("reverses_voucher_id", null);
+      q =
+        order === "date"
+          ? q.order("voucher_date", { ascending: false }).order("created_at", { ascending: false })
+          : q.order("created_at", { ascending: false });
+      const { data, error } = await q.order("id", { ascending: false }).range(page * PAGE, page * PAGE + PAGE - 1);
+      if (error) return { row: null, error: error.message };
+      const rows = ((data ?? []) as Record<string, unknown>[]).map<HandVoucher>((r) => ({
+        id: String(r.id ?? ""),
+        voucherNo: String(r.voucher_no ?? ""),
+        voucherType: String(r.voucher_type ?? ""),
+        date: String(r.voucher_date ?? "").slice(0, 10),
+        keyedAt: String(r.created_at ?? ""),
+        createdBy: String(r.created_by ?? ""),
+        reversesVoucherId: r.reverses_voucher_id ? String(r.reverses_voucher_id) : "",
+      }));
+      if (rows.length === 0) return { row: null };
+      const rev = await ctx.sb
+        .from("ledger_vouchers")
+        .select("reverses_voucher_id")
+        .eq("tenant_id", ctx.tenantId)
+        .in("reverses_voucher_id", rows.map((r) => r.id));
+      if (rev.error) return { row: null, error: rev.error.message };
+      const reversed = new Set(
+        ((rev.data ?? []) as { reverses_voucher_id: string }[]).map((r) => String(r.reverses_voucher_id)),
+      );
+      const live = firstLiveVoucher(rows, reversed);
+      if (live) return { row: live };
+      if (rows.length < PAGE) return { row: null };
+    }
+    // Two thousand cancelled entries in a row is not "nothing entered" — it
+    // is not knowing, and the strip says so.
+    return { row: null, error: `Could not find a live ${type} in the newest ${PAGE * MAX_PAGES}` };
+  };
+
+  const found = await Promise.all(
+    HAND_KEYED_TYPES.flatMap((t) => [firstLive(t, "date"), firstLive(t, "keyed")]),
+  );
+  const failed = found.find((f) => f.error);
+  if (failed) return { ok: false, error: failed.error, kinds: {} };
+  const rows = found.map((f) => f.row).filter((r): r is HandVoucher => !!r);
+  // Every row here is live and is the newest of its type by one ordering, so
+  // picking over them per type and overall gives both answers exactly.
+  return { ok: true, kinds: lastEntriesByKind(rows, new Set()) };
 }
 
 /* ─── The year-end pack ────────────────────────────────────── */
@@ -690,6 +1020,8 @@ export async function ledgerSearchVouchers(input: {
       if (f.to) q = q.lte("voucher_date", f.to);
       if (f.voucherType) q = q.eq("voucher_type", f.voucherType);
       if (f.sourceType) q = q.eq("source_type", f.sourceType === "manual" ? "" : f.sourceType);
+      const skip = (f.excludeSourceTypes ?? []).filter((t) => /^[a-z0-9_]+$/.test(t));
+      if (skip.length) q = q.not("source_type", "in", `(${skip.join(",")})`);
       const { data, error } = await q
         .order("voucher_date", { ascending: false })
         .order("voucher_no", { ascending: false })

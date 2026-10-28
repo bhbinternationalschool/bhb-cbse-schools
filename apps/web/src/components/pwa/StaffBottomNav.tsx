@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import {
   BookOpen,
   CalendarDays,
@@ -12,8 +12,8 @@ import {
   LayoutGrid,
 } from "lucide-react";
 import { useDemoSession } from "@/components/shell/SessionContext";
-import { loadMasters } from "@/lib/masters";
-import { canAccessHref, loadRbac } from "@/lib/rbac";
+import { useAccessData } from "@/components/shell/useAccessData";
+import { canAccessHref } from "@/lib/rbac";
 
 const TABS = [
   { href: "/home", label: "Home", icon: Home, match: (p: string) => p === "/home" },
@@ -52,24 +52,19 @@ function visibleTabs(allowed: (href: string) => boolean) {
 export function StaffBottomNav({ onOpenMenu }: { onOpenMenu: () => void }) {
   const pathname = usePathname() || "/home";
   const session = useDemoSession();
-  const [tabs, setTabs] = useState(() =>
-    visibleTabs((href) => href === "/home"),
+  // Home only until the roles and roster are known; then every tab this
+  // person may open, worked out again whenever either changes.
+  const access = useAccessData();
+  const tabs = useMemo(
+    () =>
+      access.ready
+        ? visibleTabs((href) =>
+            canAccessHref(session, access.masters, href, access.rbac ?? undefined),
+          )
+        : visibleTabs((href) => href === "/home"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
   );
-  useEffect(() => {
-    const decide = () =>
-      setTabs(
-        visibleTabs((href) =>
-          canAccessHref(session, loadMasters(), href, loadRbac()),
-        ),
-      );
-    decide();
-    window.addEventListener("bhb-masters-updated", decide);
-    const t = window.setTimeout(decide, 5000);
-    return () => {
-      window.removeEventListener("bhb-masters-updated", decide);
-      window.clearTimeout(t);
-    };
-  }, [session]);
 
   return (
     <nav

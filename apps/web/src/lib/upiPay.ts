@@ -98,11 +98,79 @@ function findDate(t: string): string {
   return "";
 }
 
-function findAmountPaise(t: string): number {
-  const m = t.match(/(?:₹|Rs\.?|INR)\s*([0-9][0-9,]*(?:\.\d{1,2})?)/i);
-  if (!m) return 0;
-  const n = Number(m[1]!.replace(/,/g, ""));
+/** Rupees as written on a screen ("11,500", "1,425.50", "500") → paise, or 0. */
+function rupeesToPaise(v: string): number {
+  const n = Number(v.replace(/,/g, ""));
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : 0;
+}
+
+/**
+ * Indian digit grouping exactly as the UPI apps print an amount: "500",
+ * "11,500", "1,25,000", optional paise. "211,500" is not one of them — that
+ * is what a "₹" read as "2" looks like, and it is not guessed at.
+ */
+const INDIAN_AMOUNT = String.raw`(?:\d{1,2}(?:,\d{2})*,\d{3}|\d{1,7})(?:\.\d{1,2})?`;
+const INDIAN_AMOUNT_LINE = new RegExp(`^${INDIAN_AMOUNT}$`);
+/** Formatted like money (grouped, or with paise) rather than a bare count. */
+const FORMATTED_AMOUNT = /,\d{3}(?:\.\d{1,2})?$|\.\d{2}$/;
+
+/**
+ * What Google Vision makes of the rupee sign at the front of a big headline
+ * amount: "*11,500", "%11,500", "?11,500", "¥11,500", "Z11,500". Only a
+ * non-digit symbol counts — a "₹" read as "2" cannot be told from a real 2.
+ */
+const RUPEE_MISREAD = "[*%?¥₨Zz]";
+
+/** The words an amount sits next to on every app's success / details screen. */
+const AMOUNT_CONTEXT = /\b(paid to|paid|amount|total|debited|credited|completed|successful|success|sent|received|to)\b/i;
+/** A number on one of these lines is an account or card suffix, never the amount. */
+const NOT_AMOUNT_CONTEXT = /\b(a\/c|account|acct|bank|card|ending|xx|ref|id|no\.?|mobile|phone)\b|[•*x]{2,}/i;
+
+function findAmountPaise(t: string): number {
+  // 1. Marked with the rupee sign, "Rs" or "INR" — the first one, as before.
+  const marked = t.match(/(?:₹|₨|र[ुू]\.?|\bRs\.?|\bINR\.?|\bRupees?)\s*([0-9][0-9,]*(?:\.\d{1,2})?)/i);
+  if (marked) {
+    const p = rupeesToPaise(marked[1]!);
+    if (p) return p;
+  }
+  const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  // 2. The rupee sign misread as a symbol, at the start of the amount.
+  for (const l of lines) {
+    const m = l.match(new RegExp(`(?:^|\\s)${RUPEE_MISREAD}\\s?(${INDIAN_AMOUNT})(?:\\s|$)`));
+    if (!m) continue;
+    // A lone symbol + number line is the headline; mid-line, only a
+    // grouped amount ("Paid *11,500 to …"), never "Z 5" in a sentence.
+    if (m.index === 0 && l === m[0].trim()) return rupeesToPaise(m[1]!);
+    if (FORMATTED_AMOUNT.test(m[1]!)) return rupeesToPaise(m[1]!);
+  }
+  // 3. No marked amount: a line that is nothing but an amount — the big
+  //    headline on GPay / PhonePe / Paytm / BHIM, whose "₹" OCR dropped.
+  //    At most 7 digits, so a UTR (12) or a mobile (10) never qualifies;
+  //    a date or a time is never a line of bare digits. Scored on what sits
+  //    around it; a tie between two different amounts gives nothing.
+  const years = new Set((t.match(/\b20\d{2}\b/g) ?? []).filter((y) => new RegExp(`[A-Za-z]{3,9}[,\\s]+${y}|[/-]${y}`).test(t)));
+  const scored: { paise: number; score: number }[] = [];
+  lines.forEach((l, i) => {
+    if (!INDIAN_AMOUNT_LINE.test(l)) return;
+    if (years.has(l)) return;
+    // "15" / "October 2026, 12:28am" split over two lines is a date.
+    const nextWord = (lines[i + 1] || "").match(/^[A-Za-z]+/)?.[0] ?? "";
+    const prevWord = (lines[i - 1] || "").match(/[A-Za-z]+$/)?.[0] ?? "";
+    if ((nextWord && monthOf(nextWord)) || (prevWord && monthOf(prevWord))) return;
+    const paise = rupeesToPaise(l);
+    if (!paise) return;
+    const near = [lines[i - 2], lines[i - 1], lines[i + 1], lines[i + 2]].filter((x): x is string => !!x);
+    let score = 0;
+    if (FORMATTED_AMOUNT.test(l)) score += 2;
+    if (near.some((x) => AMOUNT_CONTEXT.test(x))) score += 2;
+    if (i === 0) score += 1;
+    if (lines[i - 1] && NOT_AMOUNT_CONTEXT.test(lines[i - 1]!)) score -= 3;
+    if (score > 0) scored.push({ paise, score });
+  });
+  if (!scored.length) return 0;
+  const best = Math.max(...scored.map((s) => s.score));
+  const top = new Set(scored.filter((s) => s.score === best).map((s) => s.paise));
+  return top.size === 1 ? [...top][0]! : 0;
 }
 
 /**
@@ -178,10 +246,61 @@ export function parseUpiProofText(text: string): UpiProof {
   };
 }
 
-/* ─── Checking it against the payment being recorded ────────────────── */
+/* ─── Who was paid: the screen's name against the ERP's ─────────────── */
 
 const nameTokens = (n: string) =>
-  (n || "").toUpperCase().replace(/[^A-Z\s]/g, " ").split(/\s+/).filter((w) => w.length > 1);
+  (n || "").toUpperCase().replace(/[^A-Z\s]/g, " ").split(/\s+/).filter((w) => w.length > 2);
+
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length]!;
+}
+
+/** One OCR slip in a word ("SUNGH" for SINGH), two in a long one; same first letter. */
+function tokensClose(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 4 || b.length < 4 || a[0] !== b[0]) return false;
+  const allowed = Math.min(a.length, b.length) >= 7 ? 2 : 1;
+  return Math.abs(a.length - b.length) <= allowed && editDistance(a, b) <= allowed;
+}
+
+/**
+ * Does the name on the screenshot name the same person as the ERP? A word
+ * in common is enough, as before ("RANDHIR SINGH" / "Randhir Sungh"). With
+ * no word exactly in common, OCR slips are forgiven only when the WHOLE
+ * name lines up — at least two words, every word of the shorter name close
+ * to one of the other's ("Randhlr Sungh"). A single near-miss word never
+ * matches: "Rakesh" is not "Rajesh".
+ */
+export function payeeNamesAgree(screen: string, erp: string): boolean {
+  const got = nameTokens(screen);
+  const want = nameTokens(erp);
+  if (!got.length || !want.length) return false;
+  if (got.some((w) => want.includes(w))) return true;
+  const [short, long] = got.length <= want.length ? [got, want] : [want, got];
+  if (short.length < 2) return false;
+  const used = new Set<number>();
+  return short.every((w) => {
+    const k = long.findIndex((x, i) => !used.has(i) && tokensClose(w, x));
+    if (k < 0) return false;
+    used.add(k);
+    return true;
+  });
+}
+
+/** Said wherever a screenshot has no UTR — WhatsApp and the ERP upload alike. */
+export const UPI_NO_UTR_HELP =
+  "This screen has no UPI transaction ID. In your UPI app open this payment's details and send that screenshot — it shows the 12-digit UPI transaction ID / UTR.";
+
+/* ─── Checking it against the payment being recorded ────────────────── */
 
 export type UpiProofCheck = {
   ok: boolean;
@@ -197,7 +316,7 @@ export function checkUpiProof(
 ): UpiProofCheck {
   const problems: string[] = [];
   const notes: string[] = [];
-  if (!proof.utr) problems.push("No UPI reference (UTR) could be read — type it from the app's payment details.");
+  if (!proof.utr) problems.push(`${UPI_NO_UTR_HELP} Or type the UTR from there.`);
   if (proof.status === "failed") problems.push("The screenshot shows a failed payment.");
   else if (proof.status === "pending") problems.push("The screenshot shows the payment still pending — wait for it to complete.");
   else if (proof.status === "unknown") notes.push("The screenshot does not say the payment completed — check it did.");
@@ -210,9 +329,8 @@ export function checkUpiProof(
   if (expected.payeeVpa && proof.payeeVpa && proof.payeeVpa.toLowerCase() !== expected.payeeVpa.trim().toLowerCase()) {
     problems.push(`The money went to ${proof.payeeVpa}, not ${expected.payeeVpa}.`);
   } else if (expected.payeeName && proof.payeeName) {
-    const want = nameTokens(expected.payeeName);
-    const got = nameTokens(proof.payeeName);
-    if (want.length && got.length && !got.some((w) => want.includes(w))) {
+    const comparable = nameTokens(expected.payeeName).length > 0 && nameTokens(proof.payeeName).length > 0;
+    if (comparable && !payeeNamesAgree(proof.payeeName, expected.payeeName)) {
       problems.push(`The screenshot is a payment to "${proof.payeeName}", not ${expected.payeeName}.`);
     }
   } else if (!proof.payeeVpa && !proof.payeeName) {

@@ -125,7 +125,9 @@ export function teachersForSubject(
       classHit = true;
     }
     if (classHit) linked.push(s);
-    else if (subjectHit) elsewhere.push(s);
+    // A visiting person is placed only where they are explicitly linked: they
+    // are paid per period and come on their own days.
+    else if (subjectHit && s.category !== "visiting") elsewhere.push(s);
   }
   if (linked.length) return { teachers: linked, source: "subject_link" };
   const cls = masters.classes.find((c) => c.id === classId);

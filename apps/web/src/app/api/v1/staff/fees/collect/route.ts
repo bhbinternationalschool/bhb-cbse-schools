@@ -9,19 +9,25 @@ import {
   classLabelOf,
   householdContact,
   loadFeeContext,
-  openDuesFor,
+  openDueLinesFor,
 } from "@/lib/api/v1/staffFees";
+import {
+  checkPayingNowSplit,
+  dueRefKey,
+  tenderReferenceProblem,
+} from "@/lib/staffFeeCollect";
 import {
   TENDER_MODES,
   collectPayment,
   formatInr,
   loadFees,
+  type FeeDueLine,
   type TenderMode,
   type VoucherLine,
   type VoucherTender,
 } from "@/lib/fees";
 import { pushFeesRemoteServer } from "@/lib/feesPersistence.server";
-import { sendPushToSubject } from "@/lib/webPush.server";
+import { notifyFeeReceived } from "@/lib/notify/feeNotify.server";
 
 export const runtime = "nodejs";
 
@@ -48,6 +54,14 @@ type Body = {
   collectionDate?: string;
   /** Idempotency key minted by the app; a retry with the same one is a no-op. */
   clientRef?: string;
+  /**
+   * "Total paying now" (paise): the app split one amount across the posted
+   * dues, oldest first. The server re-derives that split from its own dues
+   * with the web counter's `allocateCollectionToDues` and refuses if the
+   * posted per-due amounts differ or the total exceeds what is open.
+   * Absent = the per-due amounts are taken as typed (each still capped).
+   */
+  payingNowPaise?: number;
 };
 
 const MODE_VALUES = new Set(TENDER_MODES.map((m) => m.value));
@@ -77,6 +91,13 @@ export async function POST(request: Request) {
     if (!studentId) throw new ApiError("bad_request", "studentId required", 400);
     if (!wanted.length) throw new ApiError("bad_request", "Select at least one due", 400);
     if (!clientRef) throw new ApiError("bad_request", "clientRef required", 400);
+    // Every payment that is not cash carries a reference — refused before
+    // anything is loaded, whatever the app did or did not check.
+    for (const t of body.tenders ?? []) {
+      if (Math.round(Number(t.amountPaise) || 0) <= 0) continue;
+      const problem = tenderReferenceProblem((t.mode || "cash").trim(), t.ref);
+      if (problem) throw new ApiError("bad_request", problem, 400);
+    }
 
     const { sis, fees, masters } = await loadFeeContext();
     await assertFeeBookComplete(fees);
@@ -104,19 +125,54 @@ export async function POST(request: Request) {
 
     // Re-derive what is actually open, per child of this household.
     const ay = ctx.session.academicYearCode;
-    const openByKey = new Map<string, { label: string; kind: string; balancePaise: number; studentName: string }>();
+    const openByKey = new Map<
+      string,
+      { label: string; kind: string; balancePaise: number; studentName: string; line: FeeDueLine }
+    >();
     for (const s of sis.students) {
       if (s.householdId !== householdId || s.status !== "active" || s.academicYearCode !== ay) {
         continue;
       }
-      for (const d of openDuesFor(s, masters, fees)) {
-        openByKey.set(`${s.id}|${d.dueKey}`, {
+      for (const d of openDueLinesFor(s, masters, fees)) {
+        openByKey.set(dueRefKey(s.id, d.dueKey), {
           label: d.label,
           kind: d.kind,
           balancePaise: d.balancePaise,
           studentName: s.fullName,
+          line: d,
         });
       }
+    }
+
+    // "Total paying now": the split is the server's, not the phone's.
+    let splitAmounts: Map<string, number> | null = null;
+    if (body.payingNowPaise !== undefined && body.payingNowPaise !== null) {
+      const posted = new Map<string, number>();
+      const selected: FeeDueLine[] = [];
+      for (const l of wanted) {
+        const key = dueRefKey((l.studentId || studentId).trim(), (l.dueKey || "").trim());
+        const open = openByKey.get(key);
+        if (!open) {
+          throw new ApiError(
+            "bad_request",
+            `That due is no longer open — reload the counter and try again`,
+            409,
+          );
+        }
+        if (posted.has(key)) {
+          throw new ApiError("bad_request", "The same due was sent twice", 400);
+        }
+        posted.set(key, Math.round(Number(l.amountPaise) || 0));
+      }
+      // Household order, exactly as the counter listed them.
+      for (const [key, open] of openByKey) if (posted.has(key)) selected.push(open.line);
+      const check = checkPayingNowSplit({
+        selected,
+        payingNowPaise: Number(body.payingNowPaise),
+        posted,
+      });
+      if (!check.ok) throw new ApiError("bad_request", check.error, check.status);
+      splitAmounts = check.amounts;
     }
 
     const lines: VoucherLine[] = [];
@@ -130,7 +186,9 @@ export async function POST(request: Request) {
           409,
         );
       }
-      const asked = Math.round(Number(l.amountPaise) || 0);
+      const asked = splitAmounts
+        ? (splitAmounts.get(key) ?? 0)
+        : Math.round(Number(l.amountPaise) || 0);
       if (asked <= 0) continue;
       if (asked > open.balancePaise) {
         throw new ApiError(
@@ -151,6 +209,9 @@ export async function POST(request: Request) {
     if (!lines.length) throw new ApiError("bad_request", "Nothing to collect", 400);
     const total = lines.reduce((n, l) => n + l.amountPaise, 0);
 
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const collectionDate = (body.collectionDate || "").trim() || today;
+
     const tenders: VoucherTender[] = [];
     for (const t of body.tenders ?? []) {
       const amountPaise = Math.round(Number(t.amountPaise) || 0);
@@ -163,7 +224,11 @@ export async function POST(request: Request) {
         mode,
         amountPaise,
         ref: (t.ref || "").trim(),
-        instrumentDate: (t.instrumentDate || "").trim(),
+        // The txn / instrument date defaults to the day the money was
+        // taken, exactly as the web counter pre-fills it. The phone never
+        // sent one, so every non-cash collection from it was refused by
+        // collectPayment ("enter instrument / txn date").
+        instrumentDate: (t.instrumentDate || "").trim() || (mode === "cash" ? "" : collectionDate),
         bankName: (t.bankName || "").trim(),
         realisation: mode === "cheque" ? "subject_to_clearance" : "cleared",
       });
@@ -187,13 +252,21 @@ export async function POST(request: Request) {
       );
     }
 
-    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-    const collectionDate = (body.collectionDate || "").trim() || today;
-
     // The school's setting and this person's authority are resolved HERE.
     // The app sends a date and nothing else; it cannot tell the server that
     // it is allowed to use it.
     const mayBackdate = canBackdateReceipt(ctx.session, masters);
+
+    // The receipt number from the records, not this instance's copy
+    // (data-layer 2.2e): max(the RECEIPT counter, the highest receipt on
+    // record + 1), RESERVED in the database (masters_series_claim) so a desk
+    // collecting at the same instant gets another number. No such series in
+    // Masters = the built-in numbering.
+    const { nextSeriesNumberServer, recordSeriesUseServer } = await import("@/lib/data/server/numberSeriesNext.server");
+    const issued = await nextSeriesNumberServer("RECEIPT", ay);
+    if (!issued.ok && issued.status !== 404) {
+      throw new ApiError("server_error", `Could not issue a receipt number — nothing was saved (${issued.message})`, 503);
+    }
 
     const result = collectPayment({
       householdId,
@@ -210,6 +283,7 @@ export async function POST(request: Request) {
       transactionId: clientRef,
       source: "counter",
       receiptSeries: "F",
+      issuedReceiptNo: issued.ok ? issued.formatted : undefined,
     });
     if (!result.ok) throw new ApiError("bad_request", result.error, 400);
 
@@ -222,6 +296,7 @@ export async function POST(request: Request) {
         503,
       );
     }
+    if (issued.ok) await recordSeriesUseServer("RECEIPT", ay, result.voucher.receiptNo);
 
     // The family hears about it now, without anybody pressing anything.
     // AFTER the push, so the receipt is durable before the parent is told it
@@ -254,12 +329,16 @@ export async function POST(request: Request) {
       userAgent: meta.userAgent,
     });
 
-    await sendPushToSubject("parent", householdId, {
-      title: `Fee received · ${formatInr(total)}`,
-      body: `Receipt ${result.voucher.receiptNo} for ${student.fullName} (${classLabelOf(ctx, student)}). Thank you.`,
-      url: "/fees",
-      data: { kind: "fee_receipt", receiptNo: result.voucher.receiptNo },
-    }).catch(() => undefined);
+    await notifyFeeReceived({
+      voucherId: result.voucher.id,
+      receiptNo: result.voucher.receiptNo,
+      householdId,
+      totalPaise: total,
+      studentName: student.fullName,
+      classLabel: classLabelOf(ctx, student),
+      mode: [...new Set(tenders.map((t) => t.mode))].join(" + "),
+      collectedByStaffId: ctx.session.staffId,
+    });
 
     return apiOk({
       duplicate: false,

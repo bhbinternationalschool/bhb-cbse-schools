@@ -208,6 +208,21 @@ import {
   type MinutesLanguage,
 } from "@/lib/meetingMinutesAi";
 import { trackServerWork } from "@/lib/serverWork";
+import {
+  STAFF_SCAN_PROMPT_VERSION,
+  buildStaffScanPrompt,
+  buildStaffScanSystem,
+  staffScanAuditDescriptor,
+  type StaffScanKind,
+} from "@/lib/staffScanReading";
+import {
+  buildGameQuestionsPrompt,
+  GAME_QUESTIONS_PROMPT_VERSION,
+  GAME_QUESTIONS_SYSTEM,
+  parseGameQuestions,
+  type GameQuestionFacts,
+} from "@/lib/learningGamesAi";
+import type { QuestionDraft } from "@/lib/learningGames";
 
 export type LlmEngine = "openai" | "gemini" | "none";
 export type PreferredEngine = "auto" | "openai" | "gemini";
@@ -2759,5 +2774,141 @@ export async function generateModuleRequestJson(opts: {
     parseModuleRequestDraft,
   );
   if (r.ok) return { ok: true, draft: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "AI is not configured", engine: r.engine };
+}
+
+/**
+ * Read a photo the staff app took for a form — a visitor's ID card or number
+ * plate at the gate, a fuel bill in the vehicle log book (2026-10-20).
+ *
+ * Built like readParentDocument: Gemini flash only (one provider for photos
+ * of somebody's ID card, not two), every attempt writes an ai_generations
+ * row with a descriptor in place of the photo, and a failed call is a
+ * failure — never an empty reading, which would be a claim about the photo.
+ *
+ * `parse` turns the model's text into the reading (lib/staffScanReading);
+ * `audit` decides what of it the audit row may keep — for an ID card only
+ * the document type, never the name, number or address.
+ */
+export async function readStaffScanImage<T>(opts: {
+  kind: StaffScanKind;
+  base64: string;
+  mimeType: string;
+  parse: (text: string) => T | null;
+  audit: (reading: T) => string;
+  requester?: string;
+}): Promise<
+  | { ok: true; result: T; generationId: string }
+  | { ok: false; failure: "not-configured" | "budget" | "read-failed"; error: string }
+> {
+  if (!geminiConfigured()) {
+    return { ok: false, failure: "not-configured", error: "GEMINI_API_KEY not configured" };
+  }
+  const { requester, budget } = await startLlmPrecheck({ requester: opts.requester });
+  if (!budget.ok) return { ok: false, failure: "budget", error: budget.reason };
+
+  const system = buildStaffScanSystem(opts.kind);
+  const prompt = buildStaffScanPrompt(opts.kind);
+  const t0 = Date.now();
+  const r = await generateGeminiVisionJson({
+    system,
+    prompt,
+    base64: opts.base64,
+    mimeType: opts.mimeType,
+    model: geminiModel("flash"),
+    // A dozen short fields, plus a thinking model's reasoning out of the same
+    // allowance (see readParentDocument). Headroom, not measured on a real
+    // photo yet.
+    maxTokens: 2500,
+  });
+  const latencyMs = Date.now() - t0;
+
+  const parsed = r.ok ? opts.parse(r.text) : null;
+  const parseError = r.ok && !parsed ? "The reading was not valid JSON (truncated or fenced)" : "";
+
+  const generationId = await recordAiGeneration({
+    route: `staff-scan/${opts.kind}`,
+    promptVersion: STAFF_SCAN_PROMPT_VERSION,
+    tier: "flash",
+    engine: "gemini",
+    model: r.model,
+    status: parsed ? "ok" : "error",
+    error: r.ok ? parseError : r.error,
+    inputText: `${system}\n---\n${prompt}\n---\n${staffScanAuditDescriptor({ kind: opts.kind, mimeType: opts.mimeType, base64: opts.base64 })}`,
+    outputText: parsed ? opts.audit(parsed) : "",
+    promptTokens: r.ok ? r.usage.promptTokens : null,
+    completionTokens: r.ok ? r.usage.completionTokens : null,
+    latencyMs,
+    requester,
+  });
+
+  if (!r.ok) return { ok: false, failure: "read-failed", error: r.error };
+  noteAiBudgetUse(requester, (r.usage.promptTokens ?? 0) + (r.usage.completionTokens ?? 0));
+  if (!parsed) return { ok: false, failure: "read-failed", error: parseError };
+  return { ok: true, result: parsed, generationId };
+}
+
+/**
+ * Practice-game questions for one chapter of the school's own book
+ * (lib/learningGamesAi.ts). Drafts only: the caller saves them as
+ * review = 'pending' and no child sees one until a teacher approves it.
+ * Cacheable only while the chapter has no questions yet (a second teacher
+ * asking first costs nothing); after that the prompt carries the questions
+ * already there (facts.avoid) and is not cached, so asking again — say after
+ * rejecting a draft — brings new questions instead of the same cached ten.
+ */
+export async function generateGameQuestionsJson(opts: { facts: GameQuestionFacts; requester?: string }): Promise<
+  | { ok: true; drafts: QuestionDraft[]; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const r = await callLlmJson(
+    {
+      system: GAME_QUESTIONS_SYSTEM,
+      userMessage: buildGameQuestionsPrompt(opts.facts),
+      // Ten short items; a thinking model spends part of the budget before it
+      // writes, and Hindi costs ~1.6x the tokens.
+      maxTokens: opts.facts.lang === "hi" ? 3500 : 2500,
+      temperature: 0.4,
+      // Cached only for a chapter with nothing in the pool yet: once questions
+      // exist (approved, waiting or rejected) the teacher is asking for NEW
+      // ones, and the prompt lists what to avoid.
+      meta: { route: "game-questions", promptVersion: GAME_QUESTIONS_PROMPT_VERSION, cacheable: !(opts.facts.avoid ?? []).length },
+      ...(opts.requester ? { precheck: startLlmPrecheck({ requester: opts.requester }) } : {}),
+    },
+    (text) => parseGameQuestions(text, opts.facts.count),
+  );
+  if (r.ok) return { ok: true, drafts: r.data, engine: r.engine, generationId: r.generationId };
+  return { ok: false, error: r.error || "No AI engine configured", engine: r.engine };
+}
+
+/**
+ * School chat: is this child / family message safe to show the group?
+ * (lib/schoolChatModeration.ts holds the prompt, the parser and the rules
+ * that run first.) Not cacheable — every message is judged on its own. A
+ * failure of any kind is returned as ok:false, which the caller HOLDS.
+ */
+export async function generateChatModerationJson(opts: {
+  text: string;
+  where: string;
+  requester: string;
+}): Promise<
+  | { ok: true; verdict: import("@/lib/schoolChatModeration").ModelVerdict; engine: LlmEngine; generationId: string }
+  | { ok: false; error: string; engine: LlmEngine }
+> {
+  const m = await import("@/lib/schoolChatModeration");
+  const r = await callLlmJson(
+    {
+      system: m.buildModerationSystemPrompt(),
+      userMessage: m.buildModerationUserPrompt(opts.text, opts.where),
+      maxTokens: 200,
+      temperature: 0,
+      geminiMaxTokens: 1024,
+      geminiTemperature: 0,
+      meta: { route: "school-chat-moderation", promptVersion: m.CHAT_MODERATION_PROMPT_VERSION },
+      precheck: startLlmPrecheck({ requester: opts.requester }),
+    },
+    m.parseModerationVerdict,
+  );
+  if (r.ok) return { ok: true, verdict: r.data, engine: r.engine, generationId: r.generationId };
   return { ok: false, error: r.error || "AI is not configured", engine: r.engine };
 }

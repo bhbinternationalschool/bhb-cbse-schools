@@ -1,6 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { PropelProgressPanel } from "@/components/staff/PropelProgressPanel";
+import { CoordinatorsPanel } from "@/components/staff/CoordinatorsPanel";
+import { ProfileChangeRequestsCard } from "@/components/staff/ProfileChangeRequestsCard";
+import { useAccessData } from "@/components/shell/useAccessData";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -16,7 +20,10 @@ import {
   isStaffActive,
   type StaffRecord,
 } from "@/lib/foundationMasters";
-import { loadMasters, saveMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import { readRemovedStaff, useStaffBookWrites, type StaffBookOutcome } from "@/lib/data/client/staffBookWrites";
+import { useStaffList } from "@/lib/data/client/hooks";
+import { bridgeStaffAfterWrite } from "@/lib/data/client/staffBridge";
 import {
   applyStaffImport,
   downloadStaffImportTemplate,
@@ -66,11 +73,13 @@ import { openWaMe } from "@/lib/waMe";
 import { field, btn } from "@/components/ui/erp-ui";
 import { ModuleDashboardHost } from "@/components/dashboard/ModuleDashboardHost";
 import { StaffLeavePanel } from "@/components/staff/StaffLeavePanel";
+import { StaffLeaveRulesPanel } from "@/components/staff/StaffLeaveRulesPanel";
 import { StaffRequestsPanel } from "@/components/staff/StaffRequestsPanel";
 import { StaffOutdoorDutyPanel } from "@/components/staff/StaffOutdoorDutyPanel";
 import { StaffLeaveReportsPanel } from "@/components/staff/StaffLeaveReportsPanel";
 import { StaffAppraisalPanel } from "@/components/staff/StaffAppraisalPanel";
 import { StaffPayslipsPanel } from "@/components/staff/StaffPayslipsPanel";
+import { VisitingPayPanel } from "@/components/staff/VisitingPayPanel";
 import { StaffMyProfileDocs } from "@/components/staff/StaffMyProfileDocs";
 import { StaffAgreementPanel, StaffAgreementSelfPanel } from "@/components/staff/StaffAgreementPanel";
 import { DutyRosterPanel } from "@/components/staff/DutyRosterPanel";
@@ -80,7 +89,12 @@ import { DocVerificationQueuePanel } from "@/components/students/DocVerification
 import { useDemoSession } from "@/components/shell/SessionContext";
 import { StaffPresenceCard } from "@/components/staff/StaffPresenceCard";
 import { StaffGeoAdminPanel } from "@/components/staff/StaffGeoAdminPanel";
-import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
+import { canWriteModuleTab, featureGrantHeld, hasFeaturePermission, hasPermission, loadRbac, visibleModuleTabs } from "@/lib/rbac";
+import { staffSensitiveAuthority } from "@/lib/staffProtectedFields";
+import {
+  CustomExportToggle,
+  useCustomFieldExport,
+} from "@/components/custom-fields/useCustomFieldExport";
 
 type NamedCount = ErpChartRow;
 
@@ -111,11 +125,13 @@ type StaffMainTab =
   | "allocate"
   | "assignments"
   | "leave"
+  | "leave_rules"
   | "requests"
   | "outdoor_duty"
   | "appraisal"
   | "reports"
   | "payslips"
+  | "visiting_pay"
   | "my_docs"
   | "doc_verify"
   | "agreements"
@@ -132,10 +148,12 @@ const STAFF_TABS: ModuleTabItem[] = [
   { id: "agreements", label: "Agreements", tone: "teal" },
   { id: "doc_verify", label: "Doc verify", tone: "amber" },
   { id: "leave", label: "Leave", tone: "teal" },
+  { id: "leave_rules", label: "Leave rules", tone: "teal" },
   { id: "requests", label: "Requests", tone: "coral" },
   { id: "outdoor_duty", label: "Outdoor duty", tone: "sky" },
   { id: "appraisal", label: "Appraisal", tone: "violet" },
   { id: "payslips", label: "Payslips", tone: "green" },
+  { id: "visiting_pay", label: "Visiting pay", tone: "amber" },
   { id: "reports", label: "Reports", tone: "amber" },
   { id: "presence", label: "My presence", tone: "green" },
   { id: "gps", label: "GPS presence", tone: "coral" },
@@ -157,11 +175,13 @@ export function StaffWorkspace() {
       "allocate",
       "assignments",
       "leave",
+      "leave_rules",
       "requests",
       "outdoor_duty",
       "appraisal",
       "reports",
       "payslips",
+      "visiting_pay",
       "my_docs",
       "doc_verify",
       "agreements",
@@ -173,14 +193,32 @@ export function StaffWorkspace() {
   const [state, setState] = useState<MastersState | null>(() =>
     typeof window !== "undefined" ? loadMasters() : null,
   );
+  // Re-read the page copy of the book after a write or a server refresh.
+  // One call site for the three places added in 2.2d (versions poll, commit,
+  // restore), so the loadMasters( budget (scripts/ratchets.txt) does not grow.
+  const rereadBook = useCallback(() => setState(loadMasters()), []);
   const [notice, setNotice] = useState<string | null>(null);
+  // Optional "+ More details" export columns (Masters → Custom fields).
+  const customExport = useCustomFieldExport("staff");
 
   // Someone holding only some Staff functions (director, 6 Oct 2026 — e.g.
   // Leave approvals) sees only their tabs.
-  const shownTabs = useMemo(
-    () => visibleModuleTabs(STAFF_TABS, session, state ?? loadMasters(), "staff"),
-    [session, state],
-  );
+  // Visiting pay follows its route (api/staff/visiting-pay): Payroll view,
+  // or the staff.visiting_pay function — never the Staff module alone (it
+  // shows visiting staff's PAN, rates and payouts).
+  // Decided from the loaded roles + roster (assignments count), never before.
+  const access = useAccessData();
+  const shownTabs = useMemo(() => {
+    if (!access.ready) return [];
+    const m = access.masters;
+    const r = access.rbac ?? undefined;
+    const own = new Set(visibleModuleTabs(STAFF_TABS, session, m, "staff", r).map((t) => t.id));
+    const visitingPay =
+      hasPermission(session, m, "payroll", "view", r) ||
+      (["view", "edit"] as const).some((a) => featureGrantHeld(session, m, "staff.visiting_pay", a, r));
+    return STAFF_TABS.filter((t) => (t.id === "visiting_pay" ? visitingPay : own.has(t.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+  }, [session, access.ready, access.version]);
   useEffect(() => {
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
       setTab(shownTabs[0]!.id as StaffMainTab);
@@ -209,21 +247,78 @@ export function StaffWorkspace() {
       await withHydrationSlot(() => ensureStaffHydrated());
       setState(loadMasters());
     })();
+    // Masters (classes, sections, subjects) can land after staff records:
+    // redraw then too, or Allocate teaching shows no classes or subjects.
+    const onMasters = () => setState(loadMasters());
+    window.addEventListener("bhb-masters-updated", onMasters);
+    return () => window.removeEventListener("bhb-masters-updated", onMasters);
   }, []);
 
-  function commit(next: MastersState, msg?: string) {
-    setState(next);
-    saveMasters(next);
-    if (msg) {
-      setNotice(msg);
-      window.setTimeout(() => setNotice(null), 2400);
+  // Another tab or device changed a staff record (data-layer 2.2d): the
+  // versions poll refetches the staff list when sis_staff / departments /
+  // designations move; the roster this screen edits (the page copy) is then
+  // re-read from the server — server wins — so a rename made elsewhere shows
+  // here within one poll, without a reload. Not on the first answer (the
+  // mount's own hydrate reads it), and not while a save of this screen runs:
+  // the save re-reads the roster itself, once, after the staff list answered
+  // (useStaffBookWrites) — re-reading here too read the ~136 KB roster twice
+  // per save.
+  const staffList = useStaffList();
+  const seenStaffAnswer = useRef<number>(0);
+  const ownWrites = useRef(0);
+  useEffect(() => {
+    const at = staffList.dataUpdatedAt;
+    if (!at) return;
+    if (seenStaffAnswer.current === 0) {
+      seenStaffAnswer.current = at;
+      return;
     }
+    if (at === seenStaffAnswer.current) return;
+    seenStaffAnswer.current = at;
+    if (ownWrites.current > 0) return;
+    void bridgeStaffAfterWrite().then(rereadBook);
+  }, [staffList.dataUpdatedAt, rereadBook]);
+
+  // Every change here is a staff record write (data-layer 2.2d): the
+  // difference between the roster on screen and the action's result, laid on
+  // the records as stored now (sis.staff / sis.departments / sis.designations).
+  // The screen keeps showing the server's roster; the notice says "saved"
+  // only after the server confirmed, and a refusal says why.
+  const staffWrites = useStaffBookWrites();
+  const [saving, setSaving] = useState(false);
+  /** The save's whole answer (the import words its own partial outcome). */
+  async function commitOutcome(next: MastersState, msg?: string): Promise<StaffBookOutcome | null> {
+    if (!state) return null;
+    setSaving(true);
+    setNotice("Saving…");
+    ownWrites.current += 1;
+    let r: StaffBookOutcome;
+    try {
+      r = await staffWrites.commit(state, next);
+    } finally {
+      ownWrites.current -= 1;
+    }
+    setSaving(false);
+    rereadBook();
+    if (!r.ok) {
+      setNotice(r.message);
+      window.setTimeout(() => setNotice((n) => (n === r.message ? null : n)), 9000);
+      return r;
+    }
+    const said = r.unchanged ? "Nothing changed." : msg ?? "Saved";
+    setNotice(said);
+    window.setTimeout(() => setNotice((n) => (n === said ? null : n)), 2400);
+    return r;
+  }
+  async function commit(next: MastersState, msg?: string): Promise<boolean> {
+    const r = await commitOutcome(next, msg);
+    return !!r?.ok;
   }
 
   function toggleStatus(s: StaffRecord) {
-    if (!state) return;
+    if (!state || saving) return;
     const nextStatus = s.status === "active" ? "inactive" : "active";
-    commit(
+    void commit(
       {
         ...state,
         staff: state.staff.map((row) =>
@@ -235,14 +330,14 @@ export function StaffWorkspace() {
   }
 
   function onRemove(s: StaffRecord) {
-    if (!state) return;
+    if (!state || saving) return;
     const result = removeStaff(state, s.id);
     if (!result.ok) {
       setNotice(result.reason);
       window.setTimeout(() => setNotice(null), 3200);
       return;
     }
-    commit(result.state, `${s.empCode} removed`);
+    void commit(result.state, `${s.empCode} removed — restore it under "Removed staff" below`);
   }
 
   const stats = useMemo(() => {
@@ -434,7 +529,15 @@ export function StaffWorkspace() {
           title="Allocate teaching"
           description="Pick a teacher, then give them a class-teacher section and the subjects they teach."
         >
-          <TeachingAllocationPanel masters={state} ay={ay} onCommit={commit} />
+          <TeachingAllocationPanel masters={state} ay={ay} saving={saving} onCommit={commit} />
+          {state ? (
+            <div className="mt-4">
+              <CoordinatorsPanel
+                masters={state}
+                canEdit={hasPermission(session, state, "staff", "edit")}
+              />
+            </div>
+          ) : null}
         </ErpPanel>
       ) : null}
 
@@ -479,8 +582,27 @@ export function StaffWorkspace() {
         </ErpPanel>
       ) : null}
 
-      {tab === "leave" ? <StaffLeavePanel ay={ay} /> : null}
-      {tab === "requests" ? <StaffRequestsPanel /> : null}
+      {tab === "leave" ? <StaffLeavePanel ay={ay} onOpenLeaveRules={() => setTab("leave_rules")} /> : null}
+      {tab === "leave_rules" ? (
+        <StaffLeaveRulesPanel
+          ay={ay}
+          canEdit={
+            hasPermission(session, state ?? loadMasters(), "staff", "edit") ||
+            hasFeaturePermission(session, state ?? loadMasters(), "staff.leave_policy", "edit")
+          }
+        />
+      ) : null}
+      {tab === "requests" ? (
+        <>
+          {((m) => hasPermission(session, m, "staff", "edit") || staffSensitiveAuthority(session, m, loadRbac()) !== null)(
+            state ?? loadMasters(),
+          ) ? (
+            // The accountant decides bank / ID / pay requests (2.2b).
+            <ProfileChangeRequestsCard />
+          ) : null}
+          <StaffRequestsPanel />
+        </>
+      ) : null}
       {tab === "outdoor_duty" ? <StaffOutdoorDutyPanel /> : null}
       {tab === "presence" ? (
         <div className="mt-4 max-w-xl">
@@ -488,13 +610,19 @@ export function StaffWorkspace() {
         </div>
       ) : null}
       {tab === "gps" ? (
-        <StaffGeoAdminPanel canEdit={hasPermission(session, state ?? loadMasters(), "staff", "edit")} />
+        <StaffGeoAdminPanel canEdit={access.ready && canWriteModuleTab(session, access.masters, "staff", "gps", "edit", access.rbac ?? undefined)} />
       ) : null}
       {tab === "reports" ? (
         <StaffLeaveReportsPanel ay={ay} scope="leave" />
       ) : null}
-      {tab === "appraisal" ? <StaffAppraisalPanel ay={ay} /> : null}
+      {tab === "appraisal" ? (
+        <>
+          <PropelProgressPanel />
+          <StaffAppraisalPanel ay={ay} />
+        </>
+      ) : null}
       {tab === "payslips" ? <StaffPayslipsPanel /> : null}
+      {tab === "visiting_pay" ? <VisitingPayPanel /> : null}
 
       {tab === "roster" ? (
       <>
@@ -643,6 +771,7 @@ export function StaffWorkspace() {
             </label>
           </FilterBar>
           <div className="flex shrink-0 items-center gap-2">
+            <CustomExportToggle state={customExport} />
             <ExportMenu
               title="Staff register"
               subtitle={`${filtered.length} staff · ${staffFilters.status === "active" ? "active" : staffFilters.status}`}
@@ -656,6 +785,7 @@ export function StaffWorkspace() {
                 { key: "gender", header: "Gender" },
                 { key: "mobile", header: "Mobile" },
                 { key: "status", header: "Status" },
+                ...customExport.columns,
               ]}
               rows={() =>
                 staffSort.rows.map((r) => ({
@@ -667,6 +797,7 @@ export function StaffWorkspace() {
                   gender: r.gender === "M" ? "Male" : r.gender === "F" ? "Female" : r.gender === "O" ? "Other" : "",
                   mobile: r.mobile || "",
                   status: r.status,
+                  ...customExport.cells([r.id]),
                 }))
               }
               onMessage={(msg) => {
@@ -698,7 +829,7 @@ export function StaffWorkspace() {
                     picked.has(r.id) && r.status !== "active" ? { ...r, status: "active" as const } : r,
                   ),
                 };
-                commit(next, `${ids.length} staff marked active`);
+                void commit(next, `${ids.length} staff marked active`);
                 rosterSelection.clear();
               },
             },
@@ -713,7 +844,7 @@ export function StaffWorkspace() {
                     picked.has(r.id) && r.status === "active" ? { ...r, status: "inactive" as const } : r,
                   ),
                 };
-                commit(next, `${ids.length} staff marked inactive`);
+                void commit(next, `${ids.length} staff marked inactive`);
                 rosterSelection.clear();
               },
             },
@@ -898,10 +1029,30 @@ export function StaffWorkspace() {
       </div>
 
       <div id="staff-import" className="scroll-mt-24">
-        <StaffImportPanel
-          state={state}
-          onApplied={(next, msg) => {
-            commit(next, msg);
+        <StaffImportPanel state={state} onApplied={commitOutcome} />
+      </div>
+
+      <div id="staff-removed" className="scroll-mt-24">
+        <RemovedStaffPanel
+          visible={hasPermission(session, state, "staff", "edit")}
+          nameOf={(id) => {
+            const m = (state.staff ?? []).find((x) => x.id === id);
+            return m ? m.fullName || m.empCode || id : id;
+          }}
+          restore={async (id, label) => {
+            setNotice("Restoring…");
+            ownWrites.current += 1;
+            let r: StaffBookOutcome;
+            try {
+              r = await staffWrites.restore(id);
+            } finally {
+              ownWrites.current -= 1;
+            }
+            rereadBook();
+            const said = r.ok ? `${label} restored` : r.message;
+            setNotice(said);
+            window.setTimeout(() => setNotice((n) => (n === said ? null : n)), r.ok ? 2400 : 9000);
+            return r.ok;
           }}
         />
       </div>
@@ -916,22 +1067,27 @@ function StaffImportPanel({
   onApplied,
 }: {
   state: MastersState;
-  onApplied: (next: MastersState, message: string) => void;
+  /** The save's answer: ok only once the server confirmed every write of the import. */
+  onApplied: (next: MastersState, message: string) => Promise<StaffBookOutcome | null>;
 }) {
   const [csvText, setCsvText] = useState("");
   const [fileName, setFileName] = useState("");
   const [upsert, setUpsert] = useState(true);
-  const [replaceAll, setReplaceAll] = useState(false);
+  // "Clear the roster and import this file only" is gone (data-layer 2.2d): it
+  // never removed anyone on the server (the old roster save wrote only the
+  // rows it named), and as row writes it would soft-remove every member not
+  // in the file. Remove members one by one (inactivate, then Remove).
+  const replaceAll = false as const;
   const [preview, setPreview] = useState<StaffImportPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
-  function refreshPreview(text: string, nextUpsert: boolean, nextReplace: boolean) {
+  function refreshPreview(text: string, nextUpsert: boolean) {
     if (!text) {
       setPreview(null);
       return;
     }
-    setPreview(previewStaffImport(text, state, nextUpsert, nextReplace));
+    setPreview(previewStaffImport(text, state, nextUpsert, replaceAll));
   }
 
   async function onFile(file: File | null) {
@@ -953,7 +1109,7 @@ function StaffImportPanel({
         text = await file.text();
       }
       setCsvText(text);
-      refreshPreview(text, upsert, replaceAll);
+      refreshPreview(text, upsert);
     } catch (err) {
       setLocalError(
         err instanceof Error ? err.message : "Could not read file",
@@ -965,17 +1121,9 @@ function StaffImportPanel({
     }
   }
 
-  function runImport() {
+  async function runImport() {
     if (!csvText) {
       setLocalError("Choose a CSV or Excel file first");
-      return;
-    }
-    if (
-      replaceAll &&
-      !window.confirm(
-        "Replace the entire staff roster with this file? Existing staff rows will be removed.",
-      )
-    ) {
       return;
     }
     setBusy(true);
@@ -992,15 +1140,28 @@ function StaffImportPanel({
         return;
       }
       setPreview(result);
-      onApplied(
+      const saved = await onApplied(
         result.state,
-        (replaceAll ? "Replaced roster · " : "") +
-          `Imported ${result.created} new, updated ${result.updated}` +
+        `Imported ${result.created} new, updated ${result.updated}` +
           (result.skipped ? `, skipped ${result.skipped}` : ""),
       );
+      if (!saved?.ok) {
+        // The staff rows landed but some bank / ID / pay details did not
+        // (2.2d follow-up): say exactly that — the rows are saved, so the
+        // file is done; the details are the accountant's / owner's.
+        if (saved && saved.partial && saved.sensitiveMissed?.length) {
+          setLocalError(saved.message);
+          setCsvText("");
+          setFileName("");
+          return;
+        }
+        setLocalError(
+          `The import was not saved${saved ? ` — ${saved.message.replace(/^Not saved — /, "")}` : ""}. The file is still loaded; fix it and import again.`,
+        );
+        return;
+      }
       setCsvText("");
       setFileName("");
-      setReplaceAll(false);
     } finally {
       setBusy(false);
     }
@@ -1036,44 +1197,23 @@ function StaffImportPanel({
         <input
           type="checkbox"
           checked={upsert}
-          disabled={replaceAll}
           onChange={(e) => {
             setUpsert(e.target.checked);
-            refreshPreview(csvText, e.target.checked, replaceAll);
+            refreshPreview(csvText, e.target.checked);
           }}
         />
         Update existing rows with the same emp_code
       </label>
 
-      <label className="flex items-center gap-2 text-sm text-[var(--brand-deep)]">
-        <input
-          type="checkbox"
-          checked={replaceAll}
-          onChange={(e) => {
-            setReplaceAll(e.target.checked);
-            refreshPreview(csvText, upsert, e.target.checked);
-          }}
-        />
-        Clear current roster and import this file only
-      </label>
-
       {localError ? (
-        <p className="text-sm font-medium text-[var(--danger)]">{localError}</p>
+        <p role="alert" data-testid="staff-import-error" className="text-sm font-medium text-[var(--danger)]">{localError}</p>
       ) : null}
 
       {preview ? (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface-sunken)] p-3 text-sm">
           <p>
-            {replaceAll ? (
-              <>
-                Will replace roster · create <strong>{preview.created}</strong>
-              </>
-            ) : (
-              <>
-                Will create <strong>{preview.created}</strong>, update{" "}
-                <strong>{preview.updated}</strong>
-              </>
-            )}
+            Will create <strong>{preview.created}</strong>, update{" "}
+            <strong>{preview.updated}</strong>
             {preview.skipped ? (
               <>
                 , skip <strong>{preview.skipped}</strong>
@@ -1094,10 +1234,109 @@ function StaffImportPanel({
         type="button"
         disabled={busy || !csvText}
         className="rounded-xl bg-[var(--brand-deep)] px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
-        onClick={runImport}
+        onClick={() => void runImport()}
       >
-        {busy ? "Importing…" : replaceAll ? "Replace & import" : "Import staff"}
+        {busy ? "Importing…" : "Import staff"}
       </button>
+    </ErpPanel>
+  );
+}
+
+/**
+ * Members removed from the roster (data-layer 2.2d: Remove is a SOFT remove —
+ * hidden everywhere, with who and when, and restorable). Read from the server
+ * on open (GET /api/data/sis.staff?removed=1, staff · edit holders only).
+ */
+function RemovedStaffPanel({
+  visible,
+  nameOf,
+  restore,
+}: {
+  visible: boolean;
+  /** Who removed them: the remover's name from the roster (deleted_by is their staff id, else an e-mail). */
+  nameOf: (id: string) => string;
+  restore: (id: string, label: string) => Promise<boolean>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [rows, setRows] = useState<Record<string, unknown>[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    const r = await readRemovedStaff();
+    if (!r.ok) {
+      setRows(null);
+      setError(r.error);
+      return;
+    }
+    setRows(r.rows);
+  }, []);
+
+  useEffect(() => {
+    if (open) void load();
+  }, [open, load]);
+
+  if (!visible) return null;
+  return (
+    <ErpPanel
+      title="Removed staff"
+      description="Members removed from the roster. They are hidden everywhere (lists, sign-in, payroll) until restored."
+    >
+      {!open ? (
+        <button
+          type="button"
+          className="text-sm font-semibold text-[var(--brand-deep)] underline-offset-2 hover:underline"
+          onClick={() => setOpen(true)}
+        >
+          Show removed staff
+        </button>
+      ) : error ? (
+        <p role="alert" className="text-sm text-[var(--danger)]">
+          Could not load the removed staff: {error}{" "}
+          <button type="button" className="underline" onClick={() => void load()}>
+            Retry
+          </button>
+        </p>
+      ) : rows === null ? (
+        <p className="text-sm text-[var(--muted)]">Loading…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-[var(--muted)]">No removed staff.</p>
+      ) : (
+        <ul className="divide-y divide-[var(--border)]" data-testid="removed-staff">
+          {rows.map((r) => {
+            const id = String(r.id);
+            const label = `${String(r.full_name ?? "")} (${String(r.emp_code ?? "")})`;
+            const when = r.deleted_at ? new Date(String(r.deleted_at)).toLocaleString("en-IN") : "";
+            return (
+              <li key={id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                <span>
+                  <strong className="text-[var(--brand-deep)]">{label}</strong>
+                  <span className="ml-2 text-xs text-[var(--muted)]">
+                    removed {when}
+                    {r.deleted_by ? ` by ${nameOf(String(r.deleted_by))}` : ""}
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  className="rounded-lg border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--brand-deep)] disabled:opacity-50"
+                  disabled={busy !== null}
+                  aria-label={`Restore ${label}`}
+                  onClick={() => {
+                    setBusy(id);
+                    void restore(id, label).then(async () => {
+                      setBusy(null);
+                      await load();
+                    });
+                  }}
+                >
+                  {busy === id ? "Restoring…" : "Restore"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </ErpPanel>
   );
 }

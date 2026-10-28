@@ -128,3 +128,62 @@ export async function assertLeaveApprover(ctx: ApiAuthContext): Promise<void> {
     403,
   );
 }
+
+/**
+ * Who may use the staff app's leave approvals: leadership (and the office
+ * holders assertLeaveApprover lets through) for everyone, as before; a
+ * named leave approver (Staff → Leave rules → Approvers) for the staff whose
+ * chain lists them. Anyone else gets the same 403 as before.
+ */
+export async function leaveApproverAccess(
+  ctx: ApiAuthContext,
+): Promise<{ leadership: true } | { leadership: false; reach: Set<string> }> {
+  try {
+    await assertLeaveApprover(ctx);
+    return { leadership: true };
+  } catch (refused) {
+    const { approverReach } = await import("@/lib/staffLeaveRules.server");
+    const reach = await approverReach({ masters: ctx.masters, approverStaffId: ctx.session.staffId || "" });
+    if (!reach.ok) {
+      throw new ApiError("server_error", "Could not read the leave approvers — try again", 503);
+    }
+    if (!reach.value || reach.value.size === 0) throw refused;
+    return { leadership: false, reach: reach.value };
+  }
+}
+
+/**
+ * The year's leave-rule balances over the desk numbers, for the staff app:
+ * same fields (allotted / used / remaining), worked out by the policy —
+ * sandwich days, half days, carried-in leave — plus `opening`, `pending`
+ * and `halfDayAllowed`. A year with no policy, or a failed read, leaves the
+ * desk numbers as they were.
+ */
+export async function withPolicyBalances(
+  ctx: ApiAuthContext,
+  state: StaffHrState,
+  ay: string,
+  balances: Record<string, unknown>[],
+  staffId: string,
+): Promise<Record<string, unknown>[]> {
+  const { bookRowsFor, readLeavePolicy } = await import("@/lib/staffLeaveRules.server");
+  const rows = await bookRowsFor({ ay, masters: ctx.masters, state });
+  const mine = rows?.get(staffId);
+  if (!mine) return balances;
+  const pol = await readLeavePolicy(ay);
+  return balances.map((b) => {
+    const r = mine.get(String(b.typeCode));
+    const pt = pol.ok ? pol.value?.types.find((t) => t.typeCode === b.typeCode) : undefined;
+    if (!r || !r.governed) return { ...b, halfDayAllowed: pt?.halfDayAllowed ?? true };
+    return {
+      ...b,
+      allotted: r.allocated,
+      opening: r.opening,
+      used: r.taken,
+      pending: r.pending,
+      remaining: Math.max(0, r.balance),
+      unlimited: false,
+      halfDayAllowed: pt?.halfDayAllowed ?? true,
+    };
+  });
+}

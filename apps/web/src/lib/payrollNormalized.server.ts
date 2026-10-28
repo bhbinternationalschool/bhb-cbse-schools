@@ -144,6 +144,11 @@ function lineToRow(
     payment_date: line.paymentDate || null,
     payment_mode: line.paymentMode || "bank_transfer",
     note: line.note || "",
+    // Who was actually paid, on which day (14 Oct 2026) — the book posts
+    // the salary payments from these (payroll_ledger_post).
+    paid_on: line.paidOn || null,
+    paid_by: line.paidBy || "",
+    payment_ref: line.paymentRef || "",
     updated_at: nowIso(),
   };
 }
@@ -190,10 +195,14 @@ function rowToLine(r: Record<string, unknown>): PayrollStaffLine {
       r.payment_mode === "cash" ||
       r.payment_mode === "cheque" ||
       r.payment_mode === "upi" ||
+      r.payment_mode === "neft" ||
       r.payment_mode === "other"
         ? r.payment_mode
         : "bank_transfer",
     note: String(r.note || ""),
+    paidOn: r.paid_on ? String(r.paid_on).slice(0, 10) : "",
+    paidBy: String(r.paid_by || ""),
+    paymentRef: String(r.payment_ref || ""),
   };
 }
 

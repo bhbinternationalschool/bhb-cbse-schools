@@ -2,6 +2,7 @@
  * Attendance remote sync — jsonb blob on attendance_state + normalized attendance_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   attendanceStateIsEmpty,
@@ -17,11 +18,7 @@ import {
 import { mergeDbDeskIntoAttendanceState } from "@/lib/attendanceNormalizedMerge";
 import { attendanceReadFromDbEnabled } from "@/lib/attendanceDbConfig";
 import { deskSkipBlobHydrateClient, deskSkipBlobPushClient } from "@/lib/deskCutover";
-import {
-  isDeskHydrated,
-  markDeskHydrated,
-  resetDeskHydrated,
-} from "@/lib/deskHydrateGuard";
+import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
 import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "attendance";
@@ -42,6 +39,8 @@ export function resetAttendancePersistenceCache() {
 }
 
 export function scheduleAttendanceSync(state: AttendanceState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureAttendanceHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushAttendanceRemoteServer(state));
     return;
@@ -79,7 +78,16 @@ export async function pushAttendanceRemoteServer(
  * Pull attendance blob + normalized desk (registers + ancillary).
  * DB wins when NEXT_PUBLIC_ATTENDANCE_READ_FROM_DB=true or local is empty.
  */
-export async function ensureAttendanceHydrated(): Promise<boolean> {
+// Two screens mounting together (the module dashboard and the register)
+// both passed the hydrated check before either finished, and each pulled the
+// whole desk (11 Oct 2026). Callers that arrive mid-load share the one load;
+// resetDeskHydrated() clears it, so a re-pull after a save starts fresh.
+export function ensureAttendanceHydrated(): Promise<boolean> {
+  if (isDeskHydrated(MODULE)) return Promise.resolve(false);
+  return dedupeHydration(MODULE, hydrateAttendanceOnce);
+}
+
+async function hydrateAttendanceOnce(): Promise<boolean> {
   if (isDeskHydrated(MODULE)) return false;
 
   const readFromDb = attendanceReadFromDbEnabled();

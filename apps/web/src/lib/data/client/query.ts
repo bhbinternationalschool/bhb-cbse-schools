@@ -19,7 +19,8 @@
  *      page budget and REFUSES to silently truncate — it tells you it stopped.
  */
 
-import type { Cursor } from "../types";
+import { asRevision, type Cursor, type Revision } from "../types";
+import { erpFetch } from "../erpFetch";
 
 export type PageResult<T> =
   | {
@@ -28,6 +29,11 @@ export type PageResult<T> =
       /** Null when this is the last page. */
       nextCursor: Cursor | null;
       serverTime: string;
+      /**
+       * Slice collections based on the slice's stamp, and object slices: the
+       * base every write of this collection sends (types.ts ReadOk.revision).
+       */
+      revision?: Revision | null;
     }
   | {
       ok: false;
@@ -90,6 +96,7 @@ export async function readPage<T = Record<string, unknown>>(
     rows?: T[];
     nextCursor?: string | null;
     serverTime?: string;
+    revision?: string | null;
     code?: PageResult<T> extends { ok: false; code: infer C } ? C : never;
     error?: string;
   };
@@ -124,7 +131,53 @@ export async function readPage<T = Record<string, unknown>>(
     rows: parsed.rows,
     nextCursor: (parsed.nextCursor ?? null) as Cursor | null,
     serverTime: parsed.serverTime ?? new Date().toISOString(),
+    ...(parsed.revision !== undefined
+      ? { revision: parsed.revision ? asRevision(String(parsed.revision)) : null }
+      : {}),
   };
+}
+
+/**
+ * The current revision of named records (≤ 200), soft-deleted ones included:
+ * `GET /api/data/<collection>?ids=…`. For a client that must write a record
+ * it did not load — reviving a soft-deleted row, putting away a sheet held
+ * from another source — since a null base on an existing record is refused
+ * (data-layer 1.5). Absent ids are simply not in the answer.
+ */
+export async function readRevisions(
+  collection: string,
+  ids: readonly string[],
+): Promise<
+  | { ok: true; revisions: Map<string, { revision: Revision; deleted: boolean }> }
+  | { ok: false; error: string }
+> {
+  const out = new Map<string, { revision: Revision; deleted: boolean }>();
+  const unique = Array.from(new Set(ids.filter(Boolean)));
+  for (let i = 0; i < unique.length; i += 200) {
+    const chunk = unique.slice(i, i + 200);
+    let res: Response;
+    try {
+      res = await fetch(
+        `/api/data/${encodeURIComponent(collection)}?ids=${encodeURIComponent(chunk.join(","))}`,
+        { cache: "no-store" },
+      );
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Network request failed" };
+    }
+    const body = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      rows?: { id?: unknown; updated_at?: unknown; deleted_at?: unknown }[];
+      error?: string;
+    } | null;
+    if (!res.ok || !body?.ok || !Array.isArray(body.rows)) {
+      return { ok: false, error: body?.error ?? `Request failed (${res.status})` };
+    }
+    for (const r of body.rows) {
+      if (typeof r.id !== "string" || !r.updated_at) continue;
+      out.set(r.id, { revision: asRevision(String(r.updated_at)), deleted: r.deleted_at != null });
+    }
+  }
+  return { ok: true, revisions: out };
 }
 
 export type ReadAllResult<T> =
@@ -175,4 +228,72 @@ export async function readAll<T = Record<string, unknown>>(
 
   // Budget exhausted with more to read. Say so.
   return { ok: true, rows, complete: false, nextCursor: cursor as Cursor };
+}
+
+// ── One answer from a view (data-layer 1.4) ─────────────────────────────────
+
+export type ViewResult<T> =
+  | {
+      ok: true;
+      data: T;
+      /**
+       * The erp_versions values the answer was built from (a reference
+       * view's `versions`), or null when the server did not say — the
+       * versions poll then goes by what moved between its own answers.
+       */
+      builtFrom: Record<string, { updated_at: string | null; count: number | null } | null> | null;
+    }
+  | {
+      ok: false;
+      /** HTTP status; null when the request never got an answer. */
+      status: number | null;
+      error: string;
+    };
+
+/**
+ * GET one view or /api/v1 answer: `{ ok: true, data, versions? }`.
+ *
+ * The same discipline as readPage: a failure has no `data` (offline, a
+ * non-2xx, an unreadable body, or `ok:true` with no `data` — a malformed
+ * answer is not an empty one). Sent through erpFetch, so it carries the
+ * build header and is timed.
+ */
+export async function readView<T>(
+  path: string,
+  opts: { signal?: AbortSignal; fetchImpl?: (input: string | URL, init?: RequestInit) => Promise<Response> } = {},
+): Promise<ViewResult<T>> {
+  let res: Response;
+  try {
+    res = await erpFetch(path, { cache: "no-store", signal: opts.signal }, opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {});
+  } catch (e) {
+    return { ok: false, status: null, error: e instanceof Error ? e.message : "Network request failed" };
+  }
+
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return { ok: false, status: res.status, error: `Server returned ${res.status} with an unreadable body` };
+  }
+  const parsed = (body ?? {}) as { ok?: unknown; data?: unknown; versions?: unknown; error?: unknown };
+
+  if (!res.ok || parsed.ok !== true) {
+    const e = parsed.error;
+    const message =
+      typeof e === "string"
+        ? e
+        : e && typeof e === "object" && typeof (e as { message?: unknown }).message === "string"
+          ? (e as { message: string }).message
+          : `Request failed (${res.status})`;
+    return { ok: false, status: res.ok ? 502 : res.status, error: message };
+  }
+  if (!("data" in parsed) || parsed.data === undefined || parsed.data === null) {
+    return { ok: false, status: 502, error: "Server reported success but returned no data" };
+  }
+  const v = parsed.versions;
+  return {
+    ok: true,
+    data: parsed.data as T,
+    builtFrom: v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, { updated_at: string | null; count: number | null } | null>) : null,
+  };
 }

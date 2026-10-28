@@ -5,6 +5,7 @@
  * Policy: teacher cut-off lock, absent WhatsApp nudges, office exceptions.
  */
 
+import { hydrateOnFirstRead } from "@/lib/deskLazyHydrate";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { getSessionActor } from "@/lib/sessionActor";
@@ -278,6 +279,8 @@ export function normalizeAttendanceState(raw: unknown): AttendanceState {
 }
 
 export function loadAttendance(): AttendanceState {
+  // Not in the idle sweep any more: the first read on a page loads it.
+  hydrateOnFirstRead("attendance", () => import("@/lib/attendancePersistence").then((m) => m.ensureAttendanceHydrated()));
   if (typeof window === "undefined") {
     if (serverAttendanceCache) return serverAttendanceCache;
     return emptyAttendanceState();
@@ -803,6 +806,27 @@ function exceptionFingerprint(e: Pick<
   return `${e.kind}|${e.studentId}|${e.date}|${e.sectionId}`;
 }
 
+/**
+ * The id an automatic exception gets: the same everywhere for the same child,
+ * day and reason. Rebuilds used to mint a fresh random id each time and could
+ * only delete the copies THIS browser held — teachers mark on many phones, so
+ * the rest stayed: 1,010 open streak rows for 103 child-days, 76 "no
+ * WhatsApp" rows for 6 (12 Oct 2026). With one id per fingerprint a rebuild
+ * anywhere rewrites the same row.
+ */
+export function autoExceptionId(fingerprint: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < fingerprint.length; i++) {
+    h ^= fingerprint.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  let h2 = 0;
+  for (let i = fingerprint.length - 1; i >= 0; i--) {
+    h2 = (Math.imul(h2, 31) + fingerprint.charCodeAt(i)) >>> 0;
+  }
+  return `aex_${h.toString(36)}${h2.toString(36)}`;
+}
+
 /** Recompute auto exceptions; keep resolved + parent disputes. */
 export function rebuildExceptionsInto(state: AttendanceState): AttendanceState {
   const sis = loadSis();
@@ -844,7 +868,7 @@ export function rebuildExceptionsInto(state: AttendanceState): AttendanceState {
           seen.add(fp);
           auto.push(
             normalizeException({
-              id: id("aex"),
+              id: autoExceptionId(fp),
               kind,
               status: "open",
               studentId: mark.studentId,
@@ -880,7 +904,7 @@ export function rebuildExceptionsInto(state: AttendanceState): AttendanceState {
           seen.add(fp);
           auto.push(
             normalizeException({
-              id: id("aex"),
+              id: autoExceptionId(fp),
               kind,
               status: "open",
               studentId: mark.studentId,
@@ -921,7 +945,9 @@ export function rebuildExceptionsInto(state: AttendanceState): AttendanceState {
       if (!mark) continue;
       seenDates.add(reg.date);
       dayMarks.push({ date: reg.date, status: mark.status, reg });
-      if (dayMarks.length >= PERFECT_STREAK_DAYS + 2) break;
+      // Read back to the first non-Present day, so the streak is known by the
+      // day it STARTED — the same row all the way through it.
+      if (mark.status !== "P") break;
     }
     let streak = 0;
     for (const d of dayMarks) {
@@ -930,27 +956,30 @@ export function rebuildExceptionsInto(state: AttendanceState): AttendanceState {
     }
     if (streak < PERFECT_STREAK_DAYS) continue;
     const head = dayMarks[0]!;
+    const start = dayMarks[streak - 1]!;
     const kind: AttendanceExceptionKind = "perfect_present_streak";
+    // One exception per streak, filed under its first day. Keyed by the latest
+    // day it grew a new row every school day for every child on a streak.
     const fp = exceptionFingerprint({
       kind,
       studentId,
-      date: head.date,
+      date: start.date,
       sectionId: head.reg.sectionId,
     });
     if (seen.has(fp)) continue;
     seen.add(fp);
     auto.push(
       normalizeException({
-        id: id("aex"),
+        id: autoExceptionId(fp),
         kind,
         status: "open",
         studentId,
         academicYearCode: head.reg.academicYearCode,
         classId: head.reg.classId,
         sectionId: head.reg.sectionId,
-        date: head.date,
+        date: start.date,
         registerId: head.reg.id,
-        detail: `${streak}+ consecutive Present marks — spot-check candidate`,
+        detail: `${streak} consecutive Present marks since ${start.date} (latest ${head.date}) — spot-check candidate`,
         createdAt: new Date().toISOString(),
         resolvedAt: "",
         resolvedBy: "",

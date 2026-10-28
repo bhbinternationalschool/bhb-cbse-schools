@@ -15,6 +15,7 @@ import {
   resetDeskHydrated,
 } from "@/lib/deskHydrateGuard";
 import { deskSliceDef, deskSliceEnvReadFromDb } from "@/lib/deskSliceRegistry";
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import {
   hydrateDeskSliceFromDb,
   scheduleDeskSliceSync,
@@ -62,6 +63,13 @@ export function createDeskSlicePersistence<T extends { version: number }>(opts: 
       void trackServerWork(pushRemoteServer(state));
       return;
     }
+    // Never save a desk this page has not loaded from the server (12 Oct
+    // 2026). Until it loads, the screen shows a placeholder (staff HR: the
+    // default CL/EL/ML/LWP) that looks like the real list; an edit made on it
+    // carries no row versions and no known ids, so a removal is never sent
+    // and every change is refused as "changed elsewhere". Refuse it plainly,
+    // load the desk, and let the person make the change on the real copy.
+    if (refuseSaveBeforeLoad(opts.moduleId, () => ensureHydrated())) return;
     if (!deskSkipBlobPushClient(opts.moduleId)) blob.scheduleSync(state);
     scheduleDeskSliceSync(
       opts.moduleId,

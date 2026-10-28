@@ -1,4 +1,4 @@
-import { CRUD, type RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
+import { CRUD, type RbacFeatureDef, type RbacWholeModuleTab } from "@/lib/rbacFeatureCatalog/types";
 
 /**
  * Academics — attendance, exams, homework, timetable, student leave, PTM.
@@ -21,6 +21,11 @@ import { CRUD, type RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
  *   Exams → Seating — rooms and seating plans persist only in the exams
  *                    blob (the setup push does not carry them), which a
  *                    function grant cannot write; left with the module.
+ *
+ * Dashboards are opened by a read-only function that owns every list the
+ * dashboard counts (an office person's browser with only part of the desk
+ * would show false zeros otherwise). View-only functions never pass the
+ * desk's row check, so they cannot write.
  */
 export const ACADEMICS_FEATURES: RbacFeatureDef[] = [
   /* ── Attendance (attendance-registers, staff-attendance-registers) ── */
@@ -72,6 +77,20 @@ export const ACADEMICS_FEATURES: RbacFeatureDef[] = [
     slices: ["staff/settings", "module-state/staff_attendance_rules"],
     tabs: ["staff"],
   },
+  {
+    id: "attendance.reports",
+    module: "attendance",
+    group: "Reports",
+    label: "Attendance dashboard & reports (read only)",
+    blurb:
+      "Today's attendance dashboard and the student and staff attendance reports. Export lets you download them. Changes nothing — a teacher sees only their own classes.",
+    actions: ["view", "export"],
+    // Read-only, and no slices (a slice has one owner — the register
+    // functions). attendance-registers and staff-attendance-registers serve
+    // this function every register, after cutting a teacher's copy to
+    // their own sections.
+    tabs: ["dashboard", "student-reports", "staff-reports"],
+  },
 
   /* ── Exams (exams-desk, exams-desk/sheet, desk-slice exam_papers) ── */
   {
@@ -118,10 +137,13 @@ export const ACADEMICS_FEATURES: RbacFeatureDef[] = [
     id: "exams.results",
     module: "exams",
     label: "Report cards & promotion",
-    blurb: "Report cards, results and the promotion decision for each child.",
+    blurb:
+      "Report cards, results and the promotion decision for each child, and the exams dashboard. View alone is a read-only results and dashboard grant.",
     actions: ["view", "create", "edit"],
     slices: ["promotions"],
-    tabs: ["reports", "results", "result_reports"],
+    // The dashboard counts every mark sheet and promotion — exactly what
+    // this function is served (exams-desk serves it every sheet).
+    tabs: ["dashboard", "reports", "results", "result_reports"],
   },
   {
     id: "exams.papers",
@@ -181,6 +203,18 @@ export const ACADEMICS_FEATURES: RbacFeatureDef[] = [
     slices: ["settings"],
     tabs: ["today"],
   },
+  {
+    id: "homework.overview",
+    module: "homework",
+    group: "Reports",
+    label: "Homework dashboard (read only)",
+    blurb: "The homework dashboard: what was set, the diary and what came back, across the school. Changes nothing.",
+    actions: ["view"],
+    // No slices (each has one owner): homework-desk serves this function
+    // the posts, diary and their submissions — every class, unless the
+    // person also holds a class-limited homework function.
+    tabs: ["dashboard"],
+  },
 
   /* ── Timetable (timetable-desk) ── */
   {
@@ -229,6 +263,17 @@ export const ACADEMICS_FEATURES: RbacFeatureDef[] = [
     slices: ["substitutions"],
     tabs: ["subs"],
   },
+  {
+    id: "timetable.reports",
+    module: "timetable",
+    group: "Reports",
+    label: "Timetable dashboard & reports (read only)",
+    blurb: "The timetable dashboard and its reports (class and teacher timetables, free periods, substitutions) — see and download. Changes nothing.",
+    actions: ["view"],
+    // No slices: a timetable function holder reads the whole timetable
+    // (timetable-desk GET); what may change is decided per slice on POST.
+    tabs: ["dashboard", "reports"],
+  },
 
   /* ── Student leave (student-leave-desk; shown under Attendance) ── */
   {
@@ -240,7 +285,21 @@ export const ACADEMICS_FEATURES: RbacFeatureDef[] = [
     blurb: "Record leave requests and approve or reject them for the whole school.",
     actions: CRUD,
     slices: ["requests"],
-    tabs: ["leave"],
+    // "leave" is the Attendance screen's tab; the rest are the tabs inside it.
+    // The desk push is the office's (unrestricted scope) — a class teacher
+    // decides their own classes on the teacher view instead.
+    tabs: ["leave", "dashboard", "pending", "all", "apply"],
+  },
+  {
+    id: "student_leave.reports",
+    module: "student_leave",
+    group: "Reports",
+    label: "Student leave dashboard & reports (read only)",
+    blurb: "The leave dashboard and leave reports for the whole school — see and download. Changes nothing.",
+    actions: ["view"],
+    // No slice ("requests" is owned by Student leave requests):
+    // student-leave-desk serves this function every request, read only.
+    tabs: ["leave", "dashboard", "reports"],
   },
 
   /* ── PTM (ptm-desk) ── */
@@ -280,4 +339,24 @@ export const ACADEMICS_FEATURES: RbacFeatureDef[] = [
     slices: ["feedback"],
     tabs: ["feedback", "reports"],
   },
+];
+
+/** Tabs of these modules that only the whole-module grant opens, and why. */
+export const ACADEMICS_WHOLE_MODULE_TABS: RbacWholeModuleTab[] = [
+  {
+    module: "exams",
+    tab: "seating",
+    reason:
+      "Exam rooms and seating plans persist only in the exams blob (the exams-desk setup push does not carry them), which a function grant cannot write.",
+  },
+  // Teaching: every save is a /api/v1/teaching/* route (assertPermission),
+  // which function grants do not reach, and every teacher already holds the
+  // module (the role sets give it to all teaching staff). A function would
+  // open a tab whose saves the server refuses.
+  ...(["today", "plan", "lessons", "coverage", "outcomes", "nucleus"] as const).map((tab) => ({
+    module: "teaching" as const,
+    tab,
+    reason:
+      "Teaching saves only through /api/v1/teaching/* (assertPermission on the module), which function grants do not reach; every teacher holds the whole Teaching module.",
+  })),
 ];

@@ -21,43 +21,77 @@ class RunningStrip extends StatefulWidget {
   State<RunningStrip> createState() => _RunningStripState();
 }
 
+/// The strip's ten-minute poll runs only while its screen is the one in
+/// front and the app is in the foreground (data-layer 4.4).
+@visibleForTesting
+bool shouldPoll(ModalRoute<Object?>? route, AppLifecycleState? app) =>
+    (route == null || route.isCurrent) &&
+    (app == null || app == AppLifecycleState.resumed);
+
 class _RunningStripState extends State<RunningStrip>
     with SingleTickerProviderStateMixin {
   List<CommsItem> _items = const [];
-  late final AnimationController _anim = AnimationController(vsync: this);
+  // Made on first use; a strip that never showed anything has none to
+  // dispose (creating one in dispose() looked up a deactivated ancestor).
+  AnimationController? _animCtl;
+  AnimationController get _anim =>
+      _animCtl ??= AnimationController(vsync: this);
   final _textKey = GlobalKey();
   double _textWidth = 0;
   Timer? _refresh;
 
+  ModalRoute<Object?>? _route;
+
+  /// The server has answered; a saved copy read late never paints over it.
+  bool _fresh = false;
+
   @override
   void initState() {
     super.initState();
+    // Last session's strip at once (data-layer 4.4), then the server's.
+    widget.api.cachedCommsFeed().then((c) {
+      if (c != null && mounted && !_fresh) _show(c.value);
+    });
     _load();
-    // A notice published while the app is open appears within ten minutes.
-    _refresh = Timer.periodic(const Duration(minutes: 10), (_) => _load());
+    // A notice published while the app is open appears within ten minutes —
+    // but only while the home is the screen in front and the app is open;
+    // a strip under a pushed screen or in the background asks nothing.
+    _refresh = Timer.periodic(const Duration(minutes: 10), (_) {
+      if (shouldPoll(_route, WidgetsBinding.instance.lifecycleState)) _load();
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _route = ModalRoute.of(context);
   }
 
   @override
   void dispose() {
     _refresh?.cancel();
-    _anim.dispose();
+    _animCtl?.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
     try {
       final all = await widget.api.fetchCommsFeed();
-      final sorted = [...all]
-        ..sort((a, b) {
-          if (a.pinned != b.pinned) return a.pinned ? -1 : 1;
-          return b.publishedAt.compareTo(a.publishedAt);
-        });
+      _fresh = true;
       if (!mounted) return;
-      setState(() => _items = sorted.take(8).toList());
-      WidgetsBinding.instance.addPostFrameCallback((_) => _start());
+      _show(all);
     } catch (_) {
-      // The strip is extra; a failed load simply leaves it hidden.
+      // The strip is extra; a failed load leaves it as it was (hidden, or
+      // last session's notices).
     }
+  }
+
+  void _show(List<CommsItem> all) {
+    // The same order the notices list opens in, so a tap on the strip
+    // lands on the notice it led with, at the top, one tap from in full.
+    final sorted = [...all]..sort(CommsItem.stripOrder);
+    setState(() => _items = sorted.take(8).toList());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _start());
   }
 
   void _start() {

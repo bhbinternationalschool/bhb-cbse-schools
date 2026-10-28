@@ -2,6 +2,7 @@
  * Exams remote sync — jsonb blob on exams_state + normalized exam_desk_*.
  */
 
+import { refuseSaveBeforeLoad } from "@/lib/deskLoadGuard";
 import { createDomainBlobPersistence } from "@/lib/domainBlobPersistence";
 import {
   examsStateIsEmpty,
@@ -45,6 +46,8 @@ export function resetExamsPersistenceCache() {
 }
 
 export function scheduleExamsSync(state: ExamsState) {
+  // Not before this page has loaded the desk (lib/deskLoadGuard).
+  if (refuseSaveBeforeLoad(MODULE, () => ensureExamsHydrated())) return;
   if (typeof window === "undefined") {
     void trackServerWork(pushExamsRemoteServer(state));
     return;

@@ -1,4 +1,4 @@
-import { CRUD, type RbacFeatureDef } from "@/lib/rbacFeatureCatalog/types";
+import { CRUD, type RbacFeatureDef, type RbacWholeModuleTab } from "@/lib/rbacFeatureCatalog/types";
 
 /**
  * Communications, website, events, WhatsApp and compliance — wired 6 Oct
@@ -54,6 +54,101 @@ export const COMMS_FEATURES: RbacFeatureDef[] = [
     actions: ["view"],
     tabs: ["social"],
     routes: ["/api/integrations/social/config"],
+  },
+
+  {
+    // Director, 12 Oct 2026: the office sends the app invitation without the
+    // whole Notifications edit. "Send" is a function-only action (the
+    // module's edit implies it); the built-in Office role carries this by
+    // default (lib/rbac.ts BUILT_IN_GRANT_ADDITIONS).
+    id: "notices.parent_app_usage",
+    module: "notices",
+    group: "Parents' app",
+    label: "Parents on the app",
+    blurb: "See which families use the parents' app (with their numbers) and send the app invitation to those who don't.",
+    actions: ["view", "send"],
+    tabs: ["onapp"],
+    routes: ["/api/comms/parents-on-app"],
+  },
+
+  {
+    // Both routes ask notices · view (list) / edit (save, switch off,
+    // delete — one POST), so the function carries exactly those. Who
+    // answered (Responses) also needs Students · view, and marking an
+    // Aadhaar verified Students · edit: those show a child's record, which
+    // this function does not open.
+    id: "notices.app_popups",
+    module: "notices",
+    group: "Parents' app",
+    label: "App pop-ups",
+    blurb: "Make, schedule and switch off the pop-ups and running strip in the parents' app, and see how many answered. Seeing who answered also needs Students · view.",
+    actions: ["view", "edit"],
+    tabs: ["popups"],
+    routes: ["/api/comms/app-popups", "/api/ai/app-popup-text"],
+  },
+  {
+    // Read-only on purpose: the registers are built in the browser from the
+    // notices desk, read through this slice; news rows come from the News
+    // desk (news.stories). Holding view/export only, a save is refused.
+    id: "notices.reports",
+    module: "notices",
+    group: "Reports",
+    label: "Notices & news registers",
+    blurb: "Export the notices register (and the news register, with News access) to Excel or PDF.",
+    actions: ["view", "export"],
+    slices: ["notices"],
+    tabs: ["reports"],
+  },
+  {
+    // Status and the send log only. Setting the mailboxes and sending a
+    // test stay with Masters · edit (/api/email/settings PUT, /api/email/test
+    // check that themselves) — it is school configuration.
+    id: "notices.email",
+    module: "notices",
+    group: "Email",
+    label: "Email channel",
+    blurb: "See whether school email is switched on, which mailbox sends what, and the log of mails sent.",
+    actions: ["view"],
+    tabs: ["email"],
+  },
+
+  /* ── WhatsApp inbox (Comms → WhatsApp → Chats / Class groups / Household log) ──
+   * These routes sit behind requireWaStaffApi — school-wide staff (office,
+   * leadership) holding any communications module. Each route also accepts
+   * its function below, held as a FUNCTION grant (lib/commsFunctionGate.server):
+   * a teacher's notices · view never opens them. */
+  {
+    id: "notices.wa_chats",
+    module: "notices",
+    group: "WhatsApp inbox",
+    label: "WhatsApp chats",
+    blurb: "Read every family's and staff member's WhatsApp chat with the school and reply from the school number.",
+    actions: ["view", "send"],
+    tabs: ["whatsapp", "chats"],
+    routes: ["/api/wa/hub", "/api/wa/timeline"],
+  },
+  {
+    // The route limits a teacher to their own sections' channels (each
+    // carries every parent's mobile in that section) and keeps "rebuild"
+    // for school-wide staff, whoever holds this.
+    id: "notices.wa_class_groups",
+    module: "notices",
+    group: "WhatsApp inbox",
+    label: "Class WhatsApp groups",
+    blurb: "The class WhatsApp channels: see them and confirm or cancel the homework and notices teachers send in. A teacher reaches only their own classes.",
+    actions: ["view", "send"],
+    tabs: ["whatsapp", "classes"],
+    routes: ["/api/wa/class-channel"],
+  },
+  {
+    id: "notices.household_log",
+    module: "notices",
+    group: "WhatsApp inbox",
+    label: "Household message log",
+    blurb: "One family's whole WhatsApp and app message history, with delivery ticks.",
+    actions: ["view"],
+    tabs: ["whatsapp", "log"],
+    routes: ["/api/comms/household-log"],
   },
 
   /* ── News (Comms → News) ── */
@@ -229,6 +324,18 @@ export const COMMS_FEATURES: RbacFeatureDef[] = [
     slices: ["module-state/wa_chatbot_flows"],
     tabs: ["wa-chatbot"],
   },
+  {
+    // /api/v1/wa/answer-book: write needs edit; APPROVE is its own action —
+    // an approved answer is the school speaking to every parent who asks
+    // it next (maker-checker, as with the module grant).
+    id: "wa_chatbot.answer_book",
+    module: "wa_chatbot",
+    label: "Answer book",
+    blurb: "The bot's answer book: write and propose answers, and (with Approve) make an answer live for parents or retire it.",
+    actions: ["view", "edit", "approve"],
+    tabs: ["answers"],
+    routes: ["/api/v1/wa/answer-book"],
+  },
 
   /* ── Compliance (Students → UDISE+) ── */
   {
@@ -257,5 +364,27 @@ export const COMMS_FEATURES: RbacFeatureDef[] = [
     actions: ["view", "edit"],
     tabs: ["udise"],
     routes: ["/api/v1/udise/robot"],
+  },
+];
+
+/** Tabs of these modules that only the whole-module grant opens, and why. */
+export const COMMS_WHOLE_MODULE_TABS: RbacWholeModuleTab[] = [
+  {
+    module: "notices",
+    tab: "dashboard",
+    reason:
+      "Counts notices, news and albums across three desks (school-comms, news, gallery) of three modules — a whole-Comms summary, not one function's work.",
+  },
+  {
+    module: "notifications",
+    tab: "inbox",
+    reason:
+      "The staff notifications feed (notifications-desk) is one shared list with no owner per row, so no function can save it safely; every staff role already holds Notifications · view.",
+  },
+  {
+    module: "events",
+    tab: "dashboard",
+    reason:
+      "Summarises the whole Events module — the calendar and every event’s RSVP replies together (two functions’ data); each function opens its own tab instead.",
   },
 ];

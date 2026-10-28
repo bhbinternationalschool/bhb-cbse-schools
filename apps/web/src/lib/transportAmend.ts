@@ -34,6 +34,11 @@ export type TransportAmendCheck =
   | { ok: true; plan: TransportAmendPlan }
   | { ok: false; error: string };
 
+function monthAfter(periodKey: string): string {
+  const [y, m] = periodKey.split("-").map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
+}
+
 function lastDayBefore(periodKey: string): string {
   const [y, m] = periodKey.split("-").map(Number);
   // Day 0 of month m is the last day of month m-1.
@@ -75,8 +80,24 @@ export function firstUnpaidTransportMonth(dues: FeeDueLine[]): string | null {
  * house next month). It can never pull the change earlier than the first unpaid
  * month — that is the whole protection.
  */
+/**
+ * The refusal when the caller could not read the student's fee lines (the
+ * masters view answered the teaching subset: no Masters grant, e.g. a
+ * transport in-charge). Withheld fee lists are not "nothing is paid": a
+ * month settled with a transport concession (the TRANSPORT fee head and the
+ * concession grants are withheld too) would read unpaid, and the change
+ * would land on a month the family has already settled.
+ */
+export const PAID_MONTHS_UNKNOWN_FOR_ROLE =
+  "Paid months cannot be checked for your role — the school's fee setup is not shown to it, so this change cannot be placed without risking a month the family has already paid. Ask the office (someone with Masters access) to make it.";
+
 export function planTransportAmendment(input: {
-  dues: FeeDueLine[];
+  /**
+   * The student's fee lines, or null when they could not be read for this
+   * role (teaching-scope Masters). null always refuses — see
+   * PAID_MONTHS_UNKNOWN_FOR_ROLE.
+   */
+  dues: FeeDueLine[] | null;
   /** Month the clerk asked for, e.g. "2026-10". Optional. */
   requestedMonth?: string;
   /** The assignment being amended — the change cannot predate its own start. */
@@ -84,11 +105,22 @@ export function planTransportAmendment(input: {
   /** Fallback when nothing is billed yet: the current month. */
   currentMonth: string;
 }): TransportAmendCheck {
+  if (input.dues === null) return { ok: false, error: PAID_MONTHS_UNKNOWN_FOR_ROLE };
   const paid = paidTransportMonths(input.dues);
   const firstUnpaid = firstUnpaidTransportMonth(input.dues);
 
-  // Nothing billed yet → the change is free to start now; nothing to protect.
-  const floor = firstUnpaid ?? input.currentMonth;
+  // Nothing owing → the change starts now — but never on or before a month
+  // already paid. "Nothing owing" used to be read as "nothing to protect":
+  // when a rider's assignment billed ₹0 (its stop id had been orphaned), no
+  // transport due existed at all, the floor fell to the current month, and a
+  // stop change on 14 Sep 2026 split Anvi Yadav's assignment from 1 Sep —
+  // over a September paid four days earlier. Paid months are now listed even
+  // when their assignment bills nothing (computeStudentDues), and the floor
+  // is the month after the last of them.
+  const afterPaid = paid.length ? monthAfter(paid[paid.length - 1]!) : "";
+  const floor =
+    firstUnpaid ??
+    (afterPaid > input.currentMonth ? afterPaid : input.currentMonth);
   const requested = (input.requestedMonth || "").slice(0, 7);
 
   if (requested && requested < floor) {

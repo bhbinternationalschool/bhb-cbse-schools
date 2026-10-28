@@ -10,6 +10,7 @@ import {
   SpendTagsPanel,
 } from "@/components/accounts/LedgerEntryPanels";
 import { UnpostedEntriesBanner } from "@/components/accounts/UnpostedEntriesBanner";
+import { VoucherBrowserPanel } from "@/components/accounts/VoucherBrowserPanel";
 import { DeskSyncBanner } from "@/components/accounts/DeskSyncBanner";
 import {
   BankReconPanel,
@@ -34,9 +35,11 @@ import {
   OwnerLoansPanel,
 } from "@/components/accounts/AccountsPanels";
 import { useDemoSession } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { hasPermission, visibleModuleTabs } from "@/lib/rbac";
 import { ClosingBalancePanel } from "@/components/accounts/ClosingBalancePanel";
 import { DaySheetPanel } from "@/components/accounts/DaySheetPanel";
+import { LoansPanel } from "@/components/accounts/LoansPanel";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { ErpWorkspaceShell } from "@/components/ui/erp-workspace-shell";
@@ -58,6 +61,7 @@ type AccountsTab =
   | "masters"
   | "bills"
   | "owner"
+  | "loans"
   | "dayclose"
   | "daysheet"
   | "closing";
@@ -85,6 +89,7 @@ const TABS: ModuleTabItem[] = [
   { id: "masters", label: "Masters", tone: "violet" },
   { id: "bills", label: "Bills & AP", tone: "violet" },
   { id: "owner", label: "Owner loans", tone: "coral" },
+  { id: "loans", label: "Loans & EMIs", tone: "coral" },
   { id: "daysheet", label: "Day sheet", tone: "green" },
   { id: "dayclose", label: "Day close", tone: "rose" },
   { id: "closing", label: "Closing balances", tone: "rose" },
@@ -122,9 +127,13 @@ const ACCOUNTS_MASTERS_STEPS: StepDef<AccountsMastersStep>[] = [
 
 export function AccountsWorkspace() {
   const session = useDemoSession();
+  // Roles + roster as loaded (assignments count); nothing decided before.
+  const access = useAccessData();
+  const am = access.masters;
+  const ar = access.rbac ?? undefined;
   // Running the projection is a bulk write to the book; the button only
   // renders for someone the API would let through anyway.
-  const canApprove = hasPermission(session, null, "accounts", "approve");
+  const canApprove = access.ready && hasPermission(session, am, "accounts", "approve", ar);
   /**
    * What the school is worth, as against what the counter did today. Cash and
    * bank balances, and income and expenditure for the session, are management
@@ -132,22 +141,28 @@ export function AccountsWorkspace() {
    * The API enforces the same split, so hiding a tab is a courtesy, not the
    * control.
    */
-  const canSeePosition = hasPermission(session, null, "accounts_position", "view");
+  const canSeePosition = access.ready && hasPermission(session, am, "accounts_position", "view", ar);
   const [tab, setTab] = useState<AccountsTab>("dashboard");
   // Someone holding only some Accounts functions (voucher entry, bank recon,
   // …) sees only their tabs; the ledger route enforces the same split.
-  const shownTabs = useMemo(() => visibleModuleTabs(TABS, session, null, "accounts"), [session]);
+  const shownTabs = useMemo(
+    () => (access.ready ? visibleModuleTabs(TABS, session, am, "accounts", ar) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+    [session, access.ready, access.version],
+  );
   useEffect(() => {
+    if (!access.ready) return;
     // The module holder's landing tab is unchanged; only a function holder,
     // whose tab bar may not include the dashboard, is moved to one they hold.
-    if (hasPermission(session, null, "accounts", "view")) return;
+    if (hasPermission(session, am, "accounts", "view", ar)) return;
     const open = shownTabs.filter(
-      (t) => canSeePosition || !["dashboard", "book", "bookreports", "recon", "closing"].includes(t.id),
+      (t) => canSeePosition || !["dashboard", "book", "bookreports", "recon", "closing", "loans"].includes(t.id),
     );
     if (open.length > 0 && !open.some((t) => t.id === tab)) {
       setTab(open[0]!.id as AccountsTab);
     }
-  }, [session, shownTabs, tab, canSeePosition]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- am/ar follow access.version via shownTabs
+  }, [session, access.ready, shownTabs, tab, canSeePosition]);
   const [mastersStep, setMastersStep] = useState<AccountsMastersStep>("banks");
 
   useEffect(() => {
@@ -162,6 +177,7 @@ export function AccountsWorkspace() {
       "masters",
       "bills",
       "owner",
+      "loans",
       "dayclose",
       "daysheet",
       "closing",
@@ -236,7 +252,7 @@ export function AccountsWorkspace() {
   const dayCloseBadge = dayCloseNeedsAttention() ? "!" : undefined;
 
   // Tabs that show a balance or a session total at all.
-  const POSITION_TABS = new Set(["dashboard", "book", "bookreports", "recon", "closing"]);
+  const POSITION_TABS = new Set(["dashboard", "book", "bookreports", "recon", "closing", "loans"]);
   const tabsWithBadge = shownTabs.filter((t) => canSeePosition || !POSITION_TABS.has(t.id)).map((t) =>
     t.id === "dayclose" ? { ...t, badge: dayCloseBadge } : t,
   );
@@ -315,6 +331,7 @@ export function AccountsWorkspace() {
               .map((b) => ({ id: b.id, name: b.name }))}
             actor={actorName}
             onPosted={() => setEntryTick((n) => n + 1)}
+            refreshKey={entryTick}
           />
           </div>
           {/* Between the one-head quick form and the raw double-entry
@@ -326,6 +343,7 @@ export function AccountsWorkspace() {
               .map((b) => ({ id: b.id, name: b.name }))}
             actor={actorName}
             onPosted={() => setEntryTick((n) => n + 1)}
+            refreshKey={entryTick}
           />
           </div>
           <div className={voucherForm === "voucher" ? "" : "hidden"}>
@@ -335,6 +353,7 @@ export function AccountsWorkspace() {
               .map((b) => ({ id: b.id, name: b.name }))}
             actor={actorName}
             onPosted={() => setEntryTick((n) => n + 1)}
+            refreshKey={entryTick}
           />
           </div>
           <div className={voucherForm === "cheques" ? "" : "hidden"}>
@@ -390,9 +409,16 @@ export function AccountsWorkspace() {
         </>
       ) : tab === "owner" ? (
         <>
+          {/* What the book holds for trustee money — in and repaid. The panel
+              below reads the old browser book, which never had these. */}
+          <VoucherBrowserPanel canEdit={canApprove} initialView="trustee" title="Trustee loans in the book" />
           <LegacyBookNotice tab="Owner loans — use the owner-loan presets in Vouchers" />
           <OwnerLoansPanel {...panelProps} />
         </>
+      ) : tab === "loans" ? (
+        <div className="mt-4">
+          <LoansPanel />
+        </div>
       ) : tab === "daysheet" ? (
         <DaySheetPanel {...panelProps} />
       ) : tab === "dayclose" ? (

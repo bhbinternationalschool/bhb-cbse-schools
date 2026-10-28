@@ -2,13 +2,14 @@
 
 import { AppPopupsPanel } from "@/components/comms/AppPopupsPanel";
 import { ParentsOnAppPanel } from "@/components/comms/ParentsOnAppPanel";
-import { commsTabIsOfficeOnly } from "@/lib/commsTabAccess";
+import { commsTabIsOfficeOnly, commsTabOpenedByFunction } from "@/lib/commsTabAccess";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Images, Megaphone } from "lucide-react";
-import { canAccessHref, hasPermission, loadRbac } from "@/lib/rbac";
-import { loadMasters } from "@/lib/masters";
+import { Images, Megaphone, X } from "lucide-react";
+import { Dialog, DialogPopup } from "@/components/ui/dialog";
+import { canAccessHref, canWriteModuleTab, hasPermission } from "@/lib/rbac";
 import { useDemoSession, useSessionReadOnly } from "@/components/shell/SessionContext";
+import { useAccessData } from "@/components/shell/useAccessData";
 import { ModuleTabs, type ModuleTabItem } from "@/components/ui/ModuleTabs";
 import { StepTabs, type StepDef } from "@/components/ui/StepTabs";
 import { CommsReportsRunner } from "@/components/reports/ModuleReportRunners";
@@ -173,7 +174,10 @@ export function CommsWorkspace() {
   const readOnly = useSessionReadOnly();
   // Writing an answer and approving one are different acts: an approved
   // answer is the school speaking to every parent who asks it next.
-  const canApproveAnswers = hasPermission(session, null, "wa_chatbot", "approve");
+  const access = useAccessData();
+  const canApproveAnswers =
+    access.ready &&
+    hasPermission(session, access.masters, "wa_chatbot", "approve", access.rbac ?? undefined);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -405,26 +409,49 @@ export function CommsWorkspace() {
     Notifications, and WA chatbot answers). Someone who holds only some of
     them, or only some of their functions (Masters → Roles), sees the tabs
     they may open — exactly the ones the page gate (ErpModuleGate) lets
-    through, so a tab never leads to "Access restricted". Read in an effect:
-    roles and masters live in this browser's storage, not on the server.
+    through, so a tab never leads to "Access restricted". Worked out again
+    whenever the roles or the roster land or change; until both are known
+    there is no list and no redirect (12 Oct 2026: computed once on mount,
+    it cut the office's App pop-ups / Parents on app for good).
   */
-  const [shownTabs, setShownTabs] = useState<ModuleTabItem[]>(TABS);
-  useEffect(() => {
-    const masters = loadMasters();
-    const rbac = loadRbac();
+  const shownTabs = useMemo<ModuleTabItem[]>(() => {
+    if (!access.ready) return [];
+    const masters = access.masters;
+    const rbac = access.rbac ?? undefined;
     const office = hasPermission(session, masters, "notices", "edit", rbac);
     const base = hasPermission(session, masters, "notices", "view", rbac)
       ? TABS
       : TABS.filter((t) => canAccessHref(session, masters, `/comms?tab=${t.id}`, rbac));
     // Office tabs (WhatsApp chats, pop-ups, Parents on app…) need notices ·
-    // edit; a teacher's view grant reads notices, news and the gallery.
-    setShownTabs(office ? base : base.filter((t) => !commsTabIsOfficeOnly(t.id)));
-  }, [session]);
+    // edit; a teacher's view grant reads notices, news and the gallery. A
+    // function naming the tab (Masters → Roles) opens that tab alone — held
+    // as a function grant, so notices · view never counts.
+    return office
+      ? base
+      : base.filter(
+          (t) => !commsTabIsOfficeOnly(t.id) || commsTabOpenedByFunction(session, masters, t.id, rbac),
+        );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+  }, [session, access.ready, access.version]);
+  // Write buttons on the function-capable office tabs: the module grant or
+  // the tab's function holding the action — the server refuses anyone else.
+  const tabWrite = useMemo(() => {
+    if (!access.ready) return { popups: false, answers: false, approveAnswers: false };
+    const masters = access.masters;
+    const rbac = access.rbac ?? undefined;
+    return {
+      popups: canWriteModuleTab(session, masters, "notices", "popups", "edit", rbac),
+      answers: canWriteModuleTab(session, masters, "wa_chatbot", "answers", "edit", rbac),
+      approveAnswers: canWriteModuleTab(session, masters, "wa_chatbot", "answers", "approve", rbac),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- access.version tracks the copies
+  }, [session, access.ready, access.version]);
   useEffect(() => {
+    if (!access.ready) return;
     if (shownTabs.length > 0 && !shownTabs.some((t) => t.id === tab)) {
       setTab(shownTabs[0]!.id as CommsTab);
     }
-  }, [shownTabs, tab]);
+  }, [access.ready, shownTabs, tab]);
 
   function setTab(next: CommsTab) {
     const url = new URL(window.location.href);
@@ -449,6 +476,17 @@ export function CommsWorkspace() {
     () => (comms ? listNotices(comms) : []),
     [comms],
   );
+
+  // The whole notice, for everyone who can see the list (13 Oct 2026: the
+  // table shows two lines and only "Edit" showed the rest, which read-only
+  // staff do not have). Opened from the row, its menu, or a link
+  // (?notice=<id>) from the running strip and the bell.
+  const [viewNoticeId, setViewNoticeId] = useState<string | null>(null);
+  useEffect(() => {
+    const id = searchParams.get("notice");
+    if (id) setViewNoticeId(id);
+  }, [searchParams]);
+  const viewNotice = viewNoticeId ? notices.find((n) => n.id === viewNoticeId) ?? null : null;
   const noticesFiltered = useMemo(
     () =>
       notices.filter((n) =>
@@ -603,6 +641,7 @@ export function CommsWorkspace() {
   ];
 
   const noticeActions: RowAction<(typeof noticesFiltered)[number]>[] = [
+    { id: "view", label: "Read full notice", onSelect: (n) => setViewNoticeId(n.id) },
     { id: "edit", label: "Edit", hidden: () => readOnly, onSelect: (n) => beginEditNotice(n) },
     {
       id: "publish",
@@ -913,6 +952,34 @@ export function CommsWorkspace() {
     }
   }
 
+  const closeNotice = () => {
+    setViewNoticeId(null);
+    if (searchParams.get("notice")) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("notice");
+      window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}`);
+    }
+  };
+  const noticeDialog = viewNotice ? (
+    <Dialog open onOpenChange={(o) => !o && closeNotice()}>
+      <DialogPopup className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] p-4">
+          <div>
+            <h3 className="text-base font-bold text-[var(--brand-deep)]">{viewNotice.title}</h3>
+            <p className="mt-0.5 text-[11px] text-[var(--muted)]">
+              {viewNotice.pinned ? "📌 Pinned · " : ""}For {viewNotice.audience}
+              {viewNotice.publishedAt ? ` · ${new Date(viewNotice.publishedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}` : ` · ${viewNotice.status}`}
+            </p>
+          </div>
+          <button type="button" onClick={closeNotice} className="text-[var(--muted)]" aria-label="Close">
+            <X className="size-4" aria-hidden />
+          </button>
+        </div>
+        <div className="whitespace-pre-wrap break-words p-4 text-sm leading-relaxed text-[var(--ink)]">{viewNotice.body}</div>
+      </DialogPopup>
+    </Dialog>
+  ) : null;
+
   return (
     <ErpWorkspaceShell
       title="Notices · News · Gallery"
@@ -1054,6 +1121,7 @@ export function CommsWorkspace() {
                   rows={noticesFiltered}
                   rowKey={(n) => n.id}
                   rowActions={noticeActions}
+                  onRowClick={(n) => setViewNoticeId(n.id)}
                   rowActionsLabel="Notice actions"
                   minWidth="min-w-[860px]"
                   exportFileBaseName="notices"
@@ -1397,7 +1465,7 @@ export function CommsWorkspace() {
         <EmailIntegrationPanel canEdit={!readOnly} />
       ) : null}
 
-      {tab === "popups" ? <AppPopupsPanel canEdit={!readOnly} /> : null}
+      {tab === "popups" ? <AppPopupsPanel canEdit={!readOnly && tabWrite.popups} /> : null}
       {tab === "onapp" ? <ParentsOnAppPanel /> : null}
 
       {tab === "social" ? (
@@ -1476,7 +1544,7 @@ export function CommsWorkspace() {
       ) : null}
 
       {tab === "answers" ? (
-        <AnswerBookPanel canEdit={!readOnly} canApprove={!readOnly && canApproveAnswers} />
+        <AnswerBookPanel canEdit={!readOnly && tabWrite.answers} canApprove={!readOnly && (canApproveAnswers || tabWrite.approveAnswers)} />
       ) : null}
 
       {tab === "inbox" ? (
@@ -1519,7 +1587,8 @@ export function CommsWorkspace() {
                   onClick={() => {
                     markNotificationRead(n.id, recipientKey);
                     setInbox(loadNotifications());
-                    if (n.href) router.push(n.href);
+                    if (n.kind === "notice" && n.sourceId) setViewNoticeId(n.sourceId);
+                    else if (n.href) router.push(n.href);
                   }}
                   className={`block w-full rounded-xl border px-3 py-2.5 text-left ${
                     unread
@@ -1551,6 +1620,7 @@ export function CommsWorkspace() {
           <CommsReportsRunner />
         </div>
       ) : null}
+      {noticeDialog}
     </ErpWorkspaceShell>
   );
 }

@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
 import { cachedDeskJson, deskJsonResponse } from "@/lib/deskProbeCache.server";
 import { requireStaffApi, requireStaffPermission } from "@/lib/apiRouteAuth.server";
-import {
-  fetchStaffRemoteServer,
-  pushStaffRemoteServer,
-  wipeRemoteStaffRosterServer,
-} from "@/lib/staffPersistence";
-import type { MastersState } from "@/lib/masters";
+import { fetchStaffRemoteServer, softRemoveStaffRosterServer } from "@/lib/staffPersistence";
+import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
+import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
+import { staffActorOf, staffSensitiveAuthority } from "@/lib/staffProtectedFields";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { hasPermission } from "@/lib/rbac";
 import { redactStaffRoster } from "@/lib/staffRosterRedact";
@@ -26,7 +24,9 @@ export async function GET(req: Request) {
   // PAN, bank, salary or anyone's password (lib/staffRosterRedact.ts).
   const canEditStaff =
     auth.viaMirrorSecret ||
-    hasPermission(auth.ctx.session, auth.ctx.masters, "staff", "edit", auth.ctx.rbac);
+    hasPermission(auth.ctx.session, auth.ctx.masters, "staff", "edit", auth.ctx.rbac) ||
+    // The owner and the bank & pay details function read whole records (2.2b).
+    staffSensitiveAuthority(auth.ctx.session, auth.ctx.masters, auth.ctx.rbac, { rbacKnown: auth.ctx.rbacKnown !== false }) !== null;
   const selfStaffId = auth.viaMirrorSecret ? "" : auth.ctx.session.staffId || "";
   if (!auth.viaMirrorSecret) {
     try {
@@ -69,60 +69,49 @@ export async function GET(req: Request) {
   }
 }
 
-/** POST — push a Masters state's staff/department/designation slices */
+/**
+ * POST — gone (data-layer 2.2d). The staff screens write rows through the
+ * kernel: POST /api/data/sis.staff, sis.departments, sis.designations (and
+ * /api/data/sis.staff/sensitive for bank, ID, pay and login details). This
+ * whole-roster save is refused for every body, nothing written; an old tab
+ * that still sends it is told to reload.
+ */
 export async function POST(req: Request) {
-  const auth = await requireStaffPermission(req, "staff", "edit");
+  const auth = await requireStaffApi(req);
   if (!auth.ok) return auth.response;
-
-  let body: { state?: Partial<MastersState> };
-  try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-  if (!body.state) {
-    return NextResponse.json({ error: "Missing state" }, { status: 400 });
-  }
-
-  // Browsers never receive loginPassword any more (staffRosterRedact), so a
-  // blank one in a save means "not sent", not "clear it": keep the stored.
-  const incoming = (body.state.staff ?? []) as StaffRecord[];
-  if (incoming.some((s) => !s.loginPassword)) {
-    const stored = await fetchStaffRemoteServer();
-    if (!stored) {
-      return NextResponse.json(
-        { ok: false, error: "Could not read the saved roster to check this change — nothing was written, try again" },
-        { status: 503 },
-      );
-    }
-    const pw = new Map((stored.staff as StaffRecord[]).map((s) => [s.id, s.loginPassword || ""]));
-    body.state = {
-      ...body.state,
-      staff: incoming.map((s) => (s.loginPassword ? s : { ...s, loginPassword: pw.get(s.id) || "" })),
-    };
-  }
-
-  const result = await pushStaffRemoteServer(body.state as MastersState);
-  if (!result.ok) {
-    return NextResponse.json(
-      { ok: false, error: result.error || "Push failed" },
-      { status: 502 },
-    );
-  }
-  return NextResponse.json({ ok: true });
+  console.warn(
+    `[staff-roster] refused a whole-roster POST (410) from ${auth.viaMirrorSecret ? "mirror" : auth.ctx.session.staffId || auth.ctx.session.email || "?"}`,
+  );
+  return NextResponse.json(
+    {
+      ok: false,
+      code: "gone",
+      error:
+        "This page is out of date: staff records are now saved one by one. Reload the page and make the change again — nothing was saved.",
+    },
+    { status: 410 },
+  );
 }
 
-/** DELETE — wipe staff roster (used by tenant reset flows) */
+/**
+ * DELETE — remove the whole staff roster. Since data-layer 2.2b a SOFT
+ * remove (deleted_at + deleted_by = this session): hidden everywhere,
+ * restorable; departments and designations stay. It hard-deleted every
+ * sis_staff, sis_designations and sis_departments row before.
+ */
 export async function DELETE(req: Request) {
   const auth = await requireStaffPermission(req, "staff", "delete");
   if (!auth.ok) return auth.response;
 
-  const result = await wipeRemoteStaffRosterServer();
+  const by = auth.viaMirrorSecret ? "mirror-sync" : staffActorOf(auth.ctx.session) || auth.ctx.session.fullName;
+  const result = await softRemoveStaffRosterServer(by);
   if (!result.ok) {
     return NextResponse.json(
-      { ok: false, error: result.error || "Wipe failed" },
+      { ok: false, error: result.error || "Remove failed" },
       { status: 502 },
     );
   }
-  return NextResponse.json({ ok: true });
+  clearDeskProbeCache("staff-roster");
+  invalidateServerMastersCache();
+  return NextResponse.json({ ok: true, removed: result.removed ?? 0, soft: true });
 }

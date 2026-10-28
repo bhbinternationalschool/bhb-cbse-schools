@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { normalizeVehicleKey } from "@/lib/fleetEdgeLink";
+import { normalizeVehicleKey, vehicleFleetKeys } from "@/lib/fleetEdgeLink";
 import type { TransportState } from "@/lib/transport";
 import { ErpSortTh, useTableSort } from "@/components/ui/erp-table-sort";
 
@@ -98,9 +98,9 @@ export function LivePositionsPanel({ state }: { state: TransportState }) {
     };
   }, [load]);
 
-  // Match a ping to a desk vehicle on either key: two of the six desk rows
-  // hold a chassis number where a registration belongs, so matching on the
-  // plate alone silently drops MAGIC-2 and MAGIC-3.
+  // Match a ping to a desk vehicle on its plate or VIN against any of the
+  // vehicle's keys (registration, chassis no.): Fleet Edge sends "NA" as the
+  // plate of an unregistered bus, so the plate alone silently drops it.
   const byVehicle = new Map<string, ApiPosition>();
   for (const p of positions || []) {
     for (const key of [normalizeVehicleKey(p.vehicleRef), normalizeVehicleKey(p.registrationNumber)]) {
@@ -120,7 +120,10 @@ export function LivePositionsPanel({ state }: { state: TransportState }) {
         label: route?.busNo || route?.code || v.registrationNo,
         registrationNo: v.registrationNo,
         students,
-        position: byVehicle.get(normalizeVehicleKey(v.registrationNo)) ?? null,
+        position:
+          vehicleFleetKeys(v)
+            .map((k) => byVehicle.get(k))
+            .find((p) => p != null) ?? null,
       };
     })
     .sort((a, b) => Number(!!b.position) - Number(!!a.position) || b.students - a.students);

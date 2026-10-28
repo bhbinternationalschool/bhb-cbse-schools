@@ -1,0 +1,85 @@
+# BHB International School — virtual staff room (n8n, single container).
+#
+# Runs on GCP's Always Free e2-micro (1 GB RAM) in project
+# school-erp-prod-493619, so n8n keeps its own state (workflows,
+# credentials, executions) in its built-in SQLite file on the n8n_storage
+# volume — no Postgres container, which would not fit in 1 GB anyway. The
+# school's data stays in Supabase and the ERP. Copy .env.example to .env,
+# fill it in, then `docker compose up -d`.
+#
+# Validate with `docker compose config` before the first start.
+
+name: bhb-office
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:-2.44.5}
+    restart: unless-stopped
+    ports:
+      # Loopback only; the director reaches it over an SSH tunnel or
+      # Cloudflare Tunnel / IAP, never a public port (see README).
+      - "127.0.0.1:5678:5678"
+    environment:
+      # --- n8n itself ---
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      N8N_EDITOR_BASE_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      GENERIC_TIMEZONE: Asia/Kolkata
+      TZ: Asia/Kolkata
+      NODE_ENV: production
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
+      N8N_TEMPLATES_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_COMMUNITY_PACKAGES_ENABLED: "false"
+      # The workflows read their secrets with {{ $env.NAME }} in HTTP nodes
+      # and Code nodes. n8n 2.x blocks that by default; this opens it for
+      # this one instance, whose only users are the school's own workflows.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      # Executions: keep two weeks, prune nightly, save data on error only.
+      EXECUTIONS_DATA_SAVE_ON_SUCCESS: all
+      EXECUTIONS_DATA_SAVE_ON_ERROR: all
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 336
+      # Code nodes run on the built-in task runner (n8n 2.x default).
+      # Task runners spawn a second Node process (~150 MB); the VM has 1 GB, so
+      # Code nodes run in the main process. Flip to "true" on an e2-small or bigger.
+      N8N_RUNNERS_ENABLED: "false"
+      # --- n8n's own database: SQLite on the volume (default DB_TYPE) ---
+      DB_SQLITE_POOL_SIZE: 2
+      DB_SQLITE_VACUUM_ON_STARTUP: "true"
+      # 1 GB VM: cap the Node heap so the kernel never OOM-kills n8n mid-huddle
+      # (the README also adds a 2 GB swap file).
+      NODE_OPTIONS: --max-old-space-size=512
+      # --- what the workflows need ($env.*) ---
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
+      SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL in .env}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?set SUPABASE_SERVICE_ROLE_KEY in .env}
+      OFFICE_TENANT_ID: ${OFFICE_TENANT_ID:?set OFFICE_TENANT_ID in .env}
+      ERP_BASE_URL: ${ERP_BASE_URL:-https://bhbinternational.school}
+      WA_DISPATCH_SECRET: ${WA_DISPATCH_SECRET:?set WA_DISPATCH_SECRET in .env}
+      DIRECTOR_WA_MOBILE: ${DIRECTOR_WA_MOBILE:?set DIRECTOR_WA_MOBILE in .env}
+      PRINCIPAL_WA_MOBILE: ${PRINCIPAL_WA_MOBILE:-}
+      OFFICE_WA_TEMPLATE: ${OFFICE_WA_TEMPLATE:-}
+      OFFICE_WA_TEMPLATE_LANG: ${OFFICE_WA_TEMPLATE_LANG:-en}
+      OFFICE_WA_TEMPLATE_KEYS: ${OFFICE_WA_TEMPLATE_KEYS:-1}
+      OFFICE_SCHOOL_NAME: ${OFFICE_SCHOOL_NAME:-BHB International School}
+      OFFICE_WA_APPROVAL_TEMPLATE: ${OFFICE_WA_APPROVAL_TEMPLATE:-}
+      OFFICE_WA_APPROVAL_TEMPLATE_LANG: ${OFFICE_WA_APPROVAL_TEMPLATE_LANG:-en}
+      SCHOOL_INBOX: ${SCHOOL_INBOX:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_DIRECTOR_CHAT_ID: ${TELEGRAM_DIRECTOR_CHAT_ID:-}
+      TELEGRAM_PRINCIPAL_CHAT_ID: ${TELEGRAM_PRINCIPAL_CHAT_ID:-}
+      OFFICE_ROSTER: ${OFFICE_ROSTER:-receptionist,academic_incharge}
+    volumes:
+      - n8n_storage:/home/node/.n8n
+      # Read-only copy of this folder so `n8n import:workflow` can run
+      # inside the container (README → Import the workflows).
+      - ./workflows:/office/workflows:ro
+
+volumes:
+  n8n_storage:

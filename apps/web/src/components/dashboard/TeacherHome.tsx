@@ -22,7 +22,9 @@ import { findRegister, todayIso } from "@/lib/attendance";
 import { isTeacherOnly } from "@/lib/erpChatAccess";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
 import { TONE } from "@/lib/erpNav";
-import { loadMasters } from "@/lib/masters";
+import type { MastersState } from "@/lib/masters";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { QueryError } from "@/components/data/QueryError";
 import { inferRoleCodes } from "@/lib/rbac";
 import { listSessionClassTeacherSections, resolveSessionStaff } from "@/lib/staffResolve";
 import {
@@ -138,6 +140,11 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
   // did — so it was always empty.
   const { my } = useMyTeaching();
 
+  // The school's classes, holidays and bell from the server's Masters (with
+  // the roster from the access copy), kept fresh by the versions poll — no
+  // mount-time read of the page copy (data-layer 2.1f). Null while loading.
+  const { masters, error: mastersError, retry: retryMasters } = useScreenMasters();
+
   const mySections = useMemo(() => {
     if (!ready) return [];
     if (my && !my.unrestricted) {
@@ -149,9 +156,9 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
           label: `${t.className} · ${t.sectionName}`,
         }));
     }
-    const masters = loadMasters();
+    if (!masters) return [];
     return listSessionClassTeacherSections(session, masters, ay);
-  }, [ready, session, ay, tick, my]);
+  }, [ready, session, ay, tick, my, masters]);
 
   const teachingChips = useMemo(() => {
     if (my && !my.unrestricted) {
@@ -168,17 +175,16 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
   }, [my, mySections]);
 
   const pendingAttendance = useMemo(() => {
-    if (!ready) return [];
+    if (!ready || !masters) return [];
     // Per section, not one blanket check — holidays can be scoped to a
     // single class group, so a section on its own day off must not read
     // as an unmarked register, while the teacher's other sections still do.
-    const masters = loadMasters();
     return mySections.filter((s) => {
       if (findRegister(ay, s.sectionId, today)) return false;
       const classification = classifyClassHolidayDay(masters, today, ay, s.classId);
       return classification.status !== "holiday";
     });
-  }, [ready, mySections, ay, today, tick]);
+  }, [ready, masters, mySections, ay, today, tick]);
 
   /**
    * Periods that are past their grace window with no log yet. This is a
@@ -186,8 +192,7 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
    * class was missed, which only the teacher can say.
    */
   const unloggedPeriods = useMemo(() => {
-    if (!ready) return [];
-    const masters = loadMasters();
+    if (!ready || !masters) return [];
     const me = resolveSessionStaff(session, masters);
     if (!me) return [];
     const teaching = loadTeaching();
@@ -207,11 +212,23 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
       academicYearCode: ay,
       policy: teaching.policy,
     }).filter((r) => r.status === "unlogged");
-  }, [ready, session, ay, today, tick]);
+  }, [ready, masters, session, ay, today, tick]);
 
   const firstName = session.fullName.split(/\s+/)[0] || session.fullName;
 
-  if (!ready) {
+  if (mastersError) {
+    return (
+      <QueryError
+        what="the school's classes and timetable setup"
+        error={mastersError}
+        retry={retryMasters}
+      />
+    );
+  }
+
+  // Every tile below reads Masters: nothing is drawn from a copy that has
+  // not arrived (a pending register is not "none pending").
+  if (!ready || !masters) {
     return (
       <p className="text-sm text-[var(--muted)]">Loading your class desk…</p>
     );
@@ -419,11 +436,11 @@ export function TeacherHome({ onOpenFullDashboard }: { onOpenFullDashboard?: () 
 /** Whether this session should see the simplified teacher home (not principal/admin). */
 export function shouldShowTeacherHome(
   session: { roleCode: string; persona?: string; staffId?: string; email?: string; fullName: string },
-  mastersLoaded: boolean,
+  /** The access copy (useAccessData) the sidebar decides with; null = not known yet. */
+  masters: MastersState | null,
 ): boolean {
-  if (!mastersLoaded) return false;
+  if (!masters) return false;
   if ((session.persona || "staff") !== "staff") return false;
-  const masters = loadMasters();
   const roles = inferRoleCodes(session, masters);
   return isTeacherOnly(roles);
 }

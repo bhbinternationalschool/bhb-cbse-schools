@@ -10,6 +10,7 @@
  */
 
 import { formatInr } from "@/lib/masters";
+import { shortCached } from "@/lib/shortPromiseCache";
 import type { ModuleDashboardModel } from "@/components/dashboard/ModuleDashboard";
 
 type Position = {
@@ -29,8 +30,12 @@ type Position = {
   expenditureThisYearPaise: number;
 };
 
+/**
+ * The school's calendar day. `toISOString()` is UTC, so from midnight to
+ * 05:30 IST the tile showed yesterday's takings as "today" (13 Oct 2026).
+ */
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
 }
 
 function fyStart(): string {
@@ -71,6 +76,16 @@ async function monthlyCash(from: string, to: string): Promise<MonthlyCashRow[]> 
   return res?.ok ? (res.rows ?? []) : [];
 }
 
+/** One day's money in, or null when the book could not be read (never ₹0). */
+async function dayMoneyInPaise(day: string): Promise<number | null> {
+  const res = await ledgerPost<{ ok: boolean; rows?: MonthlyCashRow[] }>({
+    action: "monthly-cash",
+    from: day,
+    to: day,
+  });
+  return res?.ok ? (res.rows ?? []).reduce((n, m) => n + m.inPaise, 0) : null;
+}
+
 export async function patchAccountsDashWithServerBook(
   model: ModuleDashboardModel,
 ): Promise<ModuleDashboardModel | null> {
@@ -78,15 +93,22 @@ export async function patchAccountsDashWithServerBook(
   // "position" is the cockpit without its controls: the same balances in a
   // fraction of the time. The controls run over every voucher and took several
   // seconds, during which the dashboard showed browser-book figures.
-  const [cockpit, rp, months] = await Promise.all([
-    ledgerPost<Position>({ action: "position", asOf: today, fyFrom: fyStart() }),
-    ledgerPost<{ ok: boolean; report?: { totalReceiptsPaise: number } }>({
-      action: "receipts-payments",
-      from: today,
-      to: today,
-    }),
-    monthlyCash(fyStart(), today),
-  ]);
+  // Redraws within 15 s share one read of the server book (each desk landing
+  // redraws the dashboard; see shortPromiseCache). A failed position read is
+  // not cached.
+  const [cockpit, rp, months] = await shortCached(`accounts-dash:${today}`, 15_000, async () => {
+    const r = await Promise.all([
+      ledgerPost<Position>({ action: "position", asOf: today, fyFrom: fyStart() }),
+      // Today's money in by the same rule as the month chart below it: a
+      // voided receipt and its reversal are both left out. The Receipts &
+      // Payments total counted the voided receipt as money in and its
+      // reversal as money out, so a ₹5,000 void left "Today collection" at
+      // ₹20,610 against ₹15,610 taken (12 Oct 2026).
+      dayMoneyInPaise(today),
+      monthlyCash(fyStart(), today),
+    ]);
+    return r[0]?.ok ? r : null;
+  }).then((r) => r ?? ([null, null, null] as const));
   if (!cockpit?.ok) {
     // The server book could not be read. The base model already leaves the
     // money tiles and the bank rows blank, so returning null leaves them
@@ -95,14 +117,14 @@ export async function patchAccountsDashWithServerBook(
     return null;
   }
 
-  const todayInPaise = rp?.ok ? rp.report?.totalReceiptsPaise ?? null : null;
+  const todayInPaise = rp;
 
   const kpis = model.kpis.map((k) => {
     if (k.id === "today" && todayInPaise != null) {
       return {
         ...k,
         value: formatInr(todayInPaise),
-        hint: "server book · fees + store + all receipts",
+        hint: "server book · fees + store + all receipts, voids left out",
       };
     }
     if (k.id === "cash") {

@@ -46,8 +46,8 @@ import {
 import { loadStaffAttendance } from "@/lib/staffAttendance";
 import { ensureStaffAttendanceHydratedServer } from "@/lib/staffAttendancePersistence";
 import { classifyClassHolidayDay } from "@/lib/holidayPolicy";
-import { loadTimetable, periodInterval, teachingPeriods, WEEKDAY_SHORT } from "@/lib/timetable";
-import { ensureTimetableHydratedServer } from "@/lib/timetablePersistence";
+import { periodInterval, teachingPeriods, WEEKDAY_SHORT, type TimetableState } from "@/lib/timetable";
+import { readTimetableStateServer } from "@/lib/api/v1/teachingServer.server";
 import {
   absentTeachersForDate,
   affectedPeriodsForDate,
@@ -2896,11 +2896,15 @@ async function attendanceSummary(
 
   let staff: Parameters<typeof formatAttendanceSummaryReply>[0]["staff"] = null;
   if (school) {
-    const active = (masters.staff ?? []).filter((s) => s.status === "active");
     const reg = (loadStaffAttendance().registers ?? []).find(
       (r) => r.date === date && r.academicYearCode === ay,
     );
     const marks = new Map((reg?.marks ?? []).map((m) => [m.staffId, m.status]));
+    // Visiting staff count only on a day they are on the register — never as
+    // "not punched in" on a day nobody expected them.
+    const active = (masters.staff ?? []).filter(
+      (s) => s.status === "active" && (s.category !== "visiting" || marks.has(s.id)),
+    );
     const namesWith = (code: string) =>
       active
         .filter((s) => marks.get(s.id) === code)
@@ -3168,11 +3172,19 @@ async function busManifest(
   const ay =
     live.map((a) => a.academicYearCode).filter(Boolean).sort().pop() || session.academicYearCode;
   const riders = live.filter((a) => a.academicYearCode === ay);
-  const marks = new Map(
-    (state.boardingEvents ?? [])
-      .filter((e) => e.date === date && e.routeId === route.id)
-      .map((e) => [e.studentId, e.status]),
-  );
+  // Marks come from bus register v2 (transport_boarding_marks), the one
+  // record of boarding. A failed read is said in the reply, never shown as
+  // a bus nobody marked.
+  const { readMarks } = await import("@/lib/transportBoardingLog.server");
+  const { registerDayMarks, registerDayLabel } = await import("@/lib/transportBoardingLog");
+  const marksRes = await readMarks({ from: date, to: date, routeIds: [route.id] });
+  const dayMarks = marksRes.ok ? registerDayMarks(marksRes.marks) : [];
+  const amBy = new Map(dayMarks.filter((m) => m.trip === "AM").map((m) => [m.studentId, m.status]));
+  const pmBy = new Map(dayMarks.filter((m) => m.trip === "PM").map((m) => [m.studentId, m.status]));
+  const marks = new Map<string, string>();
+  for (const id of new Set([...amBy.keys(), ...pmBy.keys()])) {
+    marks.set(id, registerDayLabel(amBy.get(id) ?? null, pmBy.get(id) ?? null));
+  }
   const byId = new Map(sis.students.map((st) => [st.id, st]));
   const stops = [...(route.stops ?? [])]
     .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0))
@@ -3189,7 +3201,7 @@ async function busManifest(
             classLabel: st ? classLabel(masters, st.classId, st.sectionId).replace(" · ", " ") : "",
             rollNo: st?.rollNo || "",
             suspended: !!a.boardingSuspended,
-            mark: mark === "boarded" ? "boarded" : mark === "absent" ? "absent" : mark ? String(mark) : "",
+            mark: mark ?? "",
           };
         })
         .sort((a, b) => a.classLabel.localeCompare(b.classLabel) || a.fullName.localeCompare(b.fullName)),
@@ -3208,7 +3220,8 @@ async function busManifest(
     date,
     todayIso,
     stops,
-    markedCount: riders.filter((a) => marks.has(a.studentId)).length,
+    markedCount: riders.filter((a) => !a.boardingSuspended && marks.has(a.studentId)).length,
+    registerUnavailable: !marksRes.ok,
     formatMobile: maskMobile10,
   }));
 }
@@ -3346,17 +3359,27 @@ function istHhmm(now = new Date()): string {
   return `${String(ist.getUTCHours()).padStart(2, "0")}:${String(ist.getUTCMinutes()).padStart(2, "0")}`;
 }
 
-async function freeTeachers(
+/** Exported for timetableServerCallers.selftest. */
+export async function freeTeachers(
   resolved: Record<string, string>,
   periodAsk: string,
   session: DemoSession,
   todayIso: string,
 ): Promise<string> {
-  await Promise.all([ensureTimetableHydratedServer(), ensureStaffAttendanceHydratedServer()]);
+  // The timetable from its desk slices: loadTimetable() is empty on the
+  // server, so this answered "No bell timetable is set up yet" every time.
+  const staffAttendance = ensureStaffAttendanceHydratedServer();
+  let state: TimetableState;
+  try {
+    state = await readTimetableStateServer();
+  } catch {
+    await staffAttendance.catch(() => false);
+    return "I couldn't read the timetable just now — please try again in a minute.";
+  }
+  await staffAttendance;
   const ay = session.academicYearCode;
   const date = resolved.date || todayIso;
   const masters = loadMasters();
-  const state = loadTimetable();
   const periods = teachingPeriods(state.bellTemplate);
   if (!periods.length) return "No bell timetable is set up yet (Timetable → Bell template).";
   const weekday = isoDateWeekday(date);
@@ -4408,7 +4431,7 @@ async function runConfirmedWrite(
       title: `${session.fullName} · ${TENANT.shortName}`,
       body: r.message && r.message.length > 200 ? `${r.message.slice(0, 197)}…` : r.message || "",
       url: "/notices",
-      data: { kind: "broadcast" },
+      data: { kind: "broadcast", fullText: (r.message || "").slice(0, 3000), sender: session.fullName || "" },
     }).catch(() => ({ sent: 0, expired: 0, failed: 0 }));
 
     let wa = { recipientCount: 0, skippedOptOut: 0, sent: 0, failed: 0 };
