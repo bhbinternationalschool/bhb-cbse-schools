@@ -25,7 +25,8 @@ import { readSliceList, writeMastersBatch, type Row } from "./repo";
 /** last_error prefix on a refund row whose receipt's grants are still to be ended (retried by its next status check). */
 export const GRANT_REVOKE_PENDING = "GRANT_REVOKE_PENDING: the receipt is voided but its counter discount is still running —";
 
-export type ServerMastersWrite = { ok: true; written: number } | { ok: false; message: string };
+/** `conflict`: an element this write touches changed after the caller read it (re-read and re-plan). */
+export type ServerMastersWrite = { ok: true; written: number } | { ok: false; message: string; conflict?: boolean };
 
 export async function writeMastersChangesServer(changes: readonly MastersElementChange[]): Promise<ServerMastersWrite> {
   if (changes.length === 0) return { ok: true, written: 0 };
@@ -41,10 +42,10 @@ export async function writeMastersChangesServer(changes: readonly MastersElement
     return { ok: false, message: `could not read Masters (${e instanceof Error ? e.message : String(e)})` };
   }
   const plan = planMastersElementChanges(changes, (k) => lists.get(k) ?? new Map());
-  if (!plan.ok) return { ok: false, message: plan.message };
+  if (!plan.ok) return { ok: false, message: plan.message, conflict: plan.kind === "conflict" };
   if (plan.ops.length === 0) return { ok: true, written: 0 };
   const res = await writeMastersBatch(plan.ops.map((o) => ({ collection: o.collection, op: o.op })));
-  if (!res.ok) return { ok: false, message: res.message };
+  if (!res.ok) return { ok: false, message: res.message, conflict: res.kind === "conflict" };
   clearDeskProbeCache("masters-desk-rows");
   invalidateServerMastersCache();
   return { ok: true, written: plan.ops.length };
