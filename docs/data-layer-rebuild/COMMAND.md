@@ -1981,7 +1981,7 @@ a brand-new school (empty masters desk) is not run on the stack.
 `useAccessData` (`components/shell/useAccessData.ts`, 23 consumers) on `useRbac()` +
 `useStaffList()` with the same return type. Acceptance: `counts.spec.ts` on the throttled
 375 px profile shows classes and staff within 2 s.
-*(Built 28 Oct 2026, PR #TBD.)* **What exists.** `CoreDataGate` is deleted; AppShell renders every screen inside
+*(Built 28 Oct 2026, PR #726.)* **What exists.** `CoreDataGate` is deleted; AppShell renders every screen inside
 `components/shell/ShellDataWait.tsx` (director's Q5): it waits for `useMasters()` (its answer is laid on the page copy by
 the 2.1 bridge before the query resolves, so the synchronous `loadMasters()` readers see the book) and — at most 5 s, never
 blocking on failure — for the rbac and staff PAGE copies, which the lib/ save checks (`rbacGuard.assertModulePermission`)
