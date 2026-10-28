@@ -38,6 +38,7 @@ import "student_leave_queue_screen.dart";
 import "transport_requests_screen.dart";
 import "vehicle_logbook_screen.dart";
 import "waiting_card.dart";
+import "pending_work_card.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/push/notification_bell.dart";
 
@@ -623,6 +624,11 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                     ),
                     const SizedBox(height: 8),
                   ],
+                  PendingWorkCard(
+                    api: widget.api,
+                    onOpen: _openDeepLink,
+                    refreshKey: _refresh,
+                  ),
                   Card(
                     child: ListTile(
                       leading: Container(

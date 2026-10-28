@@ -16,6 +16,7 @@ import "my_attendance_calendar_screen.dart";
 import "payslips_screen.dart";
 import "self_attendance_screen.dart";
 import "transport_requests_screen.dart";
+import "pending_work_card.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/push/notification_bell.dart";
 
@@ -383,6 +384,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  PendingWorkCard(api: widget.api, onOpen: _openRoute),
                   if (_crewTools) ...[
                     _toolTile(
                       icon: Icons.fact_check_outlined,
