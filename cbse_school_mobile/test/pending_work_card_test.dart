@@ -8,7 +8,6 @@
 // Screenshot at 375 px: `flutter test --update-goldens --dart-define=SHOTS=true test/pending_work_card_test.dart`.
 import "dart:convert";
 import "dart:io";
-import "dart:typed_data";
 
 import "package:cbse_school_mobile/core/api/api_client.dart";
 import "package:cbse_school_mobile/core/config/app_config.dart";
