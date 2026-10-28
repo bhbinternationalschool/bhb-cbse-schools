@@ -6,11 +6,16 @@ import "server-only";
  *
  * Applying writes Masters, never anything else: the template's own Masters
  * rule (minted on first use, kept in step with the template's name and
- * auto-approve limit) and one grant per student, through
- * masters_write_slices — the all-or-none section save the Masters screen
- * uses, at the stamps just read. Grants are APPENDED to the stored list;
- * nothing existing is rewritten or removed. If Masters moved in between,
- * the apply re-reads and re-plans (up to three times) rather than overwrite.
+ * auto-approve limit) and one grant per student, as ONE all-or-none element
+ * batch (data-layer 2.2f: desk_slice_rows_write through
+ * writeMastersChangesServer — each new grant created, the rule created or
+ * patched at its `_rev` as stored now; the row tables are synced inside the
+ * same transaction, so a refusal anywhere means nothing landed). Grants are
+ * only ADDED; no existing grant is rewritten or removed — before 2.2f the
+ * whole concessionGrants list was re-sent at its slice stamp, and a row-table
+ * sync failure after it left the grants written while the clerk was told
+ * "nothing was granted". If an element moved in between, the apply re-reads
+ * and re-plans (up to three times) rather than overwrite.
  *
  * The money fields of a template (ground, percent/amount, heads, sibling
  * child, end policy) are fixed once it exists: changing them would silently
@@ -41,12 +46,9 @@ import {
   type ConcessionGround,
   type ConcessionRule,
 } from "@/lib/masters";
-import {
-  deskBundleToMastersState,
-  fetchMastersDeskFromDb,
-  pushMastersSlicesToDb,
-  type MastersSliceKey,
-} from "@/lib/mastersNormalized.server";
+import { diffMastersLists, type MastersElementChange } from "@/lib/data/mastersElementChanges";
+import { writeMastersChangesServer } from "@/lib/data/server/mastersLibWrites.server";
+import { deskBundleToMastersState, fetchMastersDeskFromDb } from "@/lib/mastersNormalized.server";
 import { canApproveConcession, canGrantConcession } from "@/lib/rbac";
 import { getServerTenantContext } from "@/lib/serverTenant";
 
@@ -240,12 +242,9 @@ export async function applyTemplate(
   const stale = sessionRowProblem(rows, session.academicYearCode);
   if (stale) throw new ApiError("bad_request", stale, 400);
   for (let attempt = 0; attempt < 3; attempt++) {
-    const { bundle, readFailed, sliceStamps } = await fetchMastersDeskFromDb();
-    if (readFailed || !sliceStamps) {
+    const { bundle, readFailed } = await fetchMastersDeskFromDb();
+    if (readFailed) {
       throw new ApiError("server_error", "Could not read Masters — nothing was granted. Please try again.", 503);
-    }
-    if (!sliceStamps.concessionGrants) {
-      throw new ApiError("server_error", "Could not find the concession list in Masters — nothing was granted.", 503);
     }
     const state = deskBundleToMastersState(bundle);
     const rules = state.concessions ?? [];
@@ -289,19 +288,18 @@ export async function applyTemplate(
     if (input.preview) return { preview: true, ...summary };
     if (plan.grants.length === 0) throw new ApiError("bad_request", "Nobody to grant — every student chosen was skipped", 400);
 
-    const keys: MastersSliceKey[] = ["concessionGrants"];
-    const nextConcessions = ruleNeedsWrite
-      ? current
-        ? rules.map((r) => (r.id === current.id ? wantRule : r))
-        : [...rules, wantRule]
-      : rules;
-    if (ruleNeedsWrite) keys.push("concessions");
-    const pushed = await pushMastersSlicesToDb(
-      { ...state, concessions: nextConcessions, concessionGrants: [...(state.concessionGrants ?? []), ...plan.grants] },
-      keys,
-      Object.fromEntries(keys.map((k) => [k, sliceStamps[k] ?? ""])),
-    );
-    if (pushed.ok) {
+    // The rule first (created, or patched to match the template), then one
+    // created grant per student — one batch, all or none.
+    const changes: MastersElementChange[] = [
+      ...(ruleNeedsWrite
+        ? current
+          ? diffMastersLists({ concessions: [current] }, { concessions: [wantRule] }, ["concessions"])
+          : [{ kind: "create" as const, sliceKey: "concessions", id: wantRule.id, row: { ...wantRule } }]
+        : []),
+      ...plan.grants.map((g) => ({ kind: "create" as const, sliceKey: "concessionGrants", id: g.id, row: { ...g } })),
+    ];
+    const written = await writeMastersChangesServer(changes);
+    if (written.ok) {
       await writeAudit({
         session,
         module: "fees",
@@ -313,8 +311,8 @@ export async function applyTemplate(
       }).catch(() => null);
       return { preview: false, ...summary };
     }
-    if (pushed.conflict !== "slice_stale") {
-      throw new ApiError("server_error", pushed.error || "Masters could not be saved — nothing was granted.", 500);
+    if (!written.conflict) {
+      throw new ApiError("server_error", `Masters could not be saved — nothing was granted (${written.message}).`, 500);
     }
   }
   throw new ApiError("bad_request", "Masters kept changing while this was being saved — nothing was granted. Try again.", 409);

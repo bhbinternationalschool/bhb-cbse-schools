@@ -5,9 +5,10 @@
  *
  * The app enters ONE number per subject (the whole mark). Since 2026-10-11
  * it may also pick the letter for a subject's graded part (Handwriting A/B/C)
- * by sending `component` + `grade`. Everything else — the marks parts of a
- * split subject (Oral 20 + Written 80), grade-only schemes — stays on the
- * exams desk, where those columns exist.
+ * by sending `component` + `grade`. Since 2026-10-28 it may enter the numeric
+ * marks parts of a split subject (Oral 20 + Written 80) too, sending a number
+ * per part keyed by `component`, each validated against that part's own max.
+ * Grade-only schemes still stay on the exams desk, where those columns exist.
  *
  * Old app builds know nothing of graded parts: they send
  * `{ studentId, marksObtained }`, which is always the whole mark. They can
@@ -45,7 +46,7 @@ export function staffAppEntriesProblem(
   rules: StaffAppSubjectRules,
 ): string | null {
   const graded = new Map(rules.gradedParts.map((g) => [g.code, g]));
-  const marksCodes = new Set(rules.marksParts.map((c) => c.code));
+  const marksByCode = new Map(rules.marksParts.map((c) => [c.code, c]));
   let wantsWhole = false;
   for (const e of entries) {
     if (!e || typeof e.studentId !== "string" || !e.studentId) return "Every entry needs a studentId";
@@ -67,15 +68,26 @@ export function staffAppEntriesProblem(
       if (!g.ok) return `${rules.subjectName} (${part.label}): ${g.error}`;
       continue;
     }
-    if (marksCodes.has(component)) {
-      return `${rules.subjectName} ${component} is a marks part — enter split marks on the exams desk`;
+    const marksPart = marksByCode.get(component);
+    if (marksPart) {
+      // A numeric marks part (Written 80, Oral 20): a number of its own, 0..max.
+      if (String(e.grade ?? "").trim()) {
+        return `${rules.subjectName} (${marksPart.label}) is marked, not graded — send a number, not a grade`;
+      }
+      if (n != null && (typeof n !== "number" || !Number.isFinite(n) || n < 0)) {
+        return "Marks must be a number ≥ 0 or blank";
+      }
+      if (n != null && n > marksPart.maxMarks) {
+        return `${rules.subjectName} (${marksPart.label}): marks cannot exceed ${marksPart.maxMarks}`;
+      }
+      continue;
     }
     return `${rules.subjectName}: "${component}" is not one of its parts for ${rules.termLabel}`;
   }
   if (wantsWhole && rules.marksParts.length > 0) {
     return `${rules.subjectName} is marked in parts for ${rules.termLabel} (${rules.marksParts
       .map((c) => `${c.label} ${c.maxMarks}`)
-      .join(" + ")}). Enter these marks on the exams desk.`;
+      .join(" + ")}). Enter a mark in each part, not one whole mark.`;
   }
   if (wantsWhole && rules.gradeOnlyScheme) {
     return "This class is assessed by grades, not marks. Enter them on the exams desk.";
@@ -100,12 +112,27 @@ export function mergeStaffAppEntries(
     const k = key(e.studentId, subjectId, component);
     const prev = byKey.get(k);
     if (component) {
+      // A graded part carries a `grade` key (Handwriting A/B/C); a numeric
+      // marks part (Written 80, Oral 20) carries a number. The grade of a
+      // numeric row is recomputed by prepareMarkSheet from its marks.
+      if (e.grade !== undefined) {
+        byKey.set(k, {
+          studentId: e.studentId,
+          subjectId,
+          component,
+          marksObtained: null,
+          grade: String(e.grade ?? "").trim() || "—",
+          remark: prev?.remark ?? "",
+          remarkSource: prev?.remarkSource ?? "manual",
+        });
+        continue;
+      }
       byKey.set(k, {
         studentId: e.studentId,
         subjectId,
         component,
-        marksObtained: null,
-        grade: String(e.grade ?? "").trim() || "—",
+        marksObtained: e.marksObtained == null ? null : Math.round(e.marksObtained * 2) / 2,
+        grade: prev?.grade ?? "",
         remark: prev?.remark ?? "",
         remarkSource: prev?.remarkSource ?? "manual",
       });

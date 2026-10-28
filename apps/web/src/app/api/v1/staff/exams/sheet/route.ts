@@ -4,6 +4,7 @@ import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureExamsHydratedServer } from "@/lib/examsPersistence";
 import {
+  componentsForSubject,
   effectiveMaxMarks,
   findMarkSheet,
   getExamPolicy,
@@ -76,6 +77,15 @@ export async function GET(request: Request) {
       code: s.code,
       name: s.name,
       maxMarks: effectiveMaxMarks(term, s),
+      // A subject marked in parts (English = Written 80 + Oral 20, or a
+      // 100-mark subject = 80 + four internals): one numeric column per part,
+      // each with its own maximum. Empty = one whole mark out of maxMarks.
+      marksParts: componentsForSubject(scheme, term.code, s.code).map((c) => ({
+        code: c.code,
+        label: c.label,
+        maxMarks: c.maxMarks,
+        kind: c.kind,
+      })),
       gradedParts: gradedPartsForSubject(scheme, term.code, s.code).map((g) => ({
         code: g.code,
         label: g.label,
@@ -115,6 +125,12 @@ export async function GET(request: Request) {
             subjectId: sub.id,
             marksObtained: m?.marksObtained ?? null,
             grade: m?.grade ?? "",
+            // Each numeric marks part's own entry, so the app pre-fills a
+            // field per part. Empty when the subject is not split.
+            parts: sub.marksParts.map((c) => {
+              const row = partRows.get(`${st.id}:${sub.id}:${c.code}`);
+              return { component: c.code, marksObtained: row?.marksObtained ?? null };
+            }),
             gradedParts: sub.gradedParts.map((g) => {
               const got = partRows.get(`${st.id}:${sub.id}:${g.code}`)?.grade ?? "";
               return { component: g.code, grade: got && got !== "—" ? got : "" };

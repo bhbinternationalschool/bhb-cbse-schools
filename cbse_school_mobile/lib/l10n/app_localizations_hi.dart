@@ -4031,4 +4031,9 @@ class LHi extends L {
   @override
   String get cmNoneReachable =>
       'इन कक्षाओं का कोई परिवार WhatsApp पर नहीं मिल सकता — कुछ नहीं भेजा जाएगा।';
+
+  @override
+  String markEntryRangeHint(String who, String max) {
+    return '$who: 0–$max भरें, या अनुपस्थित के लिए खाली छोड़ें';
+  }
 }

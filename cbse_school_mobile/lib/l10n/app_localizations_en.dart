@@ -4035,4 +4035,9 @@ class LEn extends L {
   @override
   String get cmNoneReachable =>
       'No family in these classes can be reached on WhatsApp — nothing would be sent.';
+
+  @override
+  String markEntryRangeHint(String who, String max) {
+    return '$who: enter 0–$max or leave blank for absent';
+  }
 }
