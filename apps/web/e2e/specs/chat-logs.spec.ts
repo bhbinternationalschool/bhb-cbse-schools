@@ -11,7 +11,8 @@
  * Against the local stack's seeded school: staff 21 and 22 (a direct chat;
  * neither is used by school-chat / chat-one, whose per-sender limit is
  * shared), the principal (a moderator — may message any family) and the
- * family of an active LKG-A child.
+ * family of an active UKG-A child (none of its children in Nursery or LKG,
+ * whose families school-chat / chat-one send as).
  *
  * Proves:
  *  1. a staff↔staff message is in both staff timelines (in / out, "You");
@@ -34,7 +35,12 @@ const staffSession = (n: number): DemoSession => {
   const s = fx.staff.staff[n - 1]!;
   return { persona: "staff", fullName: s.fullName, roleCode: "teacher", staffId: s.id, tenantSlug: fx.sessions.office.tenantSlug, academicYearCode: AY_CURRENT };
 };
-const child = fx.sis.students.find((s) => s.classId === classId(2) && s.sectionId === sectionId(2) && s.academicYearCode === AY_CURRENT && s.status === "active" && s.householdId)!;
+// A UKG-A family with no child in Nursery or LKG: school-chat / chat-one send
+// as those families, and the per-sender limit (10 a minute) is per family.
+const busyHouseholds = new Set(fx.sis.students.filter((s) => s.classId === classId(1) || s.classId === classId(2)).map((s) => s.householdId));
+const child = fx.sis.students.find(
+  (s) => s.classId === classId(3) && s.sectionId === sectionId(3) && s.academicYearCode === AY_CURRENT && s.status === "active" && s.householdId && !busyHouseholds.has(s.householdId),
+)!;
 const parentSession: DemoSession = {
   persona: "parent",
   fullName: "E2E Parent",
@@ -63,7 +69,7 @@ const mine = (entries: Entry[] | undefined) => (entries ?? []).filter((e) => e.c
 test.describe.configure({ mode: "serial" });
 
 test.describe("chat-logs: school chat in the staff and household message logs", () => {
-  test.skip(!child, "fixture: no active LKG-A child with a family");
+  test.skip(!child, "fixture: no active UKG-A child with a family outside Nursery/LKG");
 
   test("1–2. both logs list school chat messages, scoped and directed", async () => {
     const [a, b, principal, family, office] = await Promise.all([api(staffSession(A)), api(staffSession(B)), api(fx.sessions.principal), api(parentSession), api(fx.sessions.office)]);
