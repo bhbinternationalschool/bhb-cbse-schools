@@ -110,11 +110,15 @@ export function StaffLeavePanel({
           import("@/lib/staffHrPersistence"),
           import("@/lib/deskHydrateGuard"),
         ]);
-      const [didStaff, didHr] = await Promise.all([
+      await Promise.all([
         withHydrationSlot(() => ensureStaffHydrated()),
         withHydrationSlot(() => ensureStaffHrHydrated()),
       ]);
-      if (didStaff || didHr) reload();
+      // Always re-read: when another part of the page loaded the desk first,
+      // this panel's ensure call returns false although its mount read was
+      // empty (the 15 Oct "No leave requests" race; more likely since 2.3a,
+      // when screens stopped waiting behind the old gate).
+      reload();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- ay drives reload
   }, [ay]);

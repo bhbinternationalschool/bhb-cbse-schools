@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { reportClientMetric } from "@/lib/clientMetrics";
 import { pageContentReady } from "@/lib/pageReady";
+import { viewLoadMetric } from "@/lib/data/client/viewLoadMetric";
 
 /**
  * The two client measurements wired in data-layer 1.2 (lib/clientMetrics):
@@ -23,16 +24,16 @@ import { pageContentReady } from "@/lib/pageReady";
  *   locked phone: the browser stops painting it, so the number would be
  *   how long nobody looked, not how long the screen took).
  *
- * desk-hydrate — per desk, ms from the start of the route it arrived on (the
- *   same clock as that route's page-ready) to the moment the desk's data was
- *   first in place on this page: the existing once-per-desk-per-page
- *   `bhb-desk-first-hydrated` event (lib/deskHydrateGuard). It covers every
- *   desk however it was loaded — the route scheduler, a screen's own ensure
- *   call, or the on-demand heavy desks (fees, payments, attendance,
- *   admissions), which load on the first route that needs them — and
- *   nothing in the frozen hydration files changes. A desk from the idle
- *   sweep reports the time since its route opened, so read its p95 as "how
- *   long after opening a screen", not as the fetch alone.
+ * desk-hydrate — per reference read, ms from the start of the route it
+ *   arrived on (the same clock as that route's page-ready) to the moment its
+ *   first answer was in place on this page. Since data-layer 2.3a it is sent
+ *   by the query kernel (lib/data/client/viewLoadMetric): `key` is the read's
+ *   name ("masters", "staff-list", "rbac", …), once per name per page. It
+ *   used to ride the `bhb-desk-first-hydrated` event of the old desk
+ *   hydrates (deleted in 2.3a); the desks the replica still loads (sis,
+ *   fees, …) no longer report one. A read that answers after its route
+ *   opened reports the time since then, so read its p95 as "how long after
+ *   opening a screen", not as the fetch alone.
  */
 
 /**
@@ -54,8 +55,6 @@ function documentPath(): string | null {
 
 export function useClientMetrics(pathname: string): void {
   const intentAt = useRef<number | null>(null);
-  /** Where the current route's clock started (performance.now() units). */
-  const routeStart = useRef(0);
 
   // Where a navigation starts: a plain left click on a same-origin link, or back/forward.
   useEffect(() => {
@@ -81,17 +80,6 @@ export function useClientMetrics(pathname: string): void {
     };
   }, []);
 
-  // desk-hydrate
-  useEffect(() => {
-    function onFirstHydrated(e: Event) {
-      const id = (e as CustomEvent<{ id?: string }>).detail?.id;
-      if (!id) return;
-      reportClientMetric({ event: "desk-hydrate", key: id, ms: performance.now() - routeStart.current });
-    }
-    window.addEventListener("bhb-desk-first-hydrated", onFirstHydrated);
-    return () => window.removeEventListener("bhb-desk-first-hydrated", onFirstHydrated);
-  }, []);
-
   // page-ready
   useEffect(() => {
     const now = performance.now();
@@ -110,7 +98,8 @@ export function useClientMetrics(pathname: string): void {
       key = "commit";
     }
     intentAt.current = null;
-    routeStart.current = start;
+    // desk-hydrate (the query kernel's first answers) uses this route's clock.
+    viewLoadMetric.setRouteStart(start);
 
     const route = pathname;
     let frame = 0;

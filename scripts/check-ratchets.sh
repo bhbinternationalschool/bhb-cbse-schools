@@ -299,6 +299,13 @@ count_metric() {
         | grep -vE 'selftest|/app/api/school-data/masters-desk/' \
         | grep -vE '^[^:-]+[:-][0-9]+[:-][[:space:]]*(\*|//|#)' \
         | grep -cE 'method:[[:space:]]*["'"'"']POST' ;;
+    hydrate_events)
+      # Data-layer 2.3a. Code that raises or listens for the old hydrate
+      # events — "bhb-masters-updated", "bhb-rbac-updated",
+      # "bhb-desk-first-hydrated" (the quoted name on a code line; comments
+      # and selftests excluded). React Query and the versions poll replace
+      # them. Target 0.
+      dl_occurrences '"bhb-(masters-updated|rbac-updated|desk-first-hydrated)"' __no_definition__ "$SRC" ;;
     *)
       echo "-1" ;;
   esac

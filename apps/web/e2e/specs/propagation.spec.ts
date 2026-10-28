@@ -422,11 +422,9 @@ for (const via of ["editor", "api"] as const) {
 for (const obs of STAFF_OBSERVERS) {
   test(`staff record renamed via api → visible on ${obs.path}`, async ({ browser }, testInfo) => {
     // /staff re-reads its roster when the staff list moves (data-layer 2.2d).
-    // /timetable's Teacher picker reads the access copy until 2.3a.
-    test.fail(
-      obs.path === "/timetable",
-      `${UNTIL}. /timetable's Teacher picker reads useScreenMasters, whose staff side is the access copy until 2.3a puts it on useStaffList().`,
-    );
+    // /timetable's Teacher picker reads useScreenMasters, whose staff side is
+    // the access copy — on useStaffList() since 2.3a, so the versions poll
+    // brings the rename (expected-fail until 2.3a; passes since).
     const next = `Rohit Renamed ${tag()}`;
     const r: { propagatedAfterMs: number | null; visibleAfterReload?: boolean | string; controlShown?: boolean } = { propagatedAfterMs: null };
     await scenario(

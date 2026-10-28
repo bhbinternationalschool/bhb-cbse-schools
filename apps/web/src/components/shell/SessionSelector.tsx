@@ -1,33 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  listSessionYearOptions,
-  type SessionYearOption,
-} from "@/lib/masters";
 import { WORKSPACE_AY_ALIGNED_KEY } from "@/lib/workspaceSession";
+import { useAcademicYears } from "./useAcademicYears";
 
 export function SessionSelector({ currentCode }: { currentCode: string }) {
   const router = useRouter();
-  const [years, setYears] = useState<SessionYearOption[]>([]);
-
-  useEffect(() => {
-    function refresh() {
-      setYears(listSessionYearOptions());
-    }
-    refresh();
-    window.addEventListener("bhb-masters-updated", refresh);
-    window.addEventListener("bhb-desk-hydrated", refresh);
-    window.addEventListener("bhb-desk-synced", refresh);
-    window.addEventListener("storage", refresh);
-    return () => {
-      window.removeEventListener("bhb-masters-updated", refresh);
-      window.removeEventListener("bhb-desk-hydrated", refresh);
-      window.removeEventListener("bhb-desk-synced", refresh);
-      window.removeEventListener("storage", refresh);
-    };
-  }, [currentCode]);
+  // The masters view's academic years (data-layer 2.3a): a Masters change
+  // reaches the selector through the versions poll, not a page-copy event.
+  const { years } = useAcademicYears();
 
   async function onChange(code: string) {
     await fetch("/api/session/ay", {
@@ -45,8 +26,8 @@ export function SessionSelector({ currentCode }: { currentCode: string }) {
       : [{ code: currentCode, label: currentCode, status: "current" as const }];
 
   // currentCode is the server-aligned, authoritative session year — always
-  // trust and display it. `years` is a separate, client-side cache
-  // (listSessionYearOptions() reading local Masters) that can briefly lag
+  // trust and display it. `years` is the masters view's answer (empty until
+  // it arrives) and can briefly lag
   // behind the session cookie; falling back to "whichever year that cache
   // happens to have marked current" when currentCode isn't in it is what
   // made the selector flash a DIFFERENT year while every year-scoped query

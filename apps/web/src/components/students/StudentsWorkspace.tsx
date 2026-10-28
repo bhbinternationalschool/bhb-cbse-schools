@@ -284,6 +284,11 @@ export function StudentsWorkspace() {
       // first, `did` is false but this screen still shows the empty start.
       await withHydrationSlot(() => ensureSisHydrated());
       setState(loadSis());
+      // The tabs' own panels (Upgrade, Update, Duplicates, …) read the roster
+      // when they mount and on each tick: tell them it has landed. Since
+      // data-layer 2.3a the shell no longer holds screens back for the old
+      // hydrates, so a panel can mount before the roster arrives.
+      setPanelTick((t) => t + 1);
     })();
   }, []);
 

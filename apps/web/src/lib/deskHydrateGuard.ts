@@ -43,15 +43,6 @@ export function markDeskHydrated(module: string): void {
   loadedOnce.add(module);
   if (everHydrated.has(module)) return;
   everHydrated.add(module);
-  // Once per desk per page. Callers mark AFTER writing what they read (the
-  // event is also deferred a tick), so a listener finds the data in place.
-  if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
-    setTimeout(() => {
-      window.dispatchEvent(
-        new CustomEvent("bhb-desk-first-hydrated", { detail: { id: module } }),
-      );
-    }, 0);
-  }
 }
 
 export function resetDeskHydrated(module?: string): void {

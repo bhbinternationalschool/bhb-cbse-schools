@@ -1,5 +1,6 @@
 "use client";
 
+import { useSisRosterLanded } from "@/components/data/useSisRosterLanded";
 import { useEffect, useMemo, useState } from "react";
 import {
   addManualPreviousDue,
@@ -43,12 +44,14 @@ export function ManualPreviousDuePanel({
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
+  // The student search is the SIS roster: read it again once it has landed.
+  const sisLanded = useSisRosterLanded();
   useEffect(() => {
     const m = loadMasters();
     setMasters(m);
     setSis(loadSis());
     setFromAy((prev) => prev || previousAcademicYearCode(toAy, m) || "");
-  }, [toAy]);
+  }, [toAy, sisLanded]);
 
   useEffect(() => {
     if (!sis || !masters) return;

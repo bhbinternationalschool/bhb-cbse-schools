@@ -42,6 +42,7 @@ import { emptyMastersShell, readMastersPageCopyRaw } from "@/lib/masters";
 import { writeMastersLocalRaw } from "@/lib/mastersPersistence";
 import { bridgeMastersToPageMemory, parseMastersView, type MastersBridgeDeps } from "./mastersBridge";
 import { readView } from "./query";
+import { viewLoadMetric } from "./viewLoadMetric";
 import {
   ErpQueryError,
   pollOutcome,
@@ -129,20 +130,32 @@ export function useErpQuery<T>(
 ): UseQueryResult<T, Error> {
   const desks = opts.desk === undefined ? [] : typeof opts.desk === "string" ? [opts.desk] : [...opts.desk];
   const parse = opts.parse;
+  const name = String(typeof key === "string" ? key : key[0] ?? "");
   return useQuery<Raw<T>, Error, T>({
     queryKey: [...(typeof key === "string" ? [key] : key), path],
-    queryFn: ({ signal }) => readRaw<T>(path, parse, signal),
+    queryFn: ({ signal }) => readRaw<T>(path, parse, signal, name),
     select: selectData,
     meta: { desks } satisfies DeskMeta,
     enabled: opts.enabled,
   });
 }
 
-/** One read of `path`, checked by `parse`; a failure throws (the query's `error`). */
-async function readRaw<T>(path: string, parse: ((data: unknown) => T) | undefined, signal?: AbortSignal): Promise<Raw<T>> {
+/**
+ * One read of `path`, checked by `parse`; a failure throws (the query's
+ * `error`). The first answer of each `name` on this page is reported as the
+ * `desk-hydrate` metric (./viewLoadMetric — data-layer 2.3a).
+ */
+async function readRaw<T>(
+  path: string,
+  parse: ((data: unknown) => T) | undefined,
+  signal?: AbortSignal,
+  name?: string,
+): Promise<Raw<T>> {
   const r = await readView<unknown>(path, { signal });
   if (!r.ok) throw new ErpQueryError(r.status, r.error);
-  return { data: parse ? parse(r.data) : (r.data as T), builtFrom: r.builtFrom };
+  const raw = { data: parse ? parse(r.data) : (r.data as T), builtFrom: r.builtFrom };
+  if (name) viewLoadMetric.loaded(name);
+  return raw;
 }
 
 function deskQueries(client: QueryClient): QueryDeskInfo[] {
@@ -416,7 +429,7 @@ export async function refetchMastersAnswer(client: QueryClient | null = tabQuery
   try {
     await client.fetchQuery<Raw<MastersView>>({
       queryKey: ["masters", MASTERS_VIEW_PATH],
-      queryFn: ({ signal }) => readRaw<MastersView>(MASTERS_VIEW_PATH, (d) => acceptMastersAnswer(d), signal),
+      queryFn: ({ signal }) => readRaw<MastersView>(MASTERS_VIEW_PATH, (d) => acceptMastersAnswer(d), signal, "masters"),
       meta: { desks: ["masters"] } satisfies DeskMeta,
       staleTime: 0,
     });
@@ -434,16 +447,21 @@ export function useMasters(opts: { enabled?: boolean } = {}): UseQueryResult<Mas
   });
 }
 
-/** The staff directory: no phone, Aadhaar, salary or password, ever. Read-only. */
-export function useStaffList(): UseQueryResult<StaffListView, Error> {
+/**
+ * The staff directory: no phone, Aadhaar, salary or password, ever. Read-only.
+ * Every login gets at least its own record (the access copy, 2.3a, resolves
+ * the signed-in person through it).
+ */
+export function useStaffList(opts: { enabled?: boolean } = {}): UseQueryResult<StaffListView, Error> {
   return useErpQuery<StaffListView>("staff-list", "/api/data/views/staff-list", {
     desk: ["sis_staff", "sis_departments", "sis_designations"],
+    enabled: opts.enabled,
   });
 }
 
 /** Roles & permissions (your own rows unless you hold Settings view). Read-only. */
-export function useRbac(): UseQueryResult<RbacView, Error> {
-  return useErpQuery<RbacView>("rbac", "/api/data/views/rbac", { desk: ["rbac", "rbac_state"] });
+export function useRbac(opts: { enabled?: boolean } = {}): UseQueryResult<RbacView, Error> {
+  return useErpQuery<RbacView>("rbac", "/api/data/views/rbac", { desk: ["rbac", "rbac_state"], enabled: opts.enabled });
 }
 
 /** Which modules the school switched on. Read-only. */
