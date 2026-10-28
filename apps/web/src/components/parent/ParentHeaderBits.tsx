@@ -28,6 +28,8 @@ import {
   useParentRefresh,
   type ParentChild,
 } from "@/components/parent/parentData";
+import { ChatsPanel, unreadTotal, useConversations } from "@/components/schoolChat/SchoolChatPanel";
+import { ChatDrawer, ChatUnreadBadge } from "@/components/schoolChat/SchoolChatHeaderButton";
 
 type Tab = "notices" | "news";
 
@@ -262,57 +264,76 @@ type Thread = {
 };
 
 /**
- * The parent ↔ class-teacher conversation for each child — the same thread the
- * parent app shows (GET /api/v1/chat/thread, POST /api/v1/chat/send).
+ * The parent portal's chat (29 Oct 2026): school chat for the picked child —
+ * its class and subject groups, groups its teachers made for the class, and
+ * direct chats with its teachers — the same conversations the parent app
+ * shows (/api/v1/school-chat). The older one-to-one class-teacher thread
+ * (/api/v1/chat) stays on its own tab, as in the app. The badge counts the
+ * unread school-chat messages of every child.
  */
 export function ParentChatButton() {
   const [open, setOpen] = useState(false);
+  const profile = useParentProfile();
+  const kids = profile.data?.children ?? [];
   return (
     <>
       <button
         type="button"
         aria-label="Chat"
         onClick={() => setOpen(true)}
-        className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--brand-deep)] text-white"
+        className="relative flex h-9 w-9 items-center justify-center rounded-full bg-[var(--brand-deep)] text-white"
+        data-testid="parent-chat-button"
       >
         <MessageCircle className="h-4 w-4" />
+        <ParentChatBadge studentIds={kids.map((k) => k.id)} />
       </button>
       {open ? (
-        <div
-          className="fixed inset-0 z-50 flex justify-end bg-black/30"
-          onClick={() => setOpen(false)}
-        >
-          <div
-            className="flex h-full w-full max-w-md flex-col bg-[var(--surface)] shadow-xl"
-            role="dialog"
-            aria-label="Chat with the class teacher"
-            data-testid="parent-chat"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
-              <p className="text-sm font-bold text-[var(--brand-deep)]">
-                Chat with the class teacher
-              </p>
-              <button
-                type="button"
-                aria-label="Close chat"
-                onClick={() => setOpen(false)}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <ChatBody />
+        <ChatDrawer label="School chat" testId="parent-chat" onClose={() => setOpen(false)}>
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-1 pb-2">
+            <p className="text-sm font-bold text-[var(--brand-deep)] dark:text-[var(--ink)]">
+              School chat
+            </p>
+            <button
+              type="button"
+              aria-label="Close chat"
+              onClick={() => setOpen(false)}
+              className="text-[var(--ink)]"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-        </div>
+          <ChatBody />
+        </ChatDrawer>
       ) : null}
     </>
   );
 }
 
+function ParentChatBadge({ studentIds }: { studentIds: string[] }) {
+  // One read per child (a family has one to three), each polled every 30 s
+  // while the tab is visible; each reports its count up here.
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const total = studentIds.reduce((n, id) => n + (counts[id] || 0), 0);
+  return (
+    <>
+      {studentIds.map((id) => (
+        <ChildUnread key={id} studentId={id} onCount={(n) => setCounts((c) => (c[id] === n ? c : { ...c, [id]: n }))} />
+      ))}
+      <ChatUnreadBadge count={total} />
+    </>
+  );
+}
+
+function ChildUnread({ studentId, onCount }: { studentId: string; onCount: (n: number) => void }) {
+  const n = unreadTotal(useConversations(studentId).data);
+  useEffect(() => onCount(n), [n]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
 function ChatBody() {
   const profile = useParentProfile();
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <ParentReadState query={profile} what="your family's record">
         {(p) => <ChatForFamily list={p.children} />}
       </ParentReadState>
@@ -322,12 +343,45 @@ function ChatBody() {
 
 function ChatForFamily({ list }: { list: ParentChild[] }) {
   const { child, setActiveId } = useActiveChild(list);
+  const [tab, setTab] = useState<"school" | "teacher">("school");
   return (
     <>
       <ChildPicker list={list} child={child} onPick={setActiveId} />
-      {child ? <ChatThread key={child.id} child={child} /> : null}
+      <div className="my-2 flex gap-2 text-xs font-semibold" role="tablist">
+        {(["school", "teacher"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            aria-selected={tab === t}
+            onClick={() => setTab(t)}
+            className={`rounded-full px-3 py-1 ${tab === t ? "bg-[var(--brand-deep)] text-white" : "border border-[var(--border)] text-[var(--brand-deep)]"}`}
+          >
+            {t === "school" ? "Groups & teachers" : "Class teacher (older chat)"}
+          </button>
+        ))}
+      </div>
+      {child ? (
+        tab === "school" ? (
+          <FamilySchoolChat key={child.id} studentId={child.id} />
+        ) : (
+          <ChatThread key={child.id} child={child} />
+        )
+      ) : null}
     </>
   );
+}
+
+function FamilySchoolChat({ studentId }: { studentId: string }) {
+  const convs = useConversations(studentId, { pollMs: 10_000 });
+  if (convs.isError) {
+    return (
+      <p className="text-sm text-[var(--danger)]" role="alert">
+        Could not read your chats — check the connection; it retries by itself.
+      </p>
+    );
+  }
+  return <ChatsPanel view={convs.data} loading={convs.isLoading} reload={convs.refetch} initial="" studentId={studentId} compact />;
 }
 
 function ChatThread({ child }: { child: ParentChild }) {

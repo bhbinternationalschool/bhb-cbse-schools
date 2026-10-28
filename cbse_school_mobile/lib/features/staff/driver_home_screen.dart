@@ -18,6 +18,8 @@ import "self_attendance_screen.dart";
 import "transport_requests_screen.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/push/notification_bell.dart";
+import "../../core/push/chat_button.dart";
+import "../modules/school_chat_screen.dart";
 
 /// Driver home (field persona): the bus register and log book for the
 /// driver's own bus, GPS self-attendance, and the school's routes with
@@ -350,6 +352,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                  SchoolChatButton(
+                    api: widget.api,
+                    onOpen: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => staffSchoolChat(widget.api),
+                      ),
                     ),
                   ),
                   NotificationBellButton(

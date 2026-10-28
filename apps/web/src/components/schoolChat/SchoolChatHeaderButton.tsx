@@ -16,7 +16,8 @@
  * drawer is the same pane as the School chat page.
  */
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { MessageCircle, X } from "lucide-react";
 import { ChatsPanel, unreadTotal, useConversations } from "@/components/schoolChat/SchoolChatPanel";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
@@ -31,6 +32,29 @@ export function ChatUnreadBadge({ count }: { count: number }) {
     >
       {count > 99 ? "99+" : count}
     </span>
+  );
+}
+
+/**
+ * The right-hand chat drawer, rendered into <body>: the headers it opens
+ * from blur their backdrop, which makes a `fixed` child size itself to the
+ * header (a 70 px strip) instead of the screen.
+ */
+export function ChatDrawer({ label, testId, onClose, children }: { label: string; testId: string; onClose: () => void; children: ReactNode }) {
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[60] flex justify-end bg-black/30" onClick={onClose}>
+      <div
+        className="flex h-dvh w-full max-w-md flex-col gap-3 bg-[var(--surface)] p-3 shadow-xl"
+        role="dialog"
+        aria-label={label}
+        data-testid={testId}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -63,29 +87,21 @@ export function SchoolChatHeaderButton() {
         <ChatUnreadBadge count={unread} />
       </button>
       {open ? (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setOpen(false)}>
-          <div
-            className="flex h-full w-full max-w-md flex-col gap-3 bg-[var(--surface)] p-3 shadow-xl"
-            role="dialog"
-            aria-label="School chat"
-            data-testid="header-chat-drawer"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-bold text-[var(--brand-deep)] dark:text-[var(--ink)]">School chat</p>
-              <span className="flex items-center gap-3">
-                <Link href="/school-chat" className="text-xs font-semibold text-[var(--brand-accent)] underline" onClick={() => setOpen(false)}>
-                  Open full page
-                </Link>
-                <button type="button" aria-label="Close chat" onClick={() => setOpen(false)} className="text-[var(--ink)]">
-                  <X className="h-4 w-4" />
-                </button>
-              </span>
-            </div>
-            <ChatsPanel view={convs.data} loading={convs.isLoading} reload={convs.refetch} initial="" compact />
-            {convs.isError ? <p className="text-xs text-[var(--danger)]">Could not read your chats — check the connection; it retries by itself.</p> : null}
+        <ChatDrawer label="School chat" testId="header-chat-drawer" onClose={() => setOpen(false)}>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-bold text-[var(--brand-deep)] dark:text-[var(--ink)]">School chat</p>
+            <span className="flex items-center gap-3">
+              <Link href="/school-chat" className="text-xs font-semibold text-[var(--brand-accent)] underline" onClick={() => setOpen(false)}>
+                Open full page
+              </Link>
+              <button type="button" aria-label="Close chat" onClick={() => setOpen(false)} className="text-[var(--ink)]">
+                <X className="h-4 w-4" />
+              </button>
+            </span>
           </div>
-        </div>
+          <ChatsPanel view={convs.data} loading={convs.isLoading} reload={convs.refetch} initial="" compact />
+          {convs.isError ? <p className="text-xs text-[var(--danger)]">Could not read your chats — check the connection; it retries by itself.</p> : null}
+        </ChatDrawer>
       ) : null}
     </>
   );
