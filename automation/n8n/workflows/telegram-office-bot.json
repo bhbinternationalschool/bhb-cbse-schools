@@ -12,7 +12,7 @@
           ]
         }
       },
-      "id": "33aefc86-8673-4923-b2e9-b376e483f26f",
+      "id": "e6a74063-a1cb-47a8-b2f6-42d295520609",
       "name": "Every minute",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -25,7 +25,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nif (!TG_TOKEN) return [];\n// The offset confirms every earlier update to Telegram; it survives restarts\n// in the workflow's static data (saved after each production execution).\nconst st = $getWorkflowStaticData('global');\nconst offset = Number(st.tg_offset || 0);\nreturn [{ json: { tg_method: 'getUpdates', tg: { offset, timeout: 0, limit: 100, allowed_updates: ['message', 'callback_query'] } } }];\n"
       },
-      "id": "195394b4-4c54-43cf-b217-5d901a6534a4",
+      "id": "143504da-1b36-4361-85d4-36b8288a108b",
       "name": "Build: getUpdates",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -54,7 +54,7 @@
           "timeout": 30000
         }
       },
-      "id": "a4fe68fc-f9dc-4cef-9c09-61c200699dc2",
+      "id": "c17f0c99-346b-4005-a110-3d5fa558b73d",
       "name": "Telegram: getUpdates",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -68,7 +68,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nconst res = $input.first().json || {};\nconst updates = res.ok && Array.isArray(res.result) ? res.result : [];\nif (!updates.length) return [];\nconst st = $getWorkflowStaticData('global');\nst.tg_offset = Math.max(...updates.map((u) => Number(u.update_id || 0))) + 1;\n// (?![a-z]) instead of \\b: JS word boundaries are ASCII-only, so Devanagari words never matched.\n// End-anchored: a BARE approve/reject word (optionally a draft number) is a\n// decision; anything longer is a free-form instruction for the assistant.\nconst APPROVE = /^\\s*\\/?(approve|approved|ok|okay|yes|haan|ha|हाँ|हां|ठीक)\\s*#?\\s*(\\d+)?\\s*$/i;\nconst REJECT = /^\\s*\\/?(reject|rejected|cancel|nahi|nahin|नहीं|रद्द)\\s*#?\\s*(\\d+)?\\s*$/i;\nconst COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan', marketing: 'marketing' };\nconst out = [];\nfor (const u of updates) {\n  const cq = u.callback_query;\n  if (cq) {\n    const chat_id = String((cq.message && cq.message.chat && cq.message.chat.id) || (cq.from && cq.from.id) || '');\n    const role = tgRoleOf(chat_id);\n    const data = String(cq.data || '');\n    const base = { chat_id, role, callback_id: cq.id, message_id: cq.message ? cq.message.message_id : null, message_text: cq.message ? String(cq.message.text || '') : '' };\n    if (!role) continue;\n    const m = /^(approve|reject):(\\d+)$/.exec(data);\n    if (m && role === 'director') { out.push({ json: { kind: 'decision', decision: m[1], task_id: Number(m[2]), via: 'tap', ...base } }); continue; }\n    if (m) { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    const ta = /^(done|snooze):(\\d+)$/.exec(data);\n    if (ta && role === 'director') { out.push({ json: { kind: 'taskaction', action: ta[1], task_id: Number(ta[2]), ...base } }); continue; }\n    if ((ta || data === 'doneall') && role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    if (data === 'doneall') { out.push({ json: { kind: 'taskaction', action: 'doneall', task_id: null, ...base } }); continue; }\n    if (data === 'tasks') { out.push({ json: { kind: 'command', cmd: 'tasks', ...base } }); continue; }\n    continue;\n  }\n  const msg = u.message;\n  if (!msg || !msg.text) continue;\n  const chat_id = String(msg.chat && msg.chat.id || '');\n  const role = tgRoleOf(chat_id);\n  const text = String(msg.text || '').trim();\n  const base = { chat_id, role, callback_id: null, message_id: null, message_text: '' };\n  const cmd = /^\\/([a-z]+)(?:@\\w+)?\\b/i.exec(text);\n  if (cmd && COMMANDS[cmd[1].toLowerCase()]) {\n    const name = COMMANDS[cmd[1].toLowerCase()];\n    if (role || name === 'start') out.push({ json: { kind: 'command', cmd: name, ...base } });\n    continue;\n  }\n  if (!role) continue;\n  const ta = /^\\/(done|close|snooze)\\s+#?(\\d+|all)\\b/i.exec(text);\n  if (ta) {\n    if (role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    const act = ta[1].toLowerCase() === 'close' ? 'done' : ta[1].toLowerCase();\n    const arg = ta[2].toLowerCase();\n    if (arg === 'all') { if (act === 'done') out.push({ json: { kind: 'taskaction', action: 'doneall', task_id: null, ...base } }); continue; }\n    out.push({ json: { kind: 'taskaction', action: act, task_id: Number(arg), ...base } });\n    continue;\n  }\n  let decision = null; let m = text.match(APPROVE);\n  if (m) decision = 'approve'; else { m = text.match(REJECT); if (m) decision = 'reject'; }\n  if (!decision) {\n    // Any other message from the director is a free-form instruction for the\n    // office assistant (ERP /api/office/assistant). Non-director chatter is ignored.\n    if (role === 'director') out.push({ json: { kind: 'assistant', text, ...base } });\n    continue;\n  }\n  if (role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n  out.push({ json: { kind: 'decision', decision, task_id: m[2] ? Number(m[2]) : null, via: 'text', ...base } });\n}\nreturn out;\n"
       },
-      "id": "cd849fc6-0b8f-4fba-9619-4c5615ae2a86",
+      "id": "52ccd337-2b3e-43c8-80c2-a9a227cd63dd",
       "name": "Parse: updates",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -91,7 +91,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "90fc7a5b-a9f8-4101-b0fe-bbd670023ab3",
+                    "id": "f36da947-bfd9-45c5-b982-29df0d3804a0",
                     "leftValue": "={{ $json.kind }}",
                     "rightValue": "decision",
                     "operator": {
@@ -115,7 +115,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "c19055a1-c617-4fa9-a9a6-2683dcb8838e",
+                    "id": "9af0470c-36c0-4ea5-bca4-7aaccb851f70",
                     "leftValue": "={{ $json.kind }}",
                     "rightValue": "command",
                     "operator": {
@@ -139,7 +139,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "b4d8d0a4-c841-4ae7-a1b1-6734f6017b61",
+                    "id": "db5655a9-7104-425f-a15b-22292ea283f6",
                     "leftValue": "={{ $json.kind }}",
                     "rightValue": "taskaction",
                     "operator": {
@@ -163,7 +163,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "e51fb9ef-93b7-4671-bd1f-8f97b5fc6dee",
+                    "id": "2a818434-d57e-4e3d-a267-24c84c1dd138",
                     "leftValue": "={{ $json.kind }}",
                     "rightValue": "assistant",
                     "operator": {
@@ -181,7 +181,7 @@
         },
         "options": {}
       },
-      "id": "9d43ca74-626e-448b-b3cd-7f45c4cd3e43",
+      "id": "eaa15374-d768-4c62-be34-2fc5fe4f99df",
       "name": "Switch: update kind",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -215,7 +215,7 @@
           "timeout": 30000
         }
       },
-      "id": "46fc9c20-5117-4a49-8e65-fa3fa194117c",
+      "id": "5ad97616-7381-4b95-9f8f-d667ea69b762",
       "name": "Fetch: pending drafts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -230,7 +230,7 @@
       "parameters": {
         "jsCode": "\nconst pending = $input.all().map((i) => i.json).filter((r) => r && r.id);\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'decision');\nconst out = []; const decided = new Set();\nfor (const a of asks) {\n  let task = null;\n  if (a.task_id) task = pending.find((t) => Number(t.id) === Number(a.task_id));\n  else if (pending.length === 1) task = pending[0];\n  let ack = '';\n  if (!task) ack = a.task_id ? 'No draft #' + a.task_id + ' is waiting.' : (pending.length ? 'Which draft? ' + pending.map((t) => '#' + t.id).join(', ') + ' are waiting — tap its button or reply APPROVE <id>.' : 'No draft is waiting.');\n  else if (decided.has(task.id)) ack = 'Draft #' + task.id + ' is already decided.';\n  if (ack) { out.push({ json: { ...a, decision: 'none', task: null, ack } }); continue; }\n  decided.add(task.id);\n  out.push({ json: { ...a, task } });\n}\nreturn out;\n"
       },
-      "id": "a2fbf990-0236-47c2-80c9-f56165768eee",
+      "id": "fd358eb6-7ae5-4f9a-859f-8e380ea97d0a",
       "name": "Match: decisions",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -253,7 +253,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "c387d1a1-80ec-4788-aa60-4c9b4061f099",
+                    "id": "b03b10a5-e68f-4c7a-a7d7-bc52e71bffe0",
                     "leftValue": "={{ $json.decision }}",
                     "rightValue": "approve",
                     "operator": {
@@ -277,7 +277,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "ec6ec3f0-9ce2-4b73-826f-672aa85af7f9",
+                    "id": "9090f0a5-e760-4fa0-8331-d6d95504c071",
                     "leftValue": "={{ $json.decision }}",
                     "rightValue": "reject",
                     "operator": {
@@ -301,7 +301,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "f209176a-c2a5-494d-8434-d175d27031d4",
+                    "id": "224bab73-0538-452b-a11a-1dc3663c857f",
                     "leftValue": "={{ $json.decision }}",
                     "rightValue": "none",
                     "operator": {
@@ -319,7 +319,7 @@
         },
         "options": {}
       },
-      "id": "a5cfa5e7-a746-40bd-9f66-0e607a17b52c",
+      "id": "aa82833f-02e8-49e2-827a-e29c6f2a5d54",
       "name": "Switch: decision",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -337,7 +337,7 @@
         "message": "={{ $json.task.payload.body }}",
         "options": {}
       },
-      "id": "9cbb9c87-912e-4676-a2b8-447446cf6d91",
+      "id": "87da31f4-11ba-4735-b0c9-e3fb87b94054",
       "name": "Gmail: send approved reply",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
@@ -360,7 +360,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "5ce86f61-abcf-4e37-babb-d835e50975e1",
+                    "id": "70961750-3e3c-4dcf-be00-8bd9a5a2c658",
                     "leftValue": "={{ $json.task.source }}",
                     "rightValue": "receptionist",
                     "operator": {
@@ -384,7 +384,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "7e5e3c09-6d94-4ba4-941c-0f90a3503e5d",
+                    "id": "6e3ce7c9-b23f-492c-bf91-cd8562413f40",
                     "leftValue": "={{ $json.task.source }}",
                     "rightValue": "assistant",
                     "operator": {
@@ -408,7 +408,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "59342d2f-8fa2-4e9a-a8d2-99f3ebf83673",
+                    "id": "45623a4b-0962-40a8-b6ed-9c2fb0b830de",
                     "leftValue": "={{ $json.task.source }}",
                     "rightValue": "marketing",
                     "operator": {
@@ -426,7 +426,7 @@
         },
         "options": {}
       },
-      "id": "67fe857e-aef3-4005-b462-32145897f4c2",
+      "id": "d5d6fcd2-104c-4d9f-a3e7-3621a553b939",
       "name": "Switch: approve source",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -440,7 +440,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nconst d = $('Match: decisions').item.json;\nconst sent = $input.item.json;\nconst now = new Date().toISOString();\nreturn { json: { ...d, task_id: d.task.id, patch: { approval_state: 'approved', status: 'done', decided_by: 'director', decided_at: now, updated_at: now,\n  payload: { ...d.task.payload, decision_reply: 'telegram ' + d.via, sent_at: now, gmail_sent_id: sent.id || '' } },\n  ack: '✅ Sent reply #' + d.task.id + ' to ' + (d.task.payload.to_name || d.task.payload.to) + '.' } };\n"
       },
-      "id": "6037eb41-1acd-43ae-88a7-c072e6be0f11",
+      "id": "c1b9e10c-6762-4faa-aebe-770f81578b35",
       "name": "Build: approved patch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -477,7 +477,7 @@
           "timeout": 120000
         }
       },
-      "id": "10561ba6-4762-4028-8e42-02e4bc5a547d",
+      "id": "c0628997-004f-41a6-9f97-7624522adf31",
       "name": "ERP: approve send",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -493,7 +493,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nconst d = $('Match: decisions').item.json;\nconst res = $input.item.json || {};\nconst now = new Date().toISOString();\n// The ERP returns { kind:'action_done', text } once the send has run. Only\n// then is the draft closed; if the office was unreachable it stays pending.\nif (res.kind === 'action_done') {\n  return { json: { ...d, task_id: d.task.id, patch: { approval_state: 'approved', status: 'done', decided_by: 'director', decided_at: now, updated_at: now,\n    payload: { ...d.task.payload, decision_reply: 'telegram ' + d.via, sent_at: now, send_result: String(res.text || '') } },\n    ack: '✅ ' + String(res.text || 'Sent.') } };\n}\nreturn { json: { ...d, task_id: d.task.id, patch: { updated_at: now, payload: { ...d.task.payload, last_error: 'send unreachable ' + now } },\n  ack: '⚠️ Could not reach the office to send draft #' + d.task.id + '. It is still waiting — tap Approve again.' } };\n"
       },
-      "id": "deff5ec4-23bc-4a47-97fd-23787dc39c9c",
+      "id": "5fe195b1-9643-4dfb-969b-2a574999fa30",
       "name": "Build: assistant approved patch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -507,7 +507,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nconst d = $('Match: decisions').item.json;\nconst now = new Date().toISOString();\nconst p = d.task.payload || {};\nconst what = [p.mk_unit, p.mk_channel].filter(Boolean).join(' / ');\nreturn { json: { ...d, task_id: d.task.id, patch: { approval_state: 'approved', status: 'done', decided_by: 'director', decided_at: now, updated_at: now,\n  payload: { ...p, decision_reply: 'telegram ' + d.via, approved_at: now } },\n  ack: '✅ Approved #' + d.task.id + (what ? ' (' + what + ')' : '') + ' — ' + String(d.task.title || '').slice(0, 80) + '. Go ahead; the Marketing Manager records it next run.' } };\n"
       },
-      "id": "f96f8e84-8beb-4ae7-aff6-f292bfab4dec",
+      "id": "6250a8c9-aaf8-4bbb-b3fa-0f220e4172db",
       "name": "Build: marketing approved patch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -521,7 +521,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nconst d = $input.item.json;\nconst now = new Date().toISOString();\nreturn { json: { ...d, task_id: d.task.id, patch: { approval_state: 'rejected', status: 'cancelled', decided_by: 'director', decided_at: now, updated_at: now,\n  payload: { ...d.task.payload, decision_reply: 'telegram ' + d.via } },\n  ack: '🚫 Draft #' + d.task.id + ' rejected — nothing sent to ' + (d.task.payload.to_name || d.task.payload.to) + '.' } };\n"
       },
-      "id": "2fa9ca18-9324-4db9-825c-d5041e8cb126",
+      "id": "8235f389-b815-4468-94ec-86c55ea9af59",
       "name": "Build: rejected patch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -562,7 +562,7 @@
           "timeout": 30000
         }
       },
-      "id": "5ec402e8-4034-440a-b2bc-98e3edad156d",
+      "id": "7dfa4c96-66a3-47bf-ba3c-3e94e23d52a5",
       "name": "Patch: task decided",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -576,7 +576,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nreturn { json: { ...$input.item.json, patched: false } };\n"
       },
-      "id": "9752060a-3d53-42f3-ae18-5f250443f44e",
+      "id": "6a9a8efb-6b9a-42a7-8396-ad33c9233251",
       "name": "Build: no decision",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -589,7 +589,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\n// Answer the tap, edit the draft message so the decision shows under it\n// (the keyboard goes away), or reply to a typed decision.\nconst built = [];\nfor (const name of ['Build: approved patch', 'Build: assistant approved patch', 'Build: marketing approved patch', 'Build: rejected patch', 'Build: no decision']) {\n  try { for (const x of $(name).all()) built.push(x.json); } catch (e) { /* branch did not run */ }\n}\nconst out = [];\nfor (const b of built) {\n  const ack = String(b.ack || '');\n  if (b.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: b.callback_id, text: ack.slice(0, 200) } } });\n  if (b.message_id && b.decision !== 'none') {\n    const text = tgChunks(String(b.message_text || '') + '\\n\\n' + ack).slice(-1)[0];\n    out.push({ json: { tg_method: 'editMessageText', tg: { chat_id: b.chat_id, message_id: b.message_id, text } } });\n  } else {\n    out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: b.chat_id, text: ack } } });\n  }\n}\nreturn out;\n"
       },
-      "id": "c5864fdd-c670-442b-97f1-499e72c6be28",
+      "id": "358eaee0-1129-48e2-9cc2-efcdded830e6",
       "name": "Build: decision replies",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -618,7 +618,7 @@
           "timeout": 30000
         }
       },
-      "id": "b3afc617-809e-4e75-8e7e-03141ab23c8b",
+      "id": "dc6b44e8-745b-421d-800f-7a5efc355842",
       "name": "Telegram: reply",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -653,7 +653,7 @@
           "timeout": 30000
         }
       },
-      "id": "94628631-8c91-402d-862e-6783749c6303",
+      "id": "728d16e0-6f3b-4f07-8393-d6b49e1f4de2",
       "name": "Fetch: open tasks",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -689,7 +689,7 @@
           "timeout": 30000
         }
       },
-      "id": "9d5e8cb3-e85d-400f-912f-8f46d3b38fe7",
+      "id": "c15d18ae-3b48-4919-9f15-3f600f7b2f88",
       "name": "Fetch: latest huddle",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -725,7 +725,7 @@
           "timeout": 30000
         }
       },
-      "id": "7231738b-5d77-40e4-8b8f-bbb901c19fb2",
+      "id": "668575f2-1f72-4a58-98ae-00c7e0ad4c52",
       "name": "Fetch: latest plan",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -761,7 +761,7 @@
           "timeout": 30000
         }
       },
-      "id": "8bb9c420-acd9-43c1-baf2-e8fe610bbfd9",
+      "id": "85c9d62f-6315-42b3-96fc-86375bb95f5d",
       "name": "Fetch: latest marketing",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -797,7 +797,7 @@
           "timeout": 30000
         }
       },
-      "id": "347ce25c-5699-4dab-bac2-5aefab02056f",
+      "id": "eb6120ab-725d-41db-91ca-7a5ab1bb1e43",
       "name": "Fetch: marketing budget",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -810,9 +810,9 @@
     },
     {
       "parameters": {
-        "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nfunction istNow() { return new Date(Date.now() + 5.5 * 3600 * 1000); }\nfunction isoDate(d) { return d.toISOString().slice(0, 10); }\nfunction academicYearCode(d) {\n  const y = d.getUTCMonth() + 1 >= 4 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;\n  return y + '-' + String((y + 1) % 100).padStart(2, '0');\n}\n\nconst rows = (name) => { try { return $(name).all().map((i) => i.json).filter((r) => r && Object.keys(r).length); } catch (e) { return []; } };\nconst tasks = rows('Fetch: open tasks').filter((r) => r.id);\nconst meeting = rows('Fetch: latest huddle')[0] || null;\nconst planNote = rows('Fetch: latest plan')[0] || null;\nconst mktg = rows('Fetch: latest marketing')[0] || null;\nconst budgetRows = rows('Fetch: marketing budget');\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'command');\nconst today = isoDate(istNow());\nconst line = (t) => '#' + t.id + ' [' + t.to_role + '] ' + t.title + (t.due_on ? ' (due ' + t.due_on + ')' : '') + (t.approval_state === 'pending' ? ' — waiting for you' : '');\nconst out = [];\nconst send = (chat_id, text, keyboard) => {\n  const chunks = tgChunks(text);\n  chunks.forEach((c, i) => {\n    const tg = { chat_id, text: c, parse_mode: 'HTML', disable_web_page_preview: true };\n    if (keyboard && i === chunks.length - 1) tg.reply_markup = { inline_keyboard: keyboard };\n    out.push({ json: { tg_method: 'sendMessage', tg } });\n  });\n};\nfor (const a of asks) {\n  if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });\n  if (a.cmd === 'start') {\n    const who = a.role ? 'You are the ' + a.role + '.' : 'This chat is not registered yet. Give the office this chat id: <code>' + tgEscape(a.chat_id) + '</code>';\n    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n/drafts — replies waiting for your decision\\n/tasks — open tasks (tap to close or defer)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan\\n/marketing — cost per lead, spend vs budget, this week\\'s survey beats' : ''));\n    continue;\n  }\n  if (a.cmd === 'not_director') { send(a.chat_id, 'Only the director decides drafts.'); continue; }\n  if (a.cmd === 'drafts') {\n    const drafts = tasks.filter((t) => t.approval_state === 'pending' && t.source === 'receptionist');\n    if (!drafts.length) { send(a.chat_id, 'No draft is waiting for a decision.'); continue; }\n    const text = '<b>Drafts waiting (' + drafts.length + ')</b>\\n' + drafts.map((t) => { const p = t.payload || {}; return '#' + t.id + ' ' + tgEscape((p.category || '') + ' → ' + (p.to_name || p.to || '') + ' — ' + (p.subject || t.title)); }).join('\\n');\n    const keyboard = a.role === 'director' ? drafts.slice(0, 10).map((t) => [{ text: '✅ Approve ' + t.id, callback_data: 'approve:' + t.id }, { text: '❌ Reject ' + t.id, callback_data: 'reject:' + t.id }]) : null;\n    send(a.chat_id, text, keyboard);\n    continue;\n  }\n  if (a.cmd === 'tasks') {\n    if (!tasks.length) { send(a.chat_id, 'No open tasks.'); continue; }\n    const body = '<b>Open tasks (' + tasks.length + ')</b>\\n' + tasks.map((t) => tgEscape(line(t))).join('\\n');\n    let keyboard = null;\n    if (a.role === 'director') {\n      keyboard = tasks.slice(0, 8).map((t) => [{ text: '✅ Done ' + t.id, callback_data: 'done:' + t.id }, { text: '💤 Snooze ' + t.id, callback_data: 'snooze:' + t.id }]);\n      keyboard.push([{ text: '✅ Clear all ' + tasks.length, callback_data: 'doneall' }]);\n    }\n    send(a.chat_id, body + (tasks.length > 8 ? '\\n\\n(Buttons for the first 8 - for the rest reply /done <id> or /snooze <id>.)' : ''), keyboard);\n    continue;\n  }\n  if (a.cmd === 'huddle') {\n    if (!meeting) { send(a.chat_id, 'No huddle on record yet.'); continue; }\n    const dec = Array.isArray(meeting.decisions) ? meeting.decisions : [];\n    send(a.chat_id, '<b>Huddle ' + tgEscape(meeting.meeting_date) + '</b>\\n' + tgEscape(String(meeting.minutes || '').slice(0, 3000)) + (dec.length ? '\\n\\n<b>Decisions</b>\\n' + dec.map((d) => tgEscape('• ' + (d.to_role || '') + ': ' + (d.title || '') + (d.due_on ? ' by ' + d.due_on : ''))).join('\\n') : ''));\n    continue;\n  }\n  if (a.cmd === 'plan') {\n    if (!planNote) { send(a.chat_id, 'No substitution plan on record yet.'); continue; }\n    const when = String(planNote.created_at || '').slice(0, 10);\n    send(a.chat_id, (when === today ? '<b>Today\\'s plan</b>\\n' : '<b>No plan yet today — last plan ' + tgEscape(when) + '</b>\\n') + tgEscape(String(planNote.body || '').slice(0, 3500)));\n    continue;\n  }\n  if (a.cmd === 'marketing') {\n    const month = today.slice(0, 7);\n    const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');\n    const thisMonth = budgetRows.filter((b) => String(b.month || '').slice(0, 7) === month);\n    const f = (mktg && mktg.facts) || {};\n    const lines = ['<b>Marketing — ' + tgEscape(month) + '</b>'];\n    // Cost per lead (from the latest weekly note's facts; never invented here).\n    const cpl = Array.isArray(f.cost_per_lead) ? f.cost_per_lead : [];\n    if (cpl.length) {\n      lines.push('\\n<b>Cost per lead</b>');\n      for (const c of cpl) lines.push(tgEscape('• ' + (c.unit || '?') + ' / ' + (c.channel || '?') + ': ' + (c.leads != null ? c.leads + ' leads' : '') + (c.cpl != null && c.cpl !== '' ? ', CPL ' + (typeof c.cpl === 'number' ? inr(c.cpl) : c.cpl) : '')));\n    }\n    // Spend vs budget (caps are live from the budget table; spent is from the note).\n    lines.push('\\n<b>Spend vs budget</b>');\n    if (!thisMonth.length) lines.push('• No budget set for ' + month + ' yet — the director must set the monthly figure and the school/ITI split.');\n    else for (const b of thisMonth) lines.push(tgEscape('• ' + (b.unit || '?') + ' / ' + (b.channel || '?') + ': cap ' + inr(b.cap_amount) + ', allocated ' + inr(b.allocated) + ', spent ' + (b.spent != null ? inr(b.spent) : 'not known')));\n    // Week's beat plan.\n    const beats = Array.isArray(f.beat_plan) ? f.beat_plan : [];\n    if (beats.length) {\n      lines.push('\\n<b>This week\\'s beats</b>');\n      for (const bt of beats.slice(0, 8)) lines.push(tgEscape((bt.rank ? bt.rank + '. ' : '• ') + (bt.beat || (Array.isArray(bt.villages) ? bt.villages.slice(0, 3).join(', ') : '')) + (bt.child_population ? ' — ~' + bt.child_population + ' children' : '') + (bt.past_enquiries != null ? ', ' + bt.past_enquiries + ' past enq' : '')));\n    }\n    if (!cpl.length && !beats.length) {\n      if (mktg) { lines.push('\\n' + tgEscape(String(mktg.body || '').slice(0, 2500))); }\n      else lines.push('\\nNo weekly marketing note on record yet — the Marketing Manager runs Monday morning.');\n    }\n    send(a.chat_id, lines.join('\\n'));\n    continue;\n  }\n}\nreturn out;\n"
+        "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nfunction istNow() { return new Date(Date.now() + 5.5 * 3600 * 1000); }\nfunction isoDate(d) { return d.toISOString().slice(0, 10); }\nfunction academicYearCode(d) {\n  const y = d.getUTCMonth() + 1 >= 4 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;\n  return y + '-' + String((y + 1) % 100).padStart(2, '0');\n}\n\nconst rows = (name) => { try { return $(name).all().map((i) => i.json).filter((r) => r && Object.keys(r).length); } catch (e) { return []; } };\nconst tasks = rows('Fetch: open tasks').filter((r) => r.id);\nconst meeting = rows('Fetch: latest huddle')[0] || null;\nconst planNote = rows('Fetch: latest plan')[0] || null;\nconst mktg = rows('Fetch: latest marketing')[0] || null;\nconst budgetRows = rows('Fetch: marketing budget');\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'command');\nconst today = isoDate(istNow());\nconst line = (t) => '#' + t.id + ' [' + t.to_role + '] ' + t.title + (t.due_on ? ' (due ' + t.due_on + ')' : '') + (t.approval_state === 'pending' ? ' — waiting for you' : '');\nconst out = [];\nconst send = (chat_id, text, keyboard) => {\n  const chunks = tgChunks(text);\n  chunks.forEach((c, i) => {\n    const tg = { chat_id, text: c, parse_mode: 'HTML', disable_web_page_preview: true };\n    if (keyboard && i === chunks.length - 1) tg.reply_markup = { inline_keyboard: keyboard };\n    out.push({ json: { tg_method: 'sendMessage', tg } });\n  });\n};\nfor (const a of asks) {\n  if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });\n  if (a.cmd === 'start') {\n    const who = a.role ? 'You are the ' + a.role + '.' : 'This chat is not registered yet. Give the office this chat id: <code>' + tgEscape(a.chat_id) + '</code>';\n    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n/drafts — replies waiting for your decision\\n/tasks — open tasks (tap to close or defer)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan\\n/marketing — cost per lead, spend vs budget, this week\\'s survey beats' : ''));\n    continue;\n  }\n  if (a.cmd === 'not_director') { send(a.chat_id, 'Only the director decides drafts.'); continue; }\n  if (a.cmd === 'drafts') {\n    const drafts = tasks.filter((t) => t.approval_state === 'pending' && t.source === 'receptionist');\n    if (!drafts.length) { send(a.chat_id, 'No draft is waiting for a decision.'); continue; }\n    const text = '<b>Drafts waiting (' + drafts.length + ')</b>\\n' + drafts.map((t) => { const p = t.payload || {}; return '#' + t.id + ' ' + tgEscape((p.category || '') + ' → ' + (p.to_name || p.to || '') + ' — ' + (p.subject || t.title)); }).join('\\n');\n    const keyboard = a.role === 'director' ? drafts.slice(0, 10).map((t) => [{ text: '✅ Approve ' + t.id, callback_data: 'approve:' + t.id }, { text: '❌ Reject ' + t.id, callback_data: 'reject:' + t.id }]) : null;\n    send(a.chat_id, text, keyboard);\n    continue;\n  }\n  if (a.cmd === 'tasks') {\n    if (!tasks.length) { send(a.chat_id, 'No open tasks.'); continue; }\n    const body = '<b>Open tasks (' + tasks.length + ')</b>\\n' + tasks.map((t) => tgEscape(line(t))).join('\\n');\n    let keyboard = null;\n    if (a.role === 'director') {\n      keyboard = tasks.slice(0, 8).map((t) => [{ text: '✅ Done ' + t.id, callback_data: 'done:' + t.id }, { text: '💤 Snooze ' + t.id, callback_data: 'snooze:' + t.id }]);\n      keyboard.push([{ text: '✅ Clear all ' + tasks.length, callback_data: 'doneall' }]);\n    }\n    send(a.chat_id, body + (tasks.length > 8 ? '\\n\\n(Buttons for the first 8 - for the rest reply /done <id> or /snooze <id>.)' : ''), keyboard);\n    continue;\n  }\n  if (a.cmd === 'huddle') {\n    if (!meeting) { send(a.chat_id, 'No huddle on record yet.'); continue; }\n    const dec = Array.isArray(meeting.decisions) ? meeting.decisions : [];\n    send(a.chat_id, '<b>Huddle ' + tgEscape(meeting.meeting_date) + '</b>\\n' + tgEscape(String(meeting.minutes || '').slice(0, 3000)) + (dec.length ? '\\n\\n<b>Decisions</b>\\n' + dec.map((d) => tgEscape('• ' + (d.to_role || '') + ': ' + (d.title || '') + (d.due_on ? ' by ' + d.due_on : ''))).join('\\n') : ''));\n    continue;\n  }\n  if (a.cmd === 'plan') {\n    if (!planNote) { send(a.chat_id, 'No substitution plan on record yet.'); continue; }\n    const when = String(planNote.created_at || '').slice(0, 10);\n    send(a.chat_id, (when === today ? '<b>Today\\'s plan</b>\\n' : '<b>No plan yet today — last plan ' + tgEscape(when) + '</b>\\n') + tgEscape(String(planNote.body || '').slice(0, 3500)));\n    continue;\n  }\n  if (a.cmd === 'marketing') {\n    const month = today.slice(0, 7);\n    const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');\n    const thisMonth = budgetRows.filter((b) => String(b.month || '').slice(0, 7) === month);\n    const f = (mktg && mktg.facts) || {};\n    const lines = ['<b>Marketing — ' + tgEscape(month) + '</b>'];\n    // Cost per lead (from the latest weekly note's facts; never invented here).\n    const cpl = Array.isArray(f.cost_per_lead) ? f.cost_per_lead : [];\n    if (cpl.length) {\n      lines.push('\\n<b>Cost per lead</b>');\n      for (const c of cpl) lines.push(tgEscape('• ' + (c.unit || '?') + ' / ' + (c.channel || '?') + ': ' + (c.leads != null ? c.leads + ' leads' : '') + (c.cpl != null && c.cpl !== '' ? ', CPL ' + (typeof c.cpl === 'number' ? inr(c.cpl) : c.cpl) : '')));\n    }\n    // Spend vs budget (caps are live from the budget table; spent is from the note).\n    lines.push('\\n<b>Spend vs budget</b>');\n    for (const b of thisMonth) lines.push(tgEscape('• ' + (b.unit || '?') + ' / ' + (b.channel || '?') + ': cap ' + inr(b.cap_amount) + ', allocated ' + inr(b.allocated) + ', spent ' + (b.spent != null ? inr(b.spent) : 'not known')));\n    // Monthly per-portal ask: Google Ads, Facebook, WhatsApp, for school + ITI.\n    const askPortals = [['google_ads', 'Google Ads'], ['meta', 'Facebook'], ['whatsapp', 'WhatsApp']];\n    const askUnits = [['school', 'School'], ['iti', 'ITI']];\n    const have = new Set(thisMonth.map((b) => (b.unit || '') + '/' + (b.channel || '')));\n    const missing = [];\n    for (const [u, uL] of askUnits) for (const [c, cL] of askPortals) if (!have.has(u + '/' + c)) missing.push(uL + ' / ' + cL);\n    if (missing.length) {\n      lines.push(tgEscape('Not set for ' + month + ' yet: ' + missing.join(', ') + '.'));\n      lines.push(tgEscape('Reply with the amounts and I\\'ll set them — e.g. \"Google 5000, Facebook 3000, WhatsApp 2000 for the school\".'));\n    }\n    // Week's beat plan.\n    const beats = Array.isArray(f.beat_plan) ? f.beat_plan : [];\n    if (beats.length) {\n      lines.push('\\n<b>This week\\'s beats</b>');\n      for (const bt of beats.slice(0, 8)) lines.push(tgEscape((bt.rank ? bt.rank + '. ' : '• ') + (bt.beat || (Array.isArray(bt.villages) ? bt.villages.slice(0, 3).join(', ') : '')) + (bt.child_population ? ' — ~' + bt.child_population + ' children' : '') + (bt.past_enquiries != null ? ', ' + bt.past_enquiries + ' past enq' : '')));\n    }\n    if (!cpl.length && !beats.length) {\n      if (mktg) { lines.push('\\n' + tgEscape(String(mktg.body || '').slice(0, 2500))); }\n      else lines.push('\\nNo weekly marketing note on record yet — the Marketing Manager runs Monday morning.');\n    }\n    send(a.chat_id, lines.join('\\n'));\n    continue;\n  }\n}\nreturn out;\n"
       },
-      "id": "a6867357-e08a-4cb1-adc6-5223c37118e0",
+      "id": "81f0e20f-ebd9-436f-95a0-e63a46165181",
       "name": "Build: command replies",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -825,7 +825,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nfunction istNow() { return new Date(Date.now() + 5.5 * 3600 * 1000); }\nfunction isoDate(d) { return d.toISOString().slice(0, 10); }\nfunction academicYearCode(d) {\n  const y = d.getUTCMonth() + 1 >= 4 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;\n  return y + '-' + String((y + 1) % 100).padStart(2, '0');\n}\n\nreturn (async () => {\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'taskaction');\nconst SB = String($env.SUPABASE_URL || '').replace(/\\/$/, '');\nconst KEY = String($env.SUPABASE_SERVICE_ROLE_KEY || '');\nconst TENANT = String($env.OFFICE_TENANT_ID || '');\nconst H = { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json', Prefer: 'return=representation' };\nconst now = new Date().toISOString();\nconst tomorrow = isoDate(new Date(istNow().getTime() + 86400000));\nconst sb = async (method, pathq, body) => {\n  const res = await this.helpers.httpRequest({ method, url: SB + '/rest/v1/' + pathq, headers: H, body: body ? JSON.stringify(body) : undefined });\n  if (typeof res === 'string') { try { return JSON.parse(res); } catch (e) { return []; } }\n  return res;\n};\nconst open = await sb('GET', 'office_tasks?tenant_id=eq.' + TENANT + '&status=in.(open,doing)&select=id,to_role,title,due_on,payload&order=created_at.asc&limit=200');\nconst openArr = Array.isArray(open) ? open : [];\nconst openIds = new Set(openArr.map((t) => Number(t.id)));\nconst out = [];\nconst seen = new Set();\nfor (const a of asks) {\n  if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });\n  let ids = [];\n  if (a.action === 'doneall') ids = openArr.map((t) => Number(t.id));\n  else if (a.task_id && openIds.has(Number(a.task_id))) ids = [Number(a.task_id)];\n  if (!ids.length) { out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: a.chat_id, text: a.task_id ? 'No open task #' + a.task_id + '.' : 'No open tasks to clear.' } } }); continue; }\n  let done = 0;\n  for (const id of ids) {\n    if (seen.has(id)) continue; seen.add(id);\n    const cur = openArr.find((t) => Number(t.id) === id) || {};\n    const patch = a.action === 'snooze' ? { due_on: tomorrow, updated_at: now, payload: { ...(cur.payload || {}), snoozed_until: tomorrow, snoozed_by: 'director' } } : { status: 'done', decided_by: 'director', decided_at: now, updated_at: now };\n    try { await sb('PATCH', 'office_tasks?id=eq.' + id + '&tenant_id=eq.' + TENANT, patch); done += 1; } catch (e) {}\n  }\n  const label = a.action === 'doneall' ? ('Cleared ' + done + ' open task' + (done === 1 ? '' : 's') + '.') : (a.action === 'snooze' ? ('Task #' + ids[0] + ' snoozed to ' + tomorrow + '.') : ('Task #' + ids[0] + ' closed.'));\n  out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: a.chat_id, text: '✅ ' + label } } });\n}\nreturn out;\n})();\n"
       },
-      "id": "a9b18c20-ca01-463b-bf13-c1e8e8321ebd",
+      "id": "63ac880c-3eb0-42b2-81a9-1be7768069f4",
       "name": "Apply: task actions",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -838,7 +838,7 @@
       "parameters": {
         "jsCode": "\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'assistant');\nreturn asks.map((a) => ({ json: { chat_id: a.chat_id,\n  assist: { text: a.text, chat_id: a.chat_id, locale: /[\\u0900-\\u097F]/.test(a.text || '') ? 'hi' : 'en' } } }));\n"
       },
-      "id": "03ac6469-584f-4764-b920-a48ef3b6c008",
+      "id": "9b6479e8-9b26-48a9-bd50-2c9e5c8e4f92",
       "name": "Build: assistant request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -875,7 +875,7 @@
           "timeout": 120000
         }
       },
-      "id": "94605ba2-ba80-4339-8474-da8728f8f6a8",
+      "id": "ef1a66b9-a7da-484e-93c3-7906a353a141",
       "name": "ERP: assistant",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -890,7 +890,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\n// One ERP response per asked message (paired by order). Classify each into a\n// text reply, a document to send, or a draft to store + offer for approval.\nconst reqs = $('Build: assistant request').all().map((i) => i.json);\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const r = (items[i] && items[i].json) || {};\n  const chat_id = (reqs[i] && reqs[i].chat_id) || r.chat_id || TG_CHATS.director;\n  const kind = String(r.kind || '');\n  if (!kind) {\n    out.push({ json: { _route: 'text', chat_id, tg_method: 'sendMessage', tg: { chat_id, text: 'The office assistant could not be reached just now. Please try again in a moment.', parse_mode: 'HTML', disable_web_page_preview: true } } });\n    continue;\n  }\n  if (kind === 'file' && (r.fileBase64 || r.fileUrl)) {\n    if (r.fileBase64) {\n      out.push({ json: { _route: 'file', chat_id, caption: String(r.caption || '').slice(0, 1000) },\n        binary: { data: { data: r.fileBase64, mimeType: r.mime || 'application/pdf', fileName: r.filename || 'report.pdf' } } });\n    } else {\n      out.push({ json: { _route: 'text', chat_id, tg_method: 'sendDocument', tg: { chat_id, document: r.fileUrl, caption: String(r.caption || '').slice(0, 1000) } } });\n    }\n    continue;\n  }\n  if (kind === 'draft' && r.draft) {\n    const summary = String(r.summary || (r.draft && r.draft.recipientLabel) || 'Draft');\n    out.push({ json: { _route: 'draft', chat_id, draft: r.draft, summary,\n      row: { tenant_id: $env.OFFICE_TENANT_ID, from_role: 'director', to_role: 'director',\n        title: summary.slice(0, 80), detail: String(r.draft.body || '').slice(0, 600),\n        status: 'open', source: 'assistant', approval_state: 'pending',\n        payload: { assistant_draft: r.draft, summary, kind: 'assistant_draft' } } } });\n    continue;\n  }\n  const text = String(r.text || 'Done.');\n  for (const chunk of tgChunks(tgEscape(text))) {\n    out.push({ json: { _route: 'text', chat_id, tg_method: 'sendMessage', tg: { chat_id, text: chunk, parse_mode: 'HTML', disable_web_page_preview: true } } });\n  }\n}\nreturn out;\n"
       },
-      "id": "8febd451-d402-4a1b-bee5-ec9567dbf58b",
+      "id": "fe6e556e-3034-4eaa-93e5-7307bb73a90c",
       "name": "Route: assistant reply",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -913,7 +913,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "84197eac-5586-4076-8d03-d183884f9afa",
+                    "id": "1caef839-759a-4c10-92c1-8070ff0434af",
                     "leftValue": "={{ $json._route }}",
                     "rightValue": "text",
                     "operator": {
@@ -937,7 +937,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "d5bf3701-4dee-4c26-8b9b-3a0863f3452c",
+                    "id": "ccb5f3d7-6059-43eb-85c8-90ba6169fcd4",
                     "leftValue": "={{ $json._route }}",
                     "rightValue": "file",
                     "operator": {
@@ -961,7 +961,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "0857ec96-4ac5-4954-85a1-50b55c7f2383",
+                    "id": "94b194fd-a417-4992-b681-d8adab544438",
                     "leftValue": "={{ $json._route }}",
                     "rightValue": "draft",
                     "operator": {
@@ -979,7 +979,7 @@
         },
         "options": {}
       },
-      "id": "6ad1a7a5-12b6-41d7-85b6-0cff02397385",
+      "id": "eea00e0f-aefe-4a30-bf27-aceadaab41e5",
       "name": "Switch: assistant route",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -1015,7 +1015,7 @@
           "timeout": 120000
         }
       },
-      "id": "fc1e0bf8-b9ca-4d62-9385-cdf611eecadf",
+      "id": "c8bb7d0c-bdad-4ed1-8d86-93cfe13682ca",
       "name": "Telegram: sendDocument",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1057,7 +1057,7 @@
           "timeout": 30000
         }
       },
-      "id": "0452e3b4-ff02-4d92-bc0c-b42a5110a65f",
+      "id": "b4533126-2b67-4ccb-8179-89dc1d74ae7a",
       "name": "Insert: assistant draft",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1071,7 +1071,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\n// The insert returns the created rows (return=representation); pair each with\n// its draft (same order) and send the body with Approve/Reject buttons whose\n// callback_data is approve:<id> / reject:<id> — the decision path acts on it.\nconst rows = $input.all().map((i) => i.json).filter((r) => r && r.id);\nconst asks = $('Route: assistant reply').all().map((i) => i.json).filter((r) => r._route === 'draft');\nconst out = [];\nfor (let i = 0; i < rows.length; i++) {\n  const id = rows[i].id;\n  const a = asks[i] || {};\n  const d = a.draft || {};\n  const chat_id = a.chat_id || TG_CHATS.director;\n  const to = d.recipientLabel ? ('\\n<i>To: ' + tgEscape(d.recipientLabel) + (d.recipient && d.recipient.count ? ' (' + d.recipient.count + ')' : '') + '</i>') : '';\n  const head = '✍️ <b>Draft for approval</b>\\n' + tgEscape(a.summary || d.recipientLabel || '') + to;\n  const text = tgChunks(head + '\\n\\n' + tgEscape(String(d.body || ''))).slice(-1)[0];\n  out.push({ json: { tg_method: 'sendMessage', tg: { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true,\n    reply_markup: { inline_keyboard: [[{ text: '✅ Approve', callback_data: 'approve:' + id }, { text: '❌ Reject', callback_data: 'reject:' + id }]] } } } });\n}\nreturn out;\n"
       },
-      "id": "23535dfe-061b-4bf9-98fb-759b80c86b1f",
+      "id": "6ddec512-8d3a-4752-bca5-d5e4d50cd7a0",
       "name": "Build: draft approval",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
