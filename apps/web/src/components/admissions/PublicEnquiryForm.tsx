@@ -4,10 +4,7 @@ import { useMemo, useState } from "react";
 import Image from "next/image";
 import {
   ADMISSION_SOURCES,
-  createEnquiry,
   isDigitalCaptureSource,
-  loadAdmissions,
-  saveAdmissions,
   sourceLabel,
   type AdmissionSource,
 } from "@/lib/admissions";
@@ -36,10 +33,16 @@ const FALLBACK_CLASSES = [
   "VII",
   "VIII",
   "IX",
-  "X",
-  "XI",
-  "XII",
 ];
+
+/**
+ * Classes the school takes enquiries for (director, 28 Oct 2026): Nursery to
+ * VIII plus IX. Names may arrive as "V" or "Class V" from the desk.
+ */
+const OFFERED = new Set(FALLBACK_CLASSES.map((n) => n.toLowerCase()));
+export function isOfferedClass(name: string): boolean {
+  return OFFERED.has(name.trim().replace(/^class\s+/i, "").toLowerCase());
+}
 
 function resolveSource(raw: string | null): AdmissionSource {
   const v = (raw || "website").toLowerCase() as AdmissionSource;
@@ -70,19 +73,21 @@ export function PublicEnquiryForm({
   // this page is public, so masters are cold and the fallback would mint
   // random class ids (see lib/publicRegistration.server.ts). When the DB has
   // no classes we fall back to name-only options with an empty id, which
-  // createEnquiry accepts (allowMissingClass) and records in the campaign note.
+  // the server records as a name-only enquiry for staff to resolve.
   const classes = useMemo(
-    () =>
-      config.classes.length > 0
-        ? config.classes
-        : FALLBACK_CLASSES.map((name) => ({ id: "", name })),
+    () => {
+      const offered = config.classes.filter((c) => isOfferedClass(c.name));
+      return offered.length > 0
+        ? offered
+        : FALLBACK_CLASSES.map((name) => ({ id: "", name }));
+    },
     [config.classes],
   );
 
   const [childName, setChildName] = useState("");
   const [dob, setDob] = useState("");
   const [gender, setGender] = useState("");
-  const [classKey, setClassKey] = useState(classes[0]?.name || "");
+  const [classKey, setClassKey] = useState(classes[0]?.id || classes[0]?.name || "");
   const [guardianName, setGuardianName] = useState("");
   const [motherName, setMotherName] = useState("");
   const [mobile, setMobile] = useState("");
@@ -98,58 +103,66 @@ export function PublicEnquiryForm({
   const [concerns, setConcerns] = useState<string[]>([]);
   const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [idemKey] = useState(() => crypto.randomUUID());
   const [done, setDone] = useState<{ enquiryNo: string } | null>(null);
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (busy) return;
     setError(null);
     const cls = classes.find((c) => c.name === classKey || c.id === classKey);
-    const classSoughtId = cls?.id || "";
-    const classLabel = cls?.name || classKey;
     if (!consent) {
       setError("Please tick the consent box so we can contact you about this enquiry.");
       return;
     }
-    const ask = enquiryQuestionsFor(classLabel);
-    const state = loadAdmissions();
-    const r = createEnquiry(
-      state,
-      {
-        source,
-        childName,
-        dob,
-        gender,
-        classSoughtId,
-        guardianName,
-        motherName,
-        mobile,
-        locality,
-        address,
-        pincode,
-        campaignNote: `Public · ${sourceLabel(source)}${classSoughtId ? "" : ` · Class ${classLabel}`}`,
-        campaignId,
-        referralCode,
-        note,
-        preferredLanguage,
-        previousBoard: ask.previousBoard ? previousBoard : "",
-        previousSchool: ask.previousSchool ? previousSchool : "",
-        transportInterest: transport === "yes" ? "yes" : transport === "no" ? "no" : "undecided",
-        rte,
-        concerns,
-        declarationAccepted: true,
-        parentConsentAt: new Date().toISOString(),
-        parentConsentBy: "parent (public form)",
-        leadDate: new Date().toISOString().slice(0, 10),
-      },
-      "Public form",
-      { allowMissingClass: true, publicSubmit: true },
-    );
-    if (!r.ok) {
-      setError(r.reason);
+    if (mobile.length !== 10) {
+      setError("Please enter a 10-digit mobile number.");
       return;
     }
-    saveAdmissions(r.state);
-    setDone({ enquiryNo: r.lead.enquiryNo });
+    const ask = enquiryQuestionsFor(cls?.name || classKey);
+    setBusy(true);
+    try {
+      // The server files the lead. Success is shown only after it says so.
+      const res = await fetch("/api/public/enquiry", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          source,
+          campaignId,
+          referralCode,
+          guardianName,
+          motherName,
+          childName,
+          dob,
+          gender,
+          mobile,
+          classSought: cls?.id || cls?.name || classKey,
+          locality,
+          address,
+          pincode,
+          transport,
+          consent: true,
+          message: [note, cls && !cls.id ? `Class ${cls.name}` : ""].filter(Boolean).join(" · "),
+          previousBoard: ask.previousBoard ? previousBoard : "",
+          previousSchool: ask.previousSchool ? previousSchool : "",
+          rte,
+          concerns,
+          preferredLanguage,
+          idempotencyKey: idemKey,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; enquiryNo?: string };
+      if (!res.ok || !body.ok) {
+        setError(body.error || `We could not save your enquiry. Please call 6388104972.`);
+        setBusy(false);
+        return;
+      }
+      setDone({ enquiryNo: body.enquiryNo || "" });
+    } catch {
+      setError("We could not reach the school. Please check your connection and try again.");
+    }
+    setBusy(false);
   }
 
   if (done) {
@@ -158,11 +171,13 @@ export function PublicEnquiryForm({
         <BrandHeader />
         <div className="mt-8 rounded-2xl border border-[rgba(21,128,61,0.35)] bg-[rgba(21,128,61,0.08)] px-5 py-6 text-center">
           <p className="text-sm font-semibold text-[var(--tone-green)]">Enquiry received</p>
-          <p className="mt-3 font-mono text-2xl font-bold text-[var(--brand-deep)]">
-            {done.enquiryNo}
-          </p>
+          {done.enquiryNo ? (
+            <p className="mt-3 font-mono text-2xl font-bold text-[var(--brand-deep)]">
+              {done.enquiryNo}
+            </p>
+          ) : null}
           <p className="mt-2 text-[13px] text-[var(--muted)]">
-            Please save this lead number. Our counsellor will contact you shortly.
+            Our counsellor will contact you shortly.
           </p>
         </div>
       </main>
@@ -173,14 +188,19 @@ export function PublicEnquiryForm({
     "w-full rounded-xl border border-[rgba(32,48,80,0.15)] bg-white px-3 py-2.5 text-sm";
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-lg flex-col px-4 py-8">
+    <main className="mx-auto flex min-h-screen max-w-lg flex-col px-4 pb-28 pt-8">
       <BrandHeader />
       <h1 className="mt-6 text-xl font-bold text-[var(--brand-deep)]">
         Admission enquiry
       </h1>
       <p className="mt-1 text-[12px] text-[var(--muted)]">
-        Source: <strong>{sourceLabel(source)}</strong> · You will get a lead
-        number after submit.
+        Source: <strong>{sourceLabel(source)}</strong>
+      </p>
+
+      <p className="mt-3 rounded-xl bg-[rgba(32,48,80,0.05)] p-3 text-[12px] text-[var(--muted)]">
+        Session 2027-28: applications 1 November 2026 to 30 January 2027; the
+        session starts 1 April 2027. For Nursery, the child must be at least 3
+        years old on 1 April 2027. There is no Nursery test or interaction.
       </p>
 
       <form onSubmit={submit} className="mt-5 space-y-3">
@@ -378,14 +398,15 @@ export function PublicEnquiryForm({
         </label>
 
         {error ? (
-          <p className="text-sm font-medium text-[var(--danger)]">{error}</p>
+          <p role="alert" className="text-sm font-medium text-[var(--danger)]">{error}</p>
         ) : null}
 
         <button
           type="submit"
-          className="w-full rounded-xl bg-[var(--brand-deep)] px-4 py-3 text-sm font-semibold text-white"
+          disabled={busy}
+          className="w-full disabled:opacity-60 rounded-xl bg-[var(--brand-deep)] px-4 py-3 text-sm font-semibold text-white"
         >
-          Submit enquiry
+          {busy ? "Sending…" : "Submit enquiry"}
         </button>
       </form>
     </main>
