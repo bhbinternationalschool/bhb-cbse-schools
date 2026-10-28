@@ -512,6 +512,7 @@
     "test:reference-cache": "npx tsx src/lib/data/server/referenceCache.selftest.ts",
     "test:versions-route": "npx tsx src/lib/data/server/versionsRoute.selftest.ts",
     "test:query-kernel": "npx tsx src/lib/data/client/queryKernel.selftest.ts",
+    "test:rbac-guard-access": "npx tsx src/lib/rbacGuardAccess.selftest.ts",
     "test:access-copy": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/data/client/accessCopy.selftest.ts",
     "test:view-load-metric": "npx tsx src/lib/data/client/viewLoadMetric.selftest.ts",
     "test:masters-bridge": "NEXT_PUBLIC_SUPABASE_URL=https://selftest.supabase.co NEXT_PUBLIC_SUPABASE_ANON_KEY=selftest-anon npx tsx src/lib/data/client/mastersBridge.selftest.ts",

@@ -570,6 +570,7 @@ SELFTESTS=(
   test:versions-route
   test:query-kernel
   test:access-copy
+  test:rbac-guard-access
   test:view-load-metric
   test:reference-views
   test:masters-bridge
