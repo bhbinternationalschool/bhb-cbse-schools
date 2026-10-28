@@ -33,6 +33,7 @@ const systemFor = (role) => `${HOUSE_RULES}\n\n---\n\n${readCharter(role)}`;
 const ROLE_CHARTERS = {
   receptionist: systemFor("receptionist"),
   academic_incharge: systemFor("academic-incharge"),
+  marketing_manager: systemFor("marketing-manager"),
   chair: systemFor("chair"),
 };
 
@@ -819,7 +820,7 @@ return { json: { row } };
     wf,
     "Fetch: pending drafts",
     "office_tasks",
-    `tenant_id=eq.${TENANT}&approval_state=eq.pending&source=in.(receptionist,assistant)&status=eq.open&select=*&order=created_at.asc&limit=50`,
+    `tenant_id=eq.${TENANT}&approval_state=eq.pending&source=in.(receptionist,assistant,marketing)&status=eq.open&select=*&order=created_at.asc&limit=50`,
   );
   const collect = code(
     wf,
@@ -1313,7 +1314,7 @@ const it = $input.first().json;
 const m = it.parsed || {};
 const decisions = Array.isArray(m.decisions) ? m.decisions : [];
 const minutes = it.parse_error ? ('Minutes could not be structured (' + it.parse_error + ').\\n' + String(it.text || '').slice(0, 3000)) : String(m.minutes || '').trim();
-const roles = ['receptionist', 'academic_incharge', 'director'];
+const roles = ['receptionist', 'academic_incharge', 'marketing_manager', 'director'];
 const task_rows = decisions.map((d) => ({ tenant_id: $env.OFFICE_TENANT_ID, from_role: 'chair', to_role: roles.includes(d.to_role) ? d.to_role : 'director',
   title: String(d.title || 'Decision').slice(0, 80), detail: String(d.detail || '').slice(0, 600), status: 'open', source: 'huddle', approval_state: 'none',
   due_on: d.due_on || null, payload: { kind: 'huddle_decision', meeting_date: it.today } }));
@@ -1390,7 +1391,7 @@ st.tg_offset = Math.max(...updates.map((u) => Number(u.update_id || 0))) + 1;
 // decision; anything longer is a free-form instruction for the assistant.
 const APPROVE = /^\\s*\\/?(approve|approved|ok|okay|yes|haan|ha|हाँ|हां|ठीक)\\s*#?\\s*(\\d+)?\\s*$/i;
 const REJECT = /^\\s*\\/?(reject|rejected|cancel|nahi|nahin|नहीं|रद्द)\\s*#?\\s*(\\d+)?\\s*$/i;
-const COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan' };
+const COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan', marketing: 'marketing' };
 const out = [];
 for (const u of updates) {
   const cq = u.callback_query;
@@ -1455,7 +1456,7 @@ return out;
     wf,
     "Fetch: pending drafts",
     "office_tasks",
-    `tenant_id=eq.${TENANT}&approval_state=eq.pending&source=in.(receptionist,assistant)&status=eq.open&select=*&order=created_at.asc&limit=50`,
+    `tenant_id=eq.${TENANT}&approval_state=eq.pending&source=in.(receptionist,assistant,marketing)&status=eq.open&select=*&order=created_at.asc&limit=50`,
   );
   wf.link(kind, pending, 0);
   const match = code(
@@ -1499,7 +1500,7 @@ return out;
   // Approve splits by the draft's source. A Receptionist draft is a Gmail
   // reply (as before). An assistant draft is actually SENT by the ERP, which
   // owns WhatsApp dispatch and the Meta-template rules — the bot stays thin.
-  const apSrc = switchOn(wf, "Switch: approve source", "task.source", ["receptionist", "assistant"]);
+  const apSrc = switchOn(wf, "Switch: approve source", "task.source", ["receptionist", "assistant", "marketing"]);
   wf.link(decSwitch, apSrc, 0);
   wf.link(apSrc, gmailReply, 0);
   const patchApproved = code(
@@ -1554,6 +1555,26 @@ return { json: { ...d, task_id: d.task.id, patch: { updated_at: now, payload: { 
     { each: true },
   );
   wf.link(erpApproveSend, patchApprovedAssistant);
+  // A Marketing Manager proposal (budget cap, campaign spend, ad copy, beat
+  // assignment) has no automated action: approving it only records the
+  // director's go-ahead. Nothing spends or publishes from here — a person
+  // (or a later phase) acts, and the Marketing Manager applies an approved
+  // cap change to office_marketing_budget on its next weekly run.
+  const patchApprovedMarketing = code(
+    wf,
+    "Build: marketing approved patch",
+    `
+const d = $('Match: decisions').item.json;
+const now = new Date().toISOString();
+const p = d.task.payload || {};
+const what = [p.mk_unit, p.mk_channel].filter(Boolean).join(' / ');
+return { json: { ...d, task_id: d.task.id, patch: { approval_state: 'approved', status: 'done', decided_by: 'director', decided_at: now, updated_at: now,
+  payload: { ...p, decision_reply: 'telegram ' + d.via, approved_at: now } },
+  ack: '✅ Approved #' + d.task.id + (what ? ' (' + what + ')' : '') + ' — ' + String(d.task.title || '').slice(0, 80) + '. Go ahead; the Marketing Manager records it next run.' } };
+`,
+    { each: true, row: 1 },
+  );
+  wf.link(apSrc, patchApprovedMarketing, 2);
   const patchRejected = code(
     wf,
     "Build: rejected patch",
@@ -1570,6 +1591,7 @@ return { json: { ...d, task_id: d.task.id, patch: { approval_state: 'rejected', 
   const patch = sbPatchTask(wf, "Patch: task decided");
   wf.link(patchApproved, patch);
   wf.link(patchApprovedAssistant, patch);
+  wf.link(patchApprovedMarketing, patch);
   wf.link(patchRejected, patch);
   const noDecision = code(
     wf,
@@ -1587,7 +1609,7 @@ return { json: { ...$input.item.json, patched: false } };
 // Answer the tap, edit the draft message so the decision shows under it
 // (the keyboard goes away), or reply to a typed decision.
 const built = [];
-for (const name of ['Build: approved patch', 'Build: assistant approved patch', 'Build: rejected patch', 'Build: no decision']) {
+for (const name of ['Build: approved patch', 'Build: assistant approved patch', 'Build: marketing approved patch', 'Build: rejected patch', 'Build: no decision']) {
   try { for (const x of $(name).all()) built.push(x.json); } catch (e) { /* branch did not run */ }
 }
 const out = [];
@@ -1632,7 +1654,21 @@ return out;
     `tenant_id=eq.${TENANT}&role=eq.academic_incharge&select=body,facts,created_at&order=created_at.desc&limit=1`,
     { row: 1 },
   );
-  wf.chain(openTasks, huddle, plan);
+  const mktgNote = sbGet(
+    wf,
+    "Fetch: latest marketing",
+    "office_notes",
+    `tenant_id=eq.${TENANT}&role=eq.marketing_manager&select=body,facts,created_at&order=created_at.desc&limit=1`,
+    { row: 1 },
+  );
+  const mktgBudget = sbGet(
+    wf,
+    "Fetch: marketing budget",
+    "office_marketing_budget",
+    `tenant_id=eq.${TENANT}&status=neq.archived&select=month,unit,channel,cap_amount,allocated,spent,currency&order=month.desc&limit=100`,
+    { row: 1 },
+  );
+  wf.chain(openTasks, huddle, plan, mktgNote, mktgBudget);
   const commandReplies = code(
     wf,
     "Build: command replies",
@@ -1641,6 +1677,8 @@ const rows = (name) => { try { return $(name).all().map((i) => i.json).filter((r
 const tasks = rows('Fetch: open tasks').filter((r) => r.id);
 const meeting = rows('Fetch: latest huddle')[0] || null;
 const planNote = rows('Fetch: latest plan')[0] || null;
+const mktg = rows('Fetch: latest marketing')[0] || null;
+const budgetRows = rows('Fetch: marketing budget');
 const asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'command');
 const today = isoDate(istNow());
 const line = (t) => '#' + t.id + ' [' + t.to_role + '] ' + t.title + (t.due_on ? ' (due ' + t.due_on + ')' : '') + (t.approval_state === 'pending' ? ' — waiting for you' : '');
@@ -1657,7 +1695,7 @@ for (const a of asks) {
   if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });
   if (a.cmd === 'start') {
     const who = a.role ? 'You are the ' + a.role + '.' : 'This chat is not registered yet. Give the office this chat id: <code>' + tgEscape(a.chat_id) + '</code>';
-    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n/drafts — replies waiting for your decision\\n/tasks — open tasks (tap to close or defer)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan' : ''));
+    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n/drafts — replies waiting for your decision\\n/tasks — open tasks (tap to close or defer)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan\\n/marketing — cost per lead, spend vs budget, this week\\'s survey beats' : ''));
     continue;
   }
   if (a.cmd === 'not_director') { send(a.chat_id, 'Only the director decides drafts.'); continue; }
@@ -1692,12 +1730,41 @@ for (const a of asks) {
     send(a.chat_id, (when === today ? '<b>Today\\'s plan</b>\\n' : '<b>No plan yet today — last plan ' + tgEscape(when) + '</b>\\n') + tgEscape(String(planNote.body || '').slice(0, 3500)));
     continue;
   }
+  if (a.cmd === 'marketing') {
+    const month = today.slice(0, 7);
+    const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
+    const thisMonth = budgetRows.filter((b) => String(b.month || '').slice(0, 7) === month);
+    const f = (mktg && mktg.facts) || {};
+    const lines = ['<b>Marketing — ' + tgEscape(month) + '</b>'];
+    // Cost per lead (from the latest weekly note's facts; never invented here).
+    const cpl = Array.isArray(f.cost_per_lead) ? f.cost_per_lead : [];
+    if (cpl.length) {
+      lines.push('\\n<b>Cost per lead</b>');
+      for (const c of cpl) lines.push(tgEscape('• ' + (c.unit || '?') + ' / ' + (c.channel || '?') + ': ' + (c.leads != null ? c.leads + ' leads' : '') + (c.cpl != null && c.cpl !== '' ? ', CPL ' + (typeof c.cpl === 'number' ? inr(c.cpl) : c.cpl) : '')));
+    }
+    // Spend vs budget (caps are live from the budget table; spent is from the note).
+    lines.push('\\n<b>Spend vs budget</b>');
+    if (!thisMonth.length) lines.push('• No budget set for ' + month + ' yet — the director must set the monthly figure and the school/ITI split.');
+    else for (const b of thisMonth) lines.push(tgEscape('• ' + (b.unit || '?') + ' / ' + (b.channel || '?') + ': cap ' + inr(b.cap_amount) + ', allocated ' + inr(b.allocated) + ', spent ' + (b.spent != null ? inr(b.spent) : 'not known')));
+    // Week's beat plan.
+    const beats = Array.isArray(f.beat_plan) ? f.beat_plan : [];
+    if (beats.length) {
+      lines.push('\\n<b>This week\\'s beats</b>');
+      for (const bt of beats.slice(0, 8)) lines.push(tgEscape((bt.rank ? bt.rank + '. ' : '• ') + (bt.beat || (Array.isArray(bt.villages) ? bt.villages.slice(0, 3).join(', ') : '')) + (bt.child_population ? ' — ~' + bt.child_population + ' children' : '') + (bt.past_enquiries != null ? ', ' + bt.past_enquiries + ' past enq' : '')));
+    }
+    if (!cpl.length && !beats.length) {
+      if (mktg) { lines.push('\\n' + tgEscape(String(mktg.body || '').slice(0, 2500))); }
+      else lines.push('\\nNo weekly marketing note on record yet — the Marketing Manager runs Monday morning.');
+    }
+    send(a.chat_id, lines.join('\\n'));
+    continue;
+  }
 }
 return out;
 `,
     { row: 1 },
   );
-  wf.link(plan, commandReplies);
+  wf.link(mktgBudget, commandReplies);
   wf.link(commandReplies, reply);
 
   /* -- task actions: done / snooze / clear -- */
@@ -1881,12 +1948,398 @@ return out;
   return wf;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   5. Marketing Manager
+   ═══════════════════════════════════════════════════════════════
+   Monday 06:00 IST (before the 06:30 huddle). Reads the monthly budget
+   caps (office_marketing_budget), the villages within 15 km (village_travel
+   + village_demographics), enquiries by village (admission_lead_market_state)
+   and by source (admission_desk_leads), last fortnight's field survey
+   (survey_days / survey_captures), the active beats, any director-approved
+   cap change, and — best effort — Google Ads performance for the one shared
+   account (school + ITI kept apart by campaign). Sonnet drafts the weekly
+   marketing note: cost per lead by unit, spend vs budget, a ranked 15 km
+   beat plan, and Meta/WhatsApp campaign drafts. Nothing spends or publishes:
+   the note and a 📋 button go to the director and principal, and every
+   proposal (cap change, campaign spend, ad copy, beat assignment) is a
+   pending office_tasks row with its own Approve/Reject on Telegram. Within
+   an existing cap the Manager sets its own allocation (a write to
+   office_marketing_budget only); raising a cap or spending where none is set
+   waits for the director. */
+function buildMarketingManager() {
+  const wf = new Workflow(
+    "Office — Marketing Manager",
+    "Monday 06:00 IST: reads the marketing budget caps, Google Ads (best effort; waiting on verification), 15 km villages + census + enquiries, and the field survey; Sonnet drafts cost-per-lead, spend-vs-budget, a ranked beat plan and Meta/WhatsApp campaign drafts; the note goes to the director/principal and every spend or public word is a pending office_tasks row approved on Telegram.",
+  );
+  const W = "marketing-manager";
+
+  const trigger = cron(wf, "Every Monday 06:00 IST", "0 6 * * 1");
+  const ctx = code(
+    wf,
+    "Context",
+    `${JS_DATES}
+const now = istNow();
+const today = isoDate(now);
+const monthStart = today.slice(0, 8) + '01';
+const dow = (now.getUTCDay() + 6) % 7; // 0 = Monday
+const weekStart = isoDate(new Date(now.getTime() - dow * 86400000));
+const since = (n) => isoDate(new Date(now.getTime() - n * 86400000));
+return [{ json: { today, monthStart, weekStart, weekday: now.getUTCDay(), ay: academicYearCode(now),
+  since7: since(7), since14: since(14), since30: since(30), since90: since(90),
+  since7iso: new Date(Date.now() - 7 * 86400000).toISOString(), run_at: new Date().toISOString() } }];
+`,
+  );
+  wf.chain(trigger, ctx);
+
+  const getBudget = sbGet(
+    wf,
+    "Fetch: budget this month",
+    "office_marketing_budget",
+    `tenant_id=eq.${TENANT}&status=neq.archived&select=month,unit,channel,cap_amount,allocated,spent,currency&order=month.desc&limit=200`,
+  );
+  const getApprovedCaps = sbGet(
+    wf,
+    "Fetch: approved cap changes",
+    "office_tasks",
+    `tenant_id=eq.${TENANT}&source=eq.marketing&approval_state=eq.approved&status=eq.done&select=id,title,payload,decided_at&order=decided_at.desc&limit=50`,
+  );
+  // Villages within 15 km by road (village_travel.distance_km), census joined
+  // in (FK village_travel.village_id → village_demographics.id). ~226 rows:
+  // one bounded page, not the whole ~4k-village table.
+  const getVillages = sbGet(
+    wf,
+    "Fetch: villages within 15km",
+    "village_travel",
+    `tenant_id=eq.${TENANT}&distance_km=lte.15&select=village_id,distance_km,duration_minutes,village_demographics(id,village_name,block_name,estimated_current_child_pop,child_0_6_total_2011)&order=distance_km.asc&limit=400`,
+  );
+  const getLeadVillages = sbGet(
+    wf,
+    "Fetch: enquiries by village",
+    "admission_lead_market_state",
+    `tenant_id=eq.${TENANT}&village_id=not.is.null&select=village_id,lead_score,lead_status,touchpoints&limit=1000`,
+  );
+  const getRecentLeads = sbGet(
+    wf,
+    "Fetch: recent leads",
+    "admission_desk_leads",
+    `tenant_id=eq.${TENANT}&lead_date=gte.{{ $('Context').first().json.since90 }}&select=id,source,stage,lead_date&order=lead_date.desc&limit=1000`,
+  );
+  const getSurveyDays = sbGet(
+    wf,
+    "Fetch: recent survey days",
+    "survey_days",
+    `tenant_id=eq.${TENANT}&day=gte.{{ $('Context').first().json.since14 }}&select=day,status,beat_id,member_name,staff_id&order=day.desc&limit=500`,
+  );
+  const getCaptures = sbGet(
+    wf,
+    "Fetch: survey captures 7d",
+    "survey_captures",
+    `tenant_id=eq.${TENANT}&captured_at=gte.{{ encodeURIComponent($('Context').first().json.since7iso) }}&select=id,lead_id,captured_at&limit=1000`,
+  );
+  const getBeats = sbGet(
+    wf,
+    "Fetch: active beats",
+    "admission_survey_beats",
+    `tenant_id=eq.${TENANT}&is_active=eq.true&select=id,code,name,area,target_households,note&limit=200`,
+  );
+  const getTasks = sbGet(
+    wf,
+    "Fetch: my open tasks",
+    "office_tasks",
+    `tenant_id=eq.${TENANT}&to_role=eq.marketing_manager&status=in.(open,doing)&select=id,title,detail,due_on,from_role,created_at&order=due_on.asc.nullslast&limit=50`,
+  );
+  wf.chain(ctx, getBudget, getApprovedCaps, getVillages, getLeadVillages, getRecentLeads, getSurveyDays, getCaptures, getBeats, getTasks);
+
+  // Google Ads — the one shared account (school + ITI). Best effort: the
+  // account is paused for advertiser verification and no service-account key
+  // is on the VM yet, so this returns ads_status 'pending' and NO numbers
+  // until the director sets the env below and verification clears. When set,
+  // it signs a service-account JWT, gets an OAuth token (scope adwords) and
+  // runs a GAQL report; a campaign is school or iti by its name (contains
+  // "ITI") until proper campaign labels are applied. Any failure is reported,
+  // never guessed. require('crypto') only runs when configured — the compose
+  // file sets NODE_FUNCTION_ALLOW_BUILTIN=crypto.
+  const googleAds = code(
+    wf,
+    "Google Ads: read",
+    `
+return (async () => {
+  const cid = String($env.GOOGLE_ADS_CUSTOMER_ID || '').replace(/\\D/g, '');
+  const clientEmail = String($env.GOOGLE_ADS_CLIENT_EMAIL || '').trim();
+  let privateKey = String($env.GOOGLE_ADS_PRIVATE_KEY || '').trim();
+  const saJson = String($env.GOOGLE_ADS_SERVICE_ACCOUNT_JSON || '').trim();
+  const devToken = String($env.GOOGLE_ADS_DEVELOPER_TOKEN || '').trim();
+  const loginCid = String($env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '').replace(/\\D/g, '');
+  const impersonate = String($env.GOOGLE_ADS_IMPERSONATE_EMAIL || '').trim();
+  const apiVer = String($env.GOOGLE_ADS_API_VERSION || 'v21').trim();
+  let email = clientEmail, key = privateKey;
+  if (saJson) { try { const j = JSON.parse(saJson); email = email || j.client_email; key = key || j.private_key; } catch (e) {} }
+  if (key) key = key.replace(/\\\\n/g, '\\n');
+  const pending = (note) => [{ json: { ads_status: 'pending', ads_note: note, ads_by_unit: [], campaigns: [] } }];
+  if (!cid || !email || !key) return pending('Google Ads not configured — waiting on advertiser verification and the service-account key on the VM.');
+  try {
+    const crypto = require('crypto');
+    const b64 = (o) => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url');
+    const nowS = Math.floor(Date.now() / 1000);
+    const claim = { iss: email, scope: 'https://www.googleapis.com/auth/adwords', aud: 'https://oauth2.googleapis.com/token', iat: nowS, exp: nowS + 3600 };
+    if (impersonate) claim.sub = impersonate;
+    const signingInput = b64({ alg: 'RS256', typ: 'JWT' }) + '.' + b64(claim);
+    const signature = crypto.createSign('RSA-SHA256').update(signingInput).sign(key).toString('base64url');
+    const assertion = signingInput + '.' + signature;
+    const tok = await this.helpers.httpRequest({ method: 'POST', url: 'https://oauth2.googleapis.com/token',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=' + encodeURIComponent(assertion), json: true });
+    const accessToken = tok && tok.access_token;
+    if (!accessToken) return pending('Google Ads token exchange returned no access_token.');
+    const headers = { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' };
+    if (devToken) headers['developer-token'] = devToken;
+    if (loginCid) headers['login-customer-id'] = loginCid;
+    const gaql = 'SELECT campaign.id, campaign.name, campaign.status, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions FROM campaign WHERE segments.date DURING LAST_30_DAYS';
+    const res = await this.helpers.httpRequest({ method: 'POST', url: 'https://googleads.googleapis.com/' + apiVer + '/customers/' + cid + '/googleAds:searchStream',
+      headers, body: { query: gaql }, json: true });
+    const batches = Array.isArray(res) ? res : [res];
+    const byCampaign = {};
+    for (const b of batches) for (const r of (b.results || [])) {
+      const c = r.campaign || {}; const m = r.metrics || {};
+      const id = String(c.id || '');
+      const unit = /\\biti\\b/i.test(String(c.name || '')) ? 'iti' : 'school';
+      const row = byCampaign[id] || (byCampaign[id] = { campaign: c.name || id, unit, status: c.status || '', cost: 0, clicks: 0, impressions: 0, conversions: 0 });
+      row.cost += Number(m.costMicros || m.cost_micros || 0) / 1e6;
+      row.clicks += Number(m.clicks || 0); row.impressions += Number(m.impressions || 0); row.conversions += Number(m.conversions || 0);
+    }
+    const campaigns = Object.values(byCampaign);
+    const byUnit = {};
+    for (const c of campaigns) { const u = byUnit[c.unit] || (byUnit[c.unit] = { unit: c.unit, cost: 0, clicks: 0, conversions: 0, campaigns: 0 }); u.cost += c.cost; u.clicks += c.clicks; u.conversions += c.conversions; u.campaigns += 1; }
+    return [{ json: { ads_status: 'ok', ads_note: 'Google Ads LAST_30_DAYS (' + campaigns.length + ' campaigns). Unit split by campaign name until labels are applied.', ads_by_unit: Object.values(byUnit), campaigns } }];
+  } catch (e) {
+    return pending('Google Ads read failed: ' + String((e && e.message) || e).slice(0, 300) + ' (account may still be paused for verification).');
+  }
+})();
+`,
+  );
+  wf.chain(getTasks, googleAds);
+
+  const assemble = code(
+    wf,
+    "Assemble",
+    `${JS_REQUEST}
+const SYSTEM = ${JSON.stringify(ROLE_CHARTERS.marketing_manager)};
+const ctx = $('Context').first().json;
+const rows = (name) => { try { return $(name).all().map((i) => i.json).filter((r) => r && Object.keys(r).length); } catch (e) { return []; } };
+const budget = rows('Fetch: budget this month').filter((b) => String(b.month || '').slice(0, 10) === ctx.monthStart);
+const approvedCaps = rows('Fetch: approved cap changes');
+const villages = rows('Fetch: villages within 15km');
+const leadVillages = rows('Fetch: enquiries by village');
+const recentLeads = rows('Fetch: recent leads');
+const surveyDays = rows('Fetch: recent survey days');
+const captures = rows('Fetch: survey captures 7d');
+const beats = rows('Fetch: active beats');
+const tasks = rows('Fetch: my open tasks');
+const ads = (() => { try { return $('Google Ads: read').first().json; } catch (e) { return { ads_status: 'pending', ads_note: 'Google Ads node did not run.', ads_by_unit: [], campaigns: [] }; } })();
+
+// enquiries per village_id from the market-state table
+const enqByVillage = {};
+for (const l of leadVillages) enqByVillage[l.village_id] = (enqByVillage[l.village_id] || 0) + 1;
+
+// rank the 15 km villages: child population first, past enquiries as a tie-shaper
+const ranked = villages.map((v) => {
+  const d = v.village_demographics || {};
+  const child = Number(d.estimated_current_child_pop || d.child_0_6_total_2011 || 0);
+  const enq = enqByVillage[v.village_id] || 0;
+  return { village: d.village_name || v.village_id, block: d.block_name || '', distance_km: v.distance_km, child_population: child, past_enquiries: enq };
+}).sort((a, b) => (b.child_population - a.child_population) || (b.past_enquiries - a.past_enquiries));
+const topVillages = ranked.slice(0, 45);
+
+// enquiries by source (last 30 days) and recent volume
+const d30 = ctx.since30;
+const bySource = {};
+let leads30 = 0, leads7 = 0;
+for (const l of recentLeads) {
+  if (l.lead_date >= d30) { leads30 += 1; bySource[l.source || 'unknown'] = (bySource[l.source || 'unknown'] || 0) + 1; }
+  if (l.lead_date >= ctx.since7) leads7 += 1;
+}
+const surveySummary = { days_14d: surveyDays.length, days_active_now: surveyDays.filter((s) => s.status === 'active').length, captures_7d: captures.length };
+
+const data = {
+  week_of: ctx.weekStart, month: ctx.monthStart, academic_year: ctx.ay,
+  budget_caps: budget.map((b) => ({ unit: b.unit, channel: b.channel, cap: Number(b.cap_amount || 0), allocated: Number(b.allocated || 0), spent: b.spent == null ? 'not known' : Number(b.spent), currency: b.currency || 'INR' })),
+  budget_set: budget.length > 0,
+  approved_cap_changes: approvedCaps.map((t) => ({ title: t.title, unit: (t.payload || {}).mk_unit, channel: (t.payload || {}).mk_channel, amount: (t.payload || {}).amount, decided_at: t.decided_at })),
+  google_ads: { status: ads.ads_status, note: ads.ads_note, by_unit: ads.ads_by_unit || [], campaigns: (ads.campaigns || []).slice(0, 30) },
+  enquiries_last_30d: leads30, enquiries_last_7d: leads7, enquiries_by_source_30d: bySource,
+  villages_within_15km: villages.length, top_villages: topVillages,
+  active_beats: beats.map((b) => ({ code: b.code, name: b.name, area: b.area, target_households: b.target_households })),
+  field_survey: surveySummary,
+  my_open_tasks: tasks.map((t) => ({ id: t.id, title: t.title, due_on: t.due_on, from: t.from_role })),
+};
+const user = 'Prepare this week\\'s marketing review and plan from the data below. Keep the school and the ITI on separate lines. Where a cost per lead has no spend or no attributed leads, write "not known" — do not invent. Return only the JSON object described in your charter under "Output format".\\n\\n' + JSON.stringify(data);
+return [{ json: { ctx, counts: { villages: villages.length, leads30, leads7, beats: beats.length, proposals_in: 0 }, ads_status: ads.ads_status, budget_set: budget.length > 0,
+  request: claudeRequest({ model: ${JSON.stringify(MODELS.write)}, system: SYSTEM, user, maxTokens: 3000, effort: 'medium' }) } }];
+`,
+  );
+  wf.chain(googleAds, assemble);
+
+  const parse = claudeCall(wf, { key: "marketing", workflow: W, role: "marketing_manager", carryFrom: assemble, each: false });
+
+  const outputs = code(
+    wf,
+    "Build: outputs",
+    `
+const it = $input.first().json;
+const p = it.parsed || {};
+const summary = it.parse_error ? ('Marketing note could not be structured: ' + it.parse_error + '\\n' + String(it.text || '').slice(0, 800)) : String(p.summary || '').trim();
+const cpl = Array.isArray(p.cost_per_lead) ? p.cost_per_lead : [];
+const svb = Array.isArray(p.spend_vs_budget) ? p.spend_vs_budget : [];
+const beats = Array.isArray(p.beat_plan) ? p.beat_plan : [];
+const proposals = Array.isArray(p.proposals) ? p.proposals : [];
+const drafts = Array.isArray(p.drafts) ? p.drafts : [];
+const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
+const UNIT = ['school', 'iti', 'shared'];
+const CHAN = ['google_ads', 'meta', 'whatsapp', 'survey', 'other'];
+
+const cplLines = cpl.map((c) => '• ' + (c.unit || '?') + ' / ' + (c.channel || '?') + ': ' + (c.leads != null ? c.leads + ' leads' : '') + (c.cpl != null && c.cpl !== '' ? ', CPL ' + (typeof c.cpl === 'number' ? inr(c.cpl) : c.cpl) : ''));
+const svbLines = svb.map((s) => '• ' + (s.unit || '?') + ' / ' + (s.channel || '?') + ': cap ' + inr(s.cap) + ', allocated ' + inr(s.allocated) + ', spent ' + (s.spent == null || s.spent === '' ? 'not known' : (typeof s.spent === 'number' ? inr(s.spent) : s.spent)));
+const beatLines = beats.slice(0, 10).map((b) => (b.rank ? b.rank + '. ' : '• ') + (b.beat || (Array.isArray(b.villages) ? b.villages.slice(0, 3).join(', ') : '')) + (b.child_population ? ' — ~' + b.child_population + ' children' : '') + (b.past_enquiries != null ? ', ' + b.past_enquiries + ' past enq' : ''));
+const head = '📣 Marketing — week of ' + it.ctx.weekStart;
+const wa_text = [head, summary,
+  it.ads_status !== 'ok' ? 'Google Ads: not known — waiting on verification/keys.' : '',
+  cplLines.length ? 'Cost per lead:\\n' + cplLines.join('\\n') : '',
+  svbLines.length ? 'Spend vs budget:\\n' + svbLines.join('\\n') : (it.budget_set ? '' : 'No monthly budget set — needs the director (figure + school/ITI split).'),
+  beatLines.length ? 'This week\\'s beats:\\n' + beatLines.join('\\n') : '',
+  (proposals.length || drafts.length) ? (proposals.length + drafts.length) + ' proposal(s) below for your Approve/Reject.' : ''].filter(Boolean).join('\\n\\n');
+
+const note_row = { tenant_id: $env.OFFICE_TENANT_ID, role: 'marketing_manager', note_date: it.ctx.today,
+  body: wa_text.slice(0, 4000),
+  facts: { week: it.ctx.weekStart, cost_per_lead: cpl, spend_vs_budget: svb, beat_plan: beats.slice(0, 12), proposals: proposals.length, drafts: drafts.length,
+    ads_status: it.ads_status, budget_set: it.budget_set, villages_15km: it.counts.villages, leads_30d: it.counts.leads30, leads_7d: it.counts.leads7, parse_error: it.parse_error || '' } };
+
+// Gated proposals (cap change, campaign spend, beat assignment) and campaign
+// drafts (ad copy) each become ONE pending office_tasks row the director
+// approves on Telegram. Capped at 8 so the board does not flood.
+const task_rows = [];
+for (const pr of proposals) {
+  task_rows.push({ tenant_id: $env.OFFICE_TENANT_ID, from_role: 'marketing_manager', to_role: 'director',
+    title: String(pr.title || 'Marketing proposal').slice(0, 80), detail: String(pr.detail || '').slice(0, 600),
+    status: 'open', source: 'marketing', approval_state: 'pending',
+    payload: { kind: 'marketing_proposal', mk_kind: String(pr.kind || ''), mk_unit: UNIT.includes(pr.unit) ? pr.unit : '', mk_channel: CHAN.includes(pr.channel) ? pr.channel : '', amount: Number(pr.amount || 0), week: it.ctx.weekStart } });
+}
+for (const d of drafts) {
+  const detail = String(d.copy || '').slice(0, 480) + (d.creative_brief ? '\\n\\nBrief: ' + String(d.creative_brief).slice(0, 200) : '') + '\\nProposed spend: ' + (d.proposed_spend ? inr(d.proposed_spend) : 'not stated');
+  task_rows.push({ tenant_id: $env.OFFICE_TENANT_ID, from_role: 'marketing_manager', to_role: 'director',
+    title: ('Approve ' + (d.channel || '') + ' copy (' + (d.unit || '') + ', ' + (d.language || '') + ')').slice(0, 80), detail: detail.slice(0, 600),
+    status: 'open', source: 'marketing', approval_state: 'pending',
+    payload: { kind: 'marketing_draft', mk_kind: 'ad_copy', mk_unit: UNIT.includes(d.unit) ? d.unit : '', mk_channel: CHAN.includes(d.channel) ? d.channel : '', amount: Number(d.proposed_spend || 0), language: d.language || '', copy: String(d.copy || '').slice(0, 2000), week: it.ctx.weekStart } });
+}
+const capped = task_rows.slice(0, 8);
+
+// Budget writes the Manager may make on its own: an allocation WITHIN an
+// existing cap, and a director-approved cap change (idempotent). Never a new
+// or larger cap on its own — that is one of the proposals above.
+const existing = (() => { try { return $('Fetch: budget this month').all().map((i) => i.json).filter((r) => r && r.month); } catch (e) { return []; } })();
+const curCaps = {};
+for (const r of existing) if (String(r.month || '').slice(0, 10) === it.ctx.monthStart) curCaps[(r.unit || '') + ':' + (r.channel || '')] = r;
+const now = new Date().toISOString();
+const budget_upserts = [];
+for (const s of svb) {
+  const cap = curCaps[(s.unit || '') + ':' + (s.channel || '')];
+  if (!cap) continue;
+  const alloc = Math.max(0, Math.min(Number(s.allocated || 0), Number(cap.cap_amount || 0)));
+  budget_upserts.push({ tenant_id: $env.OFFICE_TENANT_ID, month: it.ctx.monthStart, unit: s.unit, channel: s.channel, allocated: alloc, updated_at: now });
+}
+const approved = (() => { try { return $('Fetch: approved cap changes').all().map((i) => i.json).filter((r) => r && r.id); } catch (e) { return []; } })();
+approved.sort((a, b) => String(a.decided_at || '').localeCompare(String(b.decided_at || '')));
+for (const t of approved) {
+  const pl = t.payload || {};
+  if (pl.mk_kind !== 'budget_cap' || !UNIT.includes(pl.mk_unit) || !CHAN.includes(pl.mk_channel) || !(Number(pl.amount) > 0)) continue;
+  budget_upserts.push({ tenant_id: $env.OFFICE_TENANT_ID, month: it.ctx.monthStart, unit: pl.mk_unit, channel: pl.mk_channel, cap_amount: Number(pl.amount), status: 'active', decided_by: 'director', decided_at: t.decided_at || now, updated_at: now });
+}
+
+return [{ json: { note_row, task_rows: capped, budget_upserts, text: wa_text, to: ['director', 'principal'], tasks_button: true } }];
+`,
+  );
+  wf.link(parse, outputs);
+  wf.link(outputs, sbInsert(wf, "Insert: marketing note", "office_notes", "note_row"));
+
+  // allocations + approved caps → office_marketing_budget (upsert on the
+  // (tenant, month, unit, channel) unique key; merge so an allocation-only
+  // row keeps its cap).
+  const budgetFilter = code(
+    wf,
+    "Budget upserts?",
+    `
+const u = $input.first().json.budget_upserts || [];
+return u.length ? [{ json: { rows: u } }] : [];
+`,
+    { row: 1 },
+  );
+  wf.link(outputs, budgetFilter);
+  const upsertBudget = wf.add(
+    "Upsert: marketing budget",
+    "n8n-nodes-base.httpRequest",
+    4.2,
+    {
+      method: "POST",
+      url: "={{ $env.SUPABASE_URL }}/rest/v1/office_marketing_budget?on_conflict=tenant_id,month,unit,channel",
+      sendHeaders: true,
+      headerParameters: {
+        parameters: [...SB_HEADERS, { name: "Prefer", value: "resolution=merge-duplicates,return=representation" }],
+      },
+      sendBody: true,
+      specifyBody: "json",
+      jsonBody: "={{ JSON.stringify($json.rows) }}",
+      options: { timeout: 30000 },
+    },
+    { row: 1, onError: "continueRegularOutput" },
+  );
+  wf.link(budgetFilter, upsertBudget);
+
+  // Proposals → pending office_tasks → one Approve/Reject message each.
+  const proposalsFilter = code(
+    wf,
+    "Proposals to insert",
+    `
+const r = $input.first().json.task_rows || [];
+return r.length ? [{ json: { rows: r } }] : [];
+`,
+    { row: 2 },
+  );
+  wf.link(outputs, proposalsFilter);
+  const insertProposals = sbInsert(wf, "Insert: marketing proposals", "office_tasks", "rows", { row: 2, alwaysOutputData: true });
+  wf.link(proposalsFilter, insertProposals);
+  const approvalMsgs = code(
+    wf,
+    "Build: marketing approvals",
+    `
+const rows = $input.all().map((i) => i.json).filter((r) => r && r.id);
+const out = [];
+for (const t of rows) {
+  const p = t.payload || {};
+  const what = [p.mk_unit, p.mk_channel].filter(Boolean).join(' / ');
+  const amt = Number(p.amount || 0) > 0 ? ' ₹' + Number(p.amount).toLocaleString('en-IN') : '';
+  const head = '🧾 Proposal #' + t.id + (what ? ' (' + what + ')' : '') + amt;
+  const text = head + '\\n' + String(t.title || '') + '\\n\\n' + String(t.detail || '');
+  out.push({ json: { text, to: ['director'], approval: { draft_id: String(t.id), summary: (head + ' — ' + String(t.title || '')).slice(0, 300) } } });
+}
+return out;
+`,
+    { row: 2 },
+  );
+  wf.link(insertProposals, approvalMsgs);
+  internalChain(wf, "Marketing approval", approvalMsgs);
+
+  // The weekly note + a 📋 Open tasks button to the director and principal.
+  internalChain(wf, "Marketing", outputs);
+
+  return wf;
+}
+
 /* ─── write ─────────────────────────────────────────────────── */
 
 const builds = {
   "receptionist.json": buildReceptionist,
   "academic-incharge.json": buildAcademicIncharge,
   "morning-huddle.json": buildMorningHuddle,
+  "marketing-manager.json": buildMarketingManager,
   "telegram-office-bot.json": buildTelegramBot,
 };
 
