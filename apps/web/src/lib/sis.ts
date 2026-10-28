@@ -1476,7 +1476,6 @@ export function syncSisIntoMasters(
   // (2026-08-18, minutes after deploy). Only the students projection is
   // ours to change; everything else must be whatever masters holds now.
   writeMastersLocalRaw({ ...loadMasters(), students: demo });
-  window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
 }
 
 /** Align SIS students to current masters class/section ids. */

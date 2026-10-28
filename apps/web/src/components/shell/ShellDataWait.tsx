@@ -1,0 +1,98 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { QueryError } from "@/components/data/QueryError";
+import { useMasters } from "@/lib/data/client/hooks";
+import { hasDeskLoaded } from "@/lib/deskHydrateGuard";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
+
+/** How long the page copies of the roles and the roster are waited for (as CoreDataGate did for staff). */
+const PAGE_COPY_WAIT_MS = 5_000;
+
+/** One wait per tab for every mount that asks (the shell mounts once per page load). */
+let pageCopies: Promise<void> | null = null;
+
+/**
+ * Keep the page copies of the roles and the roster filled for the lib/
+ * readers that still read them synchronously until 2.3b — the save checks
+ * (lib/rbacGuard assertModulePermission: loadMasters().staff + loadRbac())
+ * above all. Until 2.3a useAccessData started these two hydrates on every
+ * page and the module gate waited for them; the access DECISIONS now come
+ * from the views (useAccessData), but a save made before the copies landed
+ * would be judged on built-in defaults. Each is waited for at most 5 s and a
+ * failure does not block: nothing on screen is decided from them.
+ */
+function loadPageCopies(): Promise<void> {
+  if (pageCopies) return pageCopies;
+  pageCopies = (async () => {
+    try {
+      const [{ ensureRbacHydrated }, { ensureStaffHydrated }, { withHydrationSlot }] = await Promise.all([
+        import("@/lib/rbacPersistence"),
+        import("@/lib/staffPersistence"),
+        import("@/lib/deskHydrateGuard"),
+      ]);
+      const capped = (run: () => Promise<unknown>) =>
+        Promise.race([
+          withHydrationSlot(run).catch(() => false),
+          new Promise((r) => setTimeout(r, PAGE_COPY_WAIT_MS)),
+        ]);
+      await Promise.all([
+        hasDeskLoaded("rbac") ? null : capped(() => ensureRbacHydrated()),
+        hasDeskLoaded("staff") ? null : capped(() => ensureStaffHydrated()),
+      ]);
+    } catch {
+      /* best-effort: the views decide what is shown */
+    }
+  })().finally(() => {
+    pageCopies = null;
+  });
+  return pageCopies;
+}
+
+/**
+ * Screens wait for the school's Masters (data-layer 2.3a; replaces
+ * CoreDataGate). The workspace renders once the masters VIEW has answered
+ * (useMasters — ~1 request; its answer is laid on the tab's page copy by the
+ * 2.1 bridge before the query resolves, so the ~346 synchronous loadMasters()
+ * readers see the school's classes, subjects and settings), and once the
+ * page copies of the roles and the roster have loaded or 5 s have passed.
+ *
+ * A failed masters read is shown as a failure with Try again (R6) — never an
+ * empty school. No event is raised: screens that must follow a later Masters
+ * change read useMasters() (the versions poll refetches it).
+ *
+ * The old core masters hydrate (masters-desk, ~235 KB) still runs from the
+ * route scheduler; nothing waits for it any more. It is kept because it is
+ * not proven unneeded: the reports' data guard (lib/reportDataGuard) and the
+ * subject-request approvals call it directly, and it merges the database desk
+ * into the page copy (mergeDbDeskIntoMastersState) in ways the view's bridge
+ * does not. Deleting it is 2.3b's.
+ */
+export function ShellDataWait({ children }: { children: React.ReactNode }) {
+  const remote = isSupabaseConfigured();
+  const masters = useMasters({ enabled: remote });
+  const [copiesReady, setCopiesReady] = useState(() => !remote || (hasDeskLoaded("rbac") && hasDeskLoaded("staff")));
+
+  useEffect(() => {
+    if (copiesReady) return;
+    let live = true;
+    void loadPageCopies().then(() => {
+      if (live) setCopiesReady(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [copiesReady]);
+
+  if (!remote) return <>{children}</>;
+  if (masters.data === undefined && masters.isError) {
+    return <QueryError what="the school's classes, subjects and staff" error={masters.error} retry={masters.refetch} />;
+  }
+  if (masters.data !== undefined && copiesReady) return <>{children}</>;
+  return (
+    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-sm text-[var(--muted)]" role="status">
+      <span className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--brand)]" aria-hidden />
+      <p>Loading school data…</p>
+    </div>
+  );
+}

@@ -3,8 +3,8 @@
  *
  * Screens that write staff records through the kernel (sis.staff,
  * sis.departments, sis.designations — 2.2d) still sit next to readers of the
- * tab's page copy: every permission check resolves the signed-in person
- * through `masters.staff` + `designations` (useAccessData), and the old
+ * tab's page copy: the lib/ save checks (lib/rbacGuard) resolve the signed-in
+ * person through its `masters.staff` + `designations`, and the old
  * staff-roster save takes its per-row stamps from that copy. After a kernel
  * write the copy must therefore follow the server, or (a) the screen's
  * permission answers lag the write, and (b) the next OLD save of a row this
@@ -15,9 +15,9 @@
  * holds something newer), the bridge drops the staff desk's "hydrated" mark
  * and re-reads the roster from the server: hydrateStaffOnce replaces the
  * copy's staff, departments and designations with the server's (server wins
- * — the DB-read mode is on everywhere), records the new per-row stamps, and
- * raises the one `bhb-masters-updated` the access copy listens for. A
- * soft-removed member is not in the server's roster, so they leave the copy;
+ * — the DB-read mode is on everywhere) and records the new per-row stamps.
+ * (The access copy itself is the staff-list view since data-layer 2.3a: the
+ * kernel write invalidates it; no event is raised.) A soft-removed member is not in the server's roster, so they leave the copy;
  * a restored one comes back. No merge, no push.
  */
 

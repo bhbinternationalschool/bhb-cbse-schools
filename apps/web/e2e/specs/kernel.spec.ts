@@ -247,7 +247,9 @@ test("/__kernel: a failed masters view is \"could not load\" + Try again, never 
     const t0 = Date.now();
     await page.goto("/__kernel");
     await test.step("the failure is shown (after the two retries)", async () => {
-      await expect(page.getByText("Could not load the school's classes from the server.")).toBeVisible({ timeout: 20_000 });
+      // Since 2.3a the shell's own wait (ShellDataWait) shows the failure first,
+      // for the whole page: "Could not load the school's classes, subjects and staff".
+      await expect(page.getByText(/^Could not load the school's classes/)).toBeVisible({ timeout: 20_000 });
       await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
       await expect(page.getByRole("list", { name: "Classes", exact: true })).toHaveCount(0);
     });

@@ -1,6 +1,7 @@
 "use client";
 
-import { CoreDataGate } from "@/components/shell/CoreDataGate";
+import { ShellDataWait } from "@/components/shell/ShellDataWait";
+import { useAcademicYears } from "@/components/shell/useAcademicYears";
 import Image from "next/image";
 import Link from "next/link";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -24,9 +25,7 @@ import { TENANT } from "@/lib/types";
 import type { DemoSession } from "@/lib/auth";
 import { SessionProvider } from "./SessionContext";
 import { SchoolFavicon } from "./SchoolFavicon";
-import {
-  listSessionYearOptions,
-} from "@/lib/masters";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { alignWorkspaceSessionFromMasters, bootstrapWorkspaceSession } from "@/lib/workspaceSession";
 import { markModuleRegistryClientReady } from "@/lib/moduleRegistry";
 import {
@@ -39,7 +38,21 @@ import { ToastHost } from "./Toast";
 import { useClientMetrics } from "./useClientMetrics";
 import { ErpQueryProvider } from "@/lib/data/client/hooks";
 
-export function AppShell({
+/**
+ * The staff shell. The query kernel's provider (data-layer 1.4) wraps all of
+ * it — since 2.3a the shell itself reads the masters view (the academic
+ * years, the data wait) — with one React Query client per tab; its versions
+ * poll runs only while a query is mounted (lib/data/client/hooks).
+ */
+export function AppShell(props: { session: DemoSession; children: React.ReactNode }) {
+  return (
+    <ErpQueryProvider>
+      <AppShellBody {...props} />
+    </ErpQueryProvider>
+  );
+}
+
+function AppShellBody({
   session,
   children,
 }: {
@@ -53,11 +66,14 @@ export function AppShell({
   const mobileApp = useMobileAppShell();
   const standalone = usePwaStandalone();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [years, setYears] = useState<
-    ReturnType<typeof listSessionYearOptions>
-  >([]);
   const [clock, setClock] = useState("");
   const [bootReady, setBootReady] = useState(false);
+  // The academic years, from the masters view (data-layer 2.3a) — asked only
+  // once the workspace has booted (a fresh login first clears this tab's
+  // caches). Every page's shell waits for this answer anyway (ShellDataWait).
+  const { years, dataUpdatedAt: mastersAnsweredAt } = useAcademicYears({
+    enabled: bootReady && isSupabaseConfigured(),
+  });
   const skipRouteHydrateRef = useRef(true);
   const bootstrapAyRef = useRef<string | null>(null);
 
@@ -233,7 +249,6 @@ export function AppShell({
       }
 
       bootstrapAyRef.current = session.academicYearCode;
-      setYears(listSessionYearOptions());
       setWorkspaceBootstrapPending(false);
       setBootReady(true);
 
@@ -272,26 +287,17 @@ export function AppShell({
 
 
 
-  // After Masters edits, re-align header session if needed (once per tab).
+  // Each Masters answer (the first, and every one after a Masters change the
+  // versions poll saw): re-check the session's year against the one the
+  // server resolves (lib/workspaceSession — it only relays, de-duplicated).
   useEffect(() => {
-    if (!bootReady) return;
-
-    function alignFromMasters() {
-      setYears(listSessionYearOptions());
-      void alignWorkspaceSessionFromMasters(session.academicYearCode).then(
-        (changed) => {
-          if (changed) router.refresh();
-        },
-      );
-    }
-
-    window.addEventListener("bhb-masters-updated", alignFromMasters);
-    window.addEventListener("bhb-desk-hydrated", alignFromMasters);
-    return () => {
-      window.removeEventListener("bhb-masters-updated", alignFromMasters);
-      window.removeEventListener("bhb-desk-hydrated", alignFromMasters);
-    };
-  }, [session.academicYearCode, router, bootReady]);
+    if (!bootReady || !mastersAnsweredAt) return;
+    void alignWorkspaceSessionFromMasters(session.academicYearCode).then(
+      (changed) => {
+        if (changed) router.refresh();
+      },
+    );
+  }, [mastersAnsweredAt, session.academicYearCode, router, bootReady]);
 
   const ay =
     years.find((y) => y.code === session.academicYearCode) ??
@@ -387,13 +393,9 @@ export function AppShell({
     );
   }
 
-  // The query kernel (data-layer 1.4): one React Query client per tab for the
-  // screens that read through useErpQuery / useMasters / …; its versions poll
-  // runs only while such a query is mounted (lib/data/client/hooks).
   return (
-    <ErpQueryProvider>
     <SessionProvider session={session} readOnly={readOnly}>
-      <SchoolFavicon />
+      <SchoolFavicon refreshKey={mastersAnsweredAt} />
       <div className="flex h-screen overflow-hidden bg-[var(--surface)]">
         <Suspense fallback={null}>
           <ErpSidebar
@@ -479,7 +481,7 @@ export function AppShell({
             mobileApp ? "max-sm:px-3 max-sm:py-4" : ""
           }`}
         >
-          <CoreDataGate bootReady={bootReady}>{children}</CoreDataGate>
+          <ShellDataWait>{children}</ShellDataWait>
         </main>
         {mobileApp ? (
           <StaffBottomNav onOpenMenu={() => setMobileNavOpen(true)} />
@@ -489,6 +491,5 @@ export function AppShell({
         </div>
       </div>
     </SessionProvider>
-    </ErpQueryProvider>
   );
 }

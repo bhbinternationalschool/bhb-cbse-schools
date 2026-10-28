@@ -22,7 +22,7 @@ import {
 } from "@/lib/foundationMasters";
 import { loadMasters, currentAcademicYearCode, type MastersState } from "@/lib/masters";
 import { readRemovedStaff, useStaffBookWrites, type StaffBookOutcome } from "@/lib/data/client/staffBookWrites";
-import { useStaffList } from "@/lib/data/client/hooks";
+import { useMasters, useStaffList } from "@/lib/data/client/hooks";
 import { bridgeStaffAfterWrite } from "@/lib/data/client/staffBridge";
 import {
   applyStaffImport,
@@ -247,12 +247,19 @@ export function StaffWorkspace() {
       await withHydrationSlot(() => ensureStaffHydrated());
       setState(loadMasters());
     })();
-    // Masters (classes, sections, subjects) can land after staff records:
-    // redraw then too, or Allocate teaching shows no classes or subjects.
-    const onMasters = () => setState(loadMasters());
-    window.addEventListener("bhb-masters-updated", onMasters);
-    return () => window.removeEventListener("bhb-masters-updated", onMasters);
   }, []);
+  // Masters (classes, sections, subjects) can change after the roster loaded:
+  // re-read the book when a Masters answer lands (laid on the page copy by the
+  // 2.1 bridge first), or Allocate teaching shows stale classes or subjects
+  // (data-layer 2.3a — was 'bhb-masters-updated'). Reads the tab's cache only.
+  const { dataUpdatedAt: mastersAnsweredAt } = useMasters({ enabled: false });
+  // The answer already in at mount is what the mount's own read saw.
+  const mastersSeenAt = useRef(mastersAnsweredAt);
+  useEffect(() => {
+    if (!mastersAnsweredAt || mastersAnsweredAt === mastersSeenAt.current) return;
+    mastersSeenAt.current = mastersAnsweredAt;
+    rereadBook();
+  }, [mastersAnsweredAt, rereadBook]);
 
   // Another tab or device changed a staff record (data-layer 2.2d): the
   // versions poll refetches the staff list when sis_staff / departments /

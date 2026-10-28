@@ -180,9 +180,13 @@ for (const rel of [
 }
 assert.ok(!/setTimeout\(r, 4000\)/.test(read("components/shell/ErpModuleGate.tsx")), "the gate no longer decides after a 4 s guess");
 assert.ok(!/setShownTabs\(/.test(read("components/comms/CommsWorkspace.tsx")), "Comms tabs are derived, not set once on mount");
+// Since data-layer 2.3a the copies are the rbac and staff-list views (React
+// Query keeps them fresh), not the page copies and their hydrate events; the
+// readiness rule itself is behavioural (lib/data/client/accessCopy.selftest).
 const hook = read("components/shell/useAccessData.ts");
-for (const ev of ["bhb-desk-first-hydrated", "bhb-masters-updated", "bhb-desk-hydrated", "bhb-rbac-updated"]) {
-  assert.ok(hook.includes(`"${ev}"`), `useAccessData recomputes on ${ev}`);
+assert.ok(hook.includes("useRbac(") && hook.includes("useStaffList("), "useAccessData reads useRbac() + useStaffList()");
+for (const ev of ["bhb-desk-first-hydrated", "bhb-masters-updated", "bhb-rbac-updated"]) {
+  assert.ok(!hook.includes(`"${ev}"`), `useAccessData no longer listens for ${ev}`);
 }
 
 // A SCOPED assignment never becomes the session label: "office for one class"

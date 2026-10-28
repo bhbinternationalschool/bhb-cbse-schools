@@ -117,7 +117,7 @@ export function parseMastersView(data: unknown): MastersView {
 /**
  * The screen's Masters: the server's book, plus the staff side (roster,
  * departments, designations) from the access copy every permission check
- * already uses (useAccessData — the staff hydrate's roster) until the staff
+ * already uses (useAccessData — the staff-list view since 2.3a) until the staff
  * screens move to useStaffList() (2.1c / 2.3a).
  *
  * The staff side is required, not decoration: rbac resolves the signed-in

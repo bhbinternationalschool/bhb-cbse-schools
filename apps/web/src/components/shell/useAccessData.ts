@@ -1,19 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  accessDataStatus,
-  type AccessDataStatus,
-} from "@/lib/accessDataStatus";
-import { deskEverHydrated } from "@/lib/deskHydrateGuard";
+import type { AccessDataStatus } from "@/lib/accessDataStatus";
 import { loadMasters, type MastersState } from "@/lib/masters";
 import { loadRbac, type RbacState } from "@/lib/rbac";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { useRbac, useStaffList } from "@/lib/data/client/hooks";
+import { accessMastersOf, accessRbacOf, accessStatusOf } from "@/lib/data/client/accessCopy";
 
 export type AccessData = {
   status: AccessDataStatus;
   ready: boolean;
-  /** Loaded copies — null until `ready`. Pass these to permission helpers. */
+  /**
+   * Loaded copies — null until `ready`. Pass these to permission helpers.
+   * `masters` is the roster side only (staff, departments, designations, on
+   * the empty Masters shell): classes, sections and fee lists are not in it —
+   * read them from useMasters() (useScreenMasters / useStableAccessCopy).
+   */
   masters: MastersState | null;
   rbac: RbacState | null;
   /** Changes whenever either copy changes; use as a memo dependency. */
@@ -21,97 +24,59 @@ export type AccessData = {
   retry: () => void;
 };
 
-/** Events after which a permission answer may have changed. */
-const ACCESS_EVENTS = [
-  "bhb-desk-first-hydrated",
-  "bhb-desk-hydrated",
-  "bhb-masters-updated",
-  "bhb-rbac-updated",
-] as const;
-
-// One load for every component on the page that asks (gate, sidebar,
-// bottom nav, the workspace) — not one per component.
-let inflight: Promise<void> | null = null;
-
-function loadAccessData(): Promise<void> {
-  if (inflight) return inflight;
-  inflight = (async () => {
-    try {
-      const [{ ensureRbacHydrated }, { ensureStaffHydrated }, { withHydrationSlot }] =
-        await Promise.all([
-          import("@/lib/rbacPersistence"),
-          import("@/lib/staffPersistence"),
-          import("@/lib/deskHydrateGuard"),
-        ]);
-      await Promise.allSettled([
-        deskEverHydrated("rbac") ? null : withHydrationSlot(() => ensureRbacHydrated()),
-        deskEverHydrated("staff") ? null : withHydrationSlot(() => ensureStaffHydrated()),
-      ]);
-    } catch {
-      /* status reads the outcome from deskEverHydrated */
-    }
-  })().finally(() => {
-    inflight = null;
-  });
-  return inflight;
-}
-
 /**
  * The roles and roster permission checks need, and whether they are known
- * yet (lib/accessDataStatus). Recomputes when either lands or changes.
+ * yet (data-layer 2.3a): useRbac() + useStaffList(), the two reference
+ * views, instead of the tab's page copies and their hydrate events.
+ *
+ *   - `ready` only once BOTH have answered (lib/data/client/accessCopy
+ *     accessStatusOf). A read that failed without an answer is `failed` —
+ *     the screen says it could not check and offers Try again — never
+ *     "ready with an empty roster", so never a "no" decided on nobody.
+ *   - React Query shares the two reads between every component that asks
+ *     (gate, sidebar, bottom nav, the workspace) and keeps them fresh: the
+ *     versions poll refetches them when sis_staff / departments /
+ *     designations or rbac move, and a kernel staff write invalidates them.
+ *   - Without a database (offline dev build) this browser is the truth: the
+ *     page copies, as before.
  */
 export function useAccessData(): AccessData {
   const [mounted, setMounted] = useState(false);
-  const [settled, setSettled] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const [version, setVersion] = useState(0);
+  useEffect(() => setMounted(true), []);
+  const remote = isSupabaseConfigured();
+  const rbacQ = useRbac({ enabled: remote });
+  const staffQ = useStaffList({ enabled: remote });
 
-  useEffect(() => {
-    setMounted(true);
-    const bump = () => setVersion((n) => n + 1);
-    for (const e of ACCESS_EVENTS) window.addEventListener(e, bump);
-    return () => {
-      for (const e of ACCESS_EVENTS) window.removeEventListener(e, bump);
-    };
-  }, []);
-
-  useEffect(() => {
-    let live = true;
-    setSettled(false);
-    void loadAccessData().then(() => {
-      if (!live) return;
-      setSettled(true);
-      setVersion((n) => n + 1);
-    });
-    return () => {
-      live = false;
-    };
-  }, [attempt]);
-
-  const status = accessDataStatus({
-    remote: isSupabaseConfigured(),
+  const status = accessStatusOf({
+    remote,
     mounted,
-    rbacLoaded: mounted && deskEverHydrated("rbac"),
-    rosterLoaded: mounted && deskEverHydrated("staff"),
-    attemptSettled: settled,
+    rbac: { hasData: rbacQ.data !== undefined, isError: rbacQ.isError },
+    staff: { hasData: staffQ.data !== undefined, isError: staffQ.isError },
   });
   const ready = status === "ready";
 
-  const copies = useMemo(
-    () =>
-      ready
-        ? { masters: loadMasters(), rbac: loadRbac() }
-        : { masters: null, rbac: null },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- version is the change signal
-    [ready, version],
-  );
+  const masters = useMemo(() => {
+    if (!ready) return null;
+    if (!remote) return loadMasters();
+    return staffQ.data ? accessMastersOf(staffQ.data) : null;
+  }, [ready, remote, staffQ.data]);
+  const rbac = useMemo(() => {
+    if (!ready) return null;
+    if (!remote) return loadRbac();
+    return rbacQ.data ? accessRbacOf(rbacQ.data) : null;
+  }, [ready, remote, rbacQ.data]);
 
   return {
     status,
     ready,
-    masters: copies.masters,
-    rbac: copies.rbac,
-    version,
-    retry: () => setAttempt((n) => n + 1),
+    masters,
+    rbac,
+    // Moves with every answer of either read (React Query keeps the same
+    // `data` object when an answer's content did not change).
+    version: rbacQ.dataUpdatedAt + staffQ.dataUpdatedAt + (ready ? 1 : 0),
+    retry: () => {
+      void rbacQ.refetch();
+      void staffQ.refetch();
+    },
   };
 }

@@ -18,8 +18,9 @@
  *   /students    the module dashboard's "Active students" card (button named
  *                "Active students…", number in data-testid="metric-value").
  *
- * And with masters-desk failing (503), the teacher sees "could not load" +
- * "Try again", never an empty school.
+ * And with views/masters failing (503), the teacher sees "could not load" +
+ * "Try again", never an empty school; with the old masters-desk hydrate
+ * failing she still sees her school (since 2.3a nothing waits for it).
  *
  * useMasters() (data-layer 1.4): the class teacher's /__kernel lists the
  * school's classes from GET /api/data/views/masters — the TEACHING SUBSET
@@ -211,7 +212,7 @@ test.describe("timetable-only teacher (III-A, V-A by the published timetable)", 
 
 test.describe("teacher, Masters read failing", () => {
   for (const path of ["/attendance", "/students"]) {
-    test(`${path}: masters-desk 503 → "could not load" + Try again, never an empty school`, async ({ browser }) => {
+    test(`${path}: masters-desk 503 (the old hydrate) no longer blocks — her school is drawn from views/masters`, async ({ browser }) => {
       const { context, page } = await openAs(browser, "teacher");
       try {
         await page.route("**/api/school-data/masters-desk**", (r) =>
@@ -224,10 +225,13 @@ test.describe("teacher, Masters read failing", () => {
             : r.continue(),
         );
         await page.goto(path);
-        await expect(page.getByText(/could not load/i).first()).toBeVisible({ timeout: 15_000 });
-        await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
-        await expect(page.getByRole("combobox", { name: "Class", exact: true })).toHaveCount(0);
-        await expect(page.getByRole("button", { name: /^Active students/ })).toHaveCount(0);
+        if (path === "/attendance") {
+          // Her own class opens by itself (see the class teacher block above).
+          await expect(page.getByText(/Nursery\s*·\s*A/).first()).toBeVisible({ timeout: 20_000 });
+        } else {
+          await expect(page.getByRole("button", { name: /^Active students/ }).first()).toBeVisible({ timeout: 20_000 });
+        }
+        await expect(page.getByText(/could not load/i)).toHaveCount(0);
       } finally {
         await context.close();
       }
@@ -308,16 +312,16 @@ test.describe("class teacher: fees are withheld, not none", () => {
 /**
  * The header WhatsApp button (StaffBroadcastButton, in every page's header)
  * reads Masters through useScreenMasters({enabled: open}) since data-layer
- * 2.1c: a page that reads no Masters view itself (/my-pay) does not ask the
- * masters view until the button is opened; once opened it asks, and her own
- * class's parents are offered. Since 20 Oct 2026 the header bell runs the
- * versions poll on every staff page, so the count is not 0: what is proved
- * is that the panel adds no versions request of its own — every one is the
- * bell's single poll, at least 15 s apart.
- * On origin/main before 2.1c the button never asked the view (opened: 0).
+ * 2.1c. Since 2.3a the shell itself waits for the masters view on every page
+ * (ShellDataWait, director's Q5), so /my-pay asks it exactly once before the
+ * page draws; opening the button asks NOTHING more (the tab's answer is
+ * shared) and her own class's parents are offered. Since 20 Oct 2026 the
+ * header bell runs the versions poll on every staff page, so that count is
+ * not 0: what is proved is that the panel adds no versions request of its
+ * own — every one is the bell's single poll, at least 15 s apart.
  */
 test.describe("header WhatsApp (teacher)", () => {
-  test("/my-pay: asks views/masters only once opened, then offers My class parents", async ({ browser }, testInfo) => {
+  test("/my-pay: views/masters once (the shell), nothing more when opened, then offers My class parents", async ({ browser }, testInfo) => {
     const { context, page } = await openAs(browser, "teacher");
     try {
       const seen = { masters: 0, versions: 0 };
@@ -334,12 +338,12 @@ test.describe("header WhatsApp (teacher)", () => {
       await expect(page.getByRole("heading", { name: "My pay & attendance" }).first()).toBeVisible({ timeout: 20_000 });
       await page.waitForLoadState("networkidle");
       const closed = { ...seen };
-      expect(closed.masters, "closed: no masters view request").toBe(0);
+      expect(closed.masters, "closed: the shell's one masters view request").toBe(1);
       expect(closed.versions, "closed: only the bell's first poll").toBeLessThanOrEqual(1);
       const openedAt = Date.now();
       await page.getByRole("button", { name: "WhatsApp", exact: true }).click();
       await expect(page.getByRole("button", { name: "My class parents", exact: true })).toBeVisible({ timeout: 15_000 });
-      expect(seen.masters, "opened: the masters view was asked").toBeGreaterThan(0);
+      expect(seen.masters, "opened: no further masters view request (the shell's answer is shared)").toBe(closed.masters);
       // Opening the panel mounts a desk query, but the tab already polls: no
       // extra versions request, only the bell's cadence (20 s after its first).
       const byPanel = versionsAt.filter((t) => t >= openedAt && (versionsAt[0] === undefined || t - versionsAt[0] < 15_000));
@@ -352,4 +356,45 @@ test.describe("header WhatsApp (teacher)", () => {
       await context.close();
     }
   });
+});
+
+/**
+ * Her own record (data-layer 2.3a, director's Q8): the access copy is built
+ * from GET /api/data/views/staff-list, and for every teacher login that list
+ * must contain at least her own record — otherwise her roles fall back to a
+ * guess and the header cannot link her profile. Checked two ways: the view's
+ * own answer as her session (her id is in it, active), and the account menu,
+ * which links "Profile" (My docs) and "Update profile" (/staff/<her id>/edit)
+ * only when her record resolved.
+ */
+test.describe("a teacher's own record", () => {
+  for (const who of ["teacher", "timetableTeacher"] as const) {
+    test(`${who}: views/staff-list holds her own record and the account menu links her profile`, async ({ browser }, testInfo) => {
+      const me = fx.sessions[who].staffId!;
+      const { context, page } = await openAs(browser, who);
+      try {
+        await page.goto("/home");
+        const body = await page.evaluate(async () => {
+          const r = await fetch("/api/data/views/staff-list", { cache: "no-store" });
+          return { status: r.status, json: (await r.json()) as { ok?: boolean; data?: { staff?: { id: string; status: string }[] } } };
+        });
+        expect(body.status, "the staff list answered").toBe(200);
+        const mine = body.json.data?.staff?.find((s) => s.id === me);
+        expect(mine, `her record ${me} is in the staff list`).toBeTruthy();
+        expect(mine!.status).toBe("active");
+        const menu = page.locator('header button[aria-haspopup="menu"]').last();
+        await expect(menu).toBeVisible({ timeout: 20_000 });
+        await expect(async () => {
+          await page.keyboard.press("Escape");
+          await menu.click();
+          await expect(page.getByRole("menu").getByRole("menuitem", { name: /Update profile/ })).toHaveAttribute("href", `/staff/${me}/edit`, { timeout: 2_000 });
+        }).toPass({ timeout: 20_000 });
+        await expect(page.getByRole("menu").getByText("No staff profile linked")).toHaveCount(0);
+        await testInfo.attach(`account-menu-${who}.png`, { body: await page.screenshot(), contentType: "image/png" });
+        await metric(testInfo, "own-record", { who, staffId: me, inList: !!mine, listSize: body.json.data?.staff?.length ?? null });
+      } finally {
+        await context.close();
+      }
+    });
+  }
 });

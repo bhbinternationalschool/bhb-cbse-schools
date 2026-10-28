@@ -5,7 +5,7 @@ import { useState } from "react";
 /**
  * The one "could not load / Try again" for a failed kernel query
  * (data-layer 1.4, R6): a read failure is shown as a failure — never as an
- * empty list. Same words and controls as CoreDataGate's failure state, so a
+ * empty list. The shell's own data wait (ShellDataWait) uses it too, so a
  * person meets one message whichever layer failed.
  *
  *   const q = useMasters();

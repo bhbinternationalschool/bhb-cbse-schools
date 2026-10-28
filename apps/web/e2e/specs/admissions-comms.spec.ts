@@ -171,11 +171,14 @@ test.describe("views/masters 503 = could not load, never an empty class list", (
 
   test(`office WhatsApp Send: "could not load the school's classes", no class buttons; Try again recovers`, async ({ page }, testInfo) => {
     const lift = await failView(page, "masters");
-    await openWaSend(page);
+    // Since 2.3a the shell waits for the masters view on every page, so the
+    // failure is shown before the Comms screen draws (no Send tab yet).
+    await page.goto("/comms?tab=whatsapp");
     await expect(page.getByText(/could not load/i).first()).toBeVisible({ timeout: 20_000 });
     await expect(waClassButtons(page)).toHaveCount(0);
     await lift();
     await page.getByRole("button", { name: "Try again" }).first().click();
+    await expect(page.getByRole("tab", { name: "Send message" }).first()).toBeVisible({ timeout: 20_000 });
     await expect(waClassButtons(page)).toHaveCount(N, { timeout: 15_000 });
     await metric(testInfo, "error", { page: "/comms?tab=whatsapp", read: "views/masters" });
   });

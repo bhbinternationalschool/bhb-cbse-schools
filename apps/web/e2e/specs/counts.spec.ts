@@ -50,6 +50,9 @@ import { AY_CURRENT, classId, sectionId } from "../fixture";
 import { collectPageErrors, expect, fx, leadingNumber, metric, note, test } from "../support";
 
 const SPEED_MS = 5_000;
+/** Throttled phone: classes and staff on screen within this (COMMAND.md 2.3a). */
+const PHONE_CORE_MS = 2_000;
+const PHONE = "phone-375-cpu4x";
 const CORRECT_WITHIN_MS = 30_000;
 
 const e = fx.expected;
@@ -102,6 +105,8 @@ type Check = {
   read: (page: Page) => Promise<number | null>;
   /** On a wrong number, what exactly the screen holds (recorded in the metric). */
   diagnose?: (page: Page) => Promise<unknown>;
+  /** Classes or staff: gated at PHONE_CORE_MS on the throttled phone (2.3a). */
+  core?: true;
 };
 
 /** The admission numbers a register shows, sorted against the fixture's V-A rows by year. */
@@ -124,7 +129,7 @@ async function registerRows(page: Page): Promise<unknown> {
 const PAGES: { path: string; prepare?: (page: Page) => Promise<void>; checks: Check[] }[] = [
   {
     path: "/staff",
-    checks: [{ what: "active staff", expected: e.activeStaff, read: (p) => metricValue(p, /^Active staff/) }],
+    checks: [{ what: "active staff", expected: e.activeStaff, read: (p) => metricValue(p, /^Active staff/), core: true }],
   },
   {
     path: "/students",
@@ -136,6 +141,7 @@ const PAGES: { path: string; prepare?: (page: Page) => Promise<void>; checks: Ch
       {
         what: "classes in the register's class filter",
         expected: e.classes,
+        core: true,
         read: async (p) => {
           const labels = await p.getByRole("combobox", { name: "Filter by class", exact: true }).first().locator("option").allTextContents();
           return labels.filter((l) => l.trim() && !/^all classes/i.test(l.trim())).length;
@@ -146,7 +152,7 @@ const PAGES: { path: string; prepare?: (page: Page) => Promise<void>; checks: Ch
   {
     path: "/masters",
     checks: [
-      { what: "classes", expected: e.classes, read: async (p) => leadingNumber(await p.getByRole("button", { name: /^\d+ Classes$/ }).first().textContent().catch(() => null)) },
+      { what: "classes", expected: e.classes, core: true, read: async (p) => leadingNumber(await p.getByRole("button", { name: /^\d+ Classes$/ }).first().textContent().catch(() => null)) },
       { what: "subjects", expected: e.subjects, read: async (p) => leadingNumber(await p.getByRole("button", { name: /^\d+ Subjects$/ }).first().textContent().catch(() => null)) },
     ],
   },
@@ -156,7 +162,7 @@ const PAGES: { path: string; prepare?: (page: Page) => Promise<void>; checks: Ch
       await p.getByRole("tab", { name: "Students", exact: true }).click();
     },
     checks: [
-      { what: "classes in the picker", expected: e.classes, read: async (p) => (await realOptions(p, "Class")).length },
+      { what: "classes in the picker", expected: e.classes, core: true, read: async (p) => (await realOptions(p, "Class")).length },
       {
         what: "V-A register strength",
         expected: vaChildren,
@@ -175,7 +181,7 @@ const PAGES: { path: string; prepare?: (page: Page) => Promise<void>; checks: Ch
   {
     path: "/timetable",
     checks: [
-      { what: "classes in the picker", expected: e.classes, read: async (p) => (await realOptions(p, "Class")).length },
+      { what: "classes in the picker", expected: e.classes, core: true, read: async (p) => (await realOptions(p, "Class")).length },
       {
         what: "class V periods asked (Subject rules)",
         expected: vPeriods,
@@ -193,7 +199,7 @@ const PAGES: { path: string; prepare?: (page: Page) => Promise<void>; checks: Ch
   {
     path: "/homework",
     checks: [
-      { what: "classes in the picker", expected: e.classes, read: async (p) => (await realOptions(p, "Class")).length },
+      { what: "classes in the picker", expected: e.classes, core: true, read: async (p) => (await realOptions(p, "Class")).length },
       {
         what: "subjects offered in Compose HW",
         expected: subjectHeads,
@@ -258,7 +264,18 @@ async function checkPage(page: Page, testInfo: TestInfo, path: string, prepare: 
       await test.step(`speed: every number shown within ${SPEED_MS} ms`, async () => {
         expect(slowest, `${path}: ms until the last number was right (${JSON.stringify(timings)})`).toBeLessThanOrEqual(SPEED_MS);
       });
-    } else if (slowest > SPEED_MS) {
+    } else {
+      const core = checks.filter((c) => c.core);
+      if (core.length && testInfo.project.name === PHONE) {
+        await test.step(`phone core: classes and staff shown within ${PHONE_CORE_MS} ms`, async () => {
+          const coreMs = Object.fromEntries(core.map((c) => [c.what, timings[c.what]]));
+          for (const c of core) {
+            expect(timings[c.what] ?? Infinity, `${path}: ms until ${c.what} was right on the throttled phone (${JSON.stringify(coreMs)})`).toBeLessThanOrEqual(PHONE_CORE_MS);
+          }
+        });
+      }
+    }
+    if (testInfo.project.name !== "desktop" && slowest > SPEED_MS) {
       // On the 4×-throttled phone the speed is measured and shown, not gated:
       // on 13 Oct the same pages took 2.6–5.2 s depending only on how busy the
       // machine was, so a hard 5 s line there would flip on load, not on code.
@@ -268,6 +285,8 @@ async function checkPage(page: Page, testInfo: TestInfo, path: string, prepare: 
     await metric(testInfo, "dom", {
       page: path,
       speedLimitMs: SPEED_MS,
+      phoneCoreLimitMs: PHONE_CORE_MS,
+      core: checks.filter((c) => c.core).map((c) => c.what),
       expected: Object.fromEntries(checks.map((c) => [c.what, c.expected])),
       seen,
       msToShow: timings,
