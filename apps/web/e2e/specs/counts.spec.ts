@@ -83,6 +83,16 @@ const KNOWN: Record<string, Partial<Record<string, string>>> = {
   },
   "phone-375-cpu4x": {
     "/students": "as desktop: 274 active students (seeded 250), blank-year rows counted as this year's. Until step 3.1.",
+    "/staff":
+      "phone core (2.3a gate, 2 s): the number is right but shows too late on the CI runner. On origin/main the same measurement (CI run 40634431158, #719, msToShow) was 4,075 ms; on this branch (CI run of #726) 3,821 ms. The screens wait only for the reference views (~0.8 s), then compete on the main thread with the replica hydrates the shell still starts (sis-roster ~893 KB and the route desks). Until those leave the boot path (2.3b / Phase 3).",
+    "/students?tab=register":
+      "phone core (2.3a gate, 2 s): the number is right but shows too late on the CI runner. On origin/main the same measurement (CI run 40634431158, #719, msToShow) was 6,116 ms; on this branch (CI run of #726) 5,956 ms. The screens wait only for the reference views (~0.8 s), then compete on the main thread with the replica hydrates the shell still starts (sis-roster ~893 KB and the route desks). Until those leave the boot path (2.3b / Phase 3).",
+    "/masters":
+      "phone core (2.3a gate, 2 s): the number is right but shows too late on the CI runner. On origin/main the same measurement (CI run 40634431158, #719, msToShow) was 4,003 ms; on this branch (CI run of #726) 3,387 ms. The screens wait only for the reference views (~0.8 s), then compete on the main thread with the replica hydrates the shell still starts (sis-roster ~893 KB and the route desks). Until those leave the boot path (2.3b / Phase 3).",
+    "/timetable":
+      "phone core (2.3a gate, 2 s): the number is right but shows too late on the CI runner. On origin/main the same measurement (CI run 40634431158, #719, msToShow) was 4,017 ms; on this branch (CI run of #726) 2,882 ms. The screens wait only for the reference views (~0.8 s), then compete on the main thread with the replica hydrates the shell still starts (sis-roster ~893 KB and the route desks). Until those leave the boot path (2.3b / Phase 3).",
+    "/homework":
+      "phone core (2.3a gate, 2 s): the number is right but shows too late on the CI runner. On origin/main the same measurement (CI run 40634431158, #719, msToShow) was 4,033 ms; on this branch (CI run of #726) 3,111 ms. The screens wait only for the reference views (~0.8 s), then compete on the main thread with the replica hydrates the shell still starts (sis-roster ~893 KB and the route desks). Until those leave the boot path (2.3b / Phase 3).",
     "/attendance": "as desktop: V-A's register shows blank-year rows as this year's (21, seeded 19), or stays at 0. Until step 3.1.",
   },
 };

@@ -26,11 +26,13 @@ function loadPageCopies(): Promise<void> {
   if (pageCopies) return pageCopies;
   pageCopies = (async () => {
     try {
-      const [{ ensureRbacHydrated }, { ensureStaffHydrated }, { withHydrationSlot }] = await Promise.all([
-        import("@/lib/rbacPersistence"),
-        import("@/lib/staffPersistence"),
-        import("@/lib/deskHydrateGuard"),
-      ]);
+      const [{ ensureRbacHydrated }, { ensureStaffHydrated }, { ensureModuleRegistryHydrated }, { withHydrationSlot }] =
+        await Promise.all([
+          import("@/lib/rbacPersistence"),
+          import("@/lib/staffPersistence"),
+          import("@/lib/moduleRegistryPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
       const capped = (run: () => Promise<unknown>) =>
         Promise.race([
           withHydrationSlot(run).catch(() => false),
@@ -39,6 +41,11 @@ function loadPageCopies(): Promise<void> {
       await Promise.all([
         hasDeskLoaded("rbac") ? null : capped(() => ensureRbacHydrated()),
         hasDeskLoaded("staff") ? null : capped(() => ensureStaffHydrated()),
+        // Which modules are switched on (canAccessModuleHref reads its page
+        // copy): a default-off module the school enabled must not be refused
+        // before the registry is in. Until 2.3a the access copy re-decided
+        // on its hydrate event.
+        hasDeskLoaded("module_registry") ? null : capped(() => ensureModuleRegistryHydrated()),
       ]);
     } catch {
       /* best-effort: the views decide what is shown */
@@ -57,8 +64,10 @@ function loadPageCopies(): Promise<void> {
  * readers see the school's classes, subjects and settings), and once the
  * page copies of the roles and the roster have loaded or 5 s have passed.
  *
- * A failed masters read is shown as a failure with Try again (R6) — never an
- * empty school. No event is raised: screens that must follow a later Masters
+ * A failed masters read is never an empty school (R6): when the tab's copy
+ * holds Masters anyway (the old hydrate below) the screens render and each
+ * converted one shows its own "could not load" + Try again; with no Masters
+ * at all the whole page is that failure. No event is raised: screens that must follow a later Masters
  * change read useMasters() (the versions poll refetches it).
  *
  * The old core masters hydrate (masters-desk, ~235 KB) still runs from the
@@ -71,7 +80,39 @@ function loadPageCopies(): Promise<void> {
 export function ShellDataWait({ children }: { children: React.ReactNode }) {
   const remote = isSupabaseConfigured();
   const masters = useMasters({ enabled: remote });
-  const [copiesReady, setCopiesReady] = useState(() => !remote || (hasDeskLoaded("rbac") && hasDeskLoaded("staff")));
+  const [copiesReady, setCopiesReady] = useState(
+    () => !remote || (hasDeskLoaded("rbac") && hasDeskLoaded("staff") && hasDeskLoaded("module_registry")),
+  );
+  // The masters view failed: is the tab's copy filled anyway (the old
+  // masters-desk hydrate)? Then the screens render and each says what it
+  // could not load (useScreenMasters' own error) — the infirmary and the
+  // gate stay usable (2.1i). Only with no Masters at all is the whole page
+  // the failure.
+  const failedNoAnswer = remote && masters.data === undefined && masters.isError;
+  const [copyHasMasters, setCopyHasMasters] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!failedNoAnswer) {
+      setCopyHasMasters(null);
+      return;
+    }
+    if (hasDeskLoaded("masters")) {
+      setCopyHasMasters(true);
+      return;
+    }
+    let live = true;
+    void (async () => {
+      try {
+        const { ensureMastersHydrated } = await import("@/lib/mastersPersistence");
+        await ensureMastersHydrated();
+      } catch {
+        /* decided below */
+      }
+      if (live) setCopyHasMasters(hasDeskLoaded("masters"));
+    })();
+    return () => {
+      live = false;
+    };
+  }, [failedNoAnswer]);
 
   useEffect(() => {
     if (copiesReady) return;
@@ -85,8 +126,11 @@ export function ShellDataWait({ children }: { children: React.ReactNode }) {
   }, [copiesReady]);
 
   if (!remote) return <>{children}</>;
-  if (masters.data === undefined && masters.isError) {
-    return <QueryError what="the school's classes, subjects and staff" error={masters.error} retry={masters.refetch} />;
+  if (failedNoAnswer) {
+    if (copyHasMasters && copiesReady) return <>{children}</>;
+    if (copyHasMasters === false) {
+      return <QueryError what="the school's classes, subjects and staff" error={masters.error} retry={masters.refetch} />;
+    }
   }
   if (masters.data !== undefined && copiesReady) return <>{children}</>;
   return (

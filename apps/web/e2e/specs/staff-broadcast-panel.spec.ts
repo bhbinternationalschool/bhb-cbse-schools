@@ -14,7 +14,9 @@
  */
 import { expect, openAs, test } from "../support";
 
-const ROSTER = "**/api/school-data/staff-roster*";
+// Since data-layer 2.3a "who am I" comes from the access copy — the
+// staff-list view — not the page copy's roster: that is the read held here.
+const ROSTER = "**/api/data/views/staff-list*";
 
 test("opened before the roster loads, the panel offers leave and requests once it lands", async ({ browser }) => {
   test.setTimeout(120_000);
