@@ -1,0 +1,61 @@
+name: Enquiry candidate checks
+
+on:
+  push:
+    branches: [review/google-enquiry-ca6a2906]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: enquiry-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Candidate typecheck and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies and Linux CSS binaries
+        run: |
+          npm ci
+          npm install --no-save --workspace=web \
+            lightningcss-linux-x64-gnu@1.32.0 \
+            @tailwindcss/oxide-linux-x64-gnu@4.3.2
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: bash scripts/check-ratchets.sh
+
+  build:
+    name: Candidate production build only
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+      NEXT_TELEMETRY_DISABLED: "1"
+      # Deliberately non-production, non-secret, unreachable database endpoint.
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:9
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: candidate-placeholder-not-a-secret
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install locked dependencies and Linux CSS binaries
+        run: |
+          npm ci
+          npm install --no-save --workspace=web \
+            lightningcss-linux-x64-gnu@1.32.0 \
+            @tailwindcss/oxide-linux-x64-gnu@4.3.2
+      - run: npm run build
