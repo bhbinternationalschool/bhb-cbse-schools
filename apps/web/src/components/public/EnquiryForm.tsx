@@ -14,12 +14,14 @@ import { useState } from "react";
  * form costs completions, and the office only needs enough to ring back.
  */
 export function EnquiryForm({ classes }: { classes: string[] }) {
+  const [idemKey] = useState(() => crypto.randomUUID());
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (busy) return;
     setBusy(true);
     setError(null);
     const form = new FormData(e.currentTarget);
@@ -28,6 +30,9 @@ export function EnquiryForm({ classes }: { classes: string[] }) {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          idempotencyKey: idemKey,
+          source: "website",
+          consent: form.get("consent") === "on",
           guardianName: form.get("guardianName"),
           childName: form.get("childName"),
           mobile: form.get("mobile"),
@@ -102,6 +107,11 @@ export function EnquiryForm({ classes }: { classes: string[] }) {
       <label className="mt-4 block text-sm text-slate-600">
         Anything you would like to ask (optional)
         <textarea name="message" rows={3} className={field} />
+      </label>
+
+      <label className="mt-4 flex items-start gap-2 text-xs text-slate-600">
+        <input type="checkbox" name="consent" required />
+        I agree that the school may store these details and contact me about this admission enquiry.
       </label>
 
       {error ? (
