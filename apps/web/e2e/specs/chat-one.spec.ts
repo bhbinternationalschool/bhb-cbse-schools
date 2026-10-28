@@ -223,6 +223,26 @@ test.describe.serial("chat-one: the header chat is school chat", () => {
     expect((await member.post("/api/v1/school-chat/send", { conversationId: groupId, body: `back again ${tag}` })).status).toBe(200);
   });
 
+  test("5b. an owner's login with no staff row (the director's) can make a group and talk; an unlinked teacher cannot", async () => {
+    const owner = await api({ persona: "staff", fullName: "E2E Director Nostaffrow", email: "director@e2e.invalid", roleCode: "principal", tenantSlug: fx.sessions.office.tenantSlug, academicYearCode: AY_CURRENT });
+    const unlinked = await api({ persona: "staff", fullName: "E2E Nobody Unlinked", email: "nobody@e2e.invalid", roleCode: "teacher", tenantSlug: fx.sessions.office.tenantSlug, academicYearCode: AY_CURRENT });
+    try {
+      const g = await owner.post("/api/v1/school-chat/groups", { title: `Director's group ${tag}`, staffIds: [staffSession(MEMBER).staffId] });
+      expect(g.status, JSON.stringify(g.body)).toBe(200);
+      expect((await owner.post("/api/v1/school-chat/send", { conversationId: g.body.data.id, body: `hello from the director ${tag}` })).status).toBe(200);
+      const read = await msgs(member, g.body.data.id);
+      expect(bodies(read)).toContain(`hello from the director ${tag}`);
+      expect(read.body.data.messages.find((m) => m.body === `hello from the director ${tag}`)?.senderLabel).toContain("E2E Director Nostaffrow");
+      expect((await member.post("/api/v1/school-chat/send", { conversationId: g.body.data.id, body: `reply to the director ${tag}` })).status).toBe(200);
+      expect(bodies(await msgs(owner, g.body.data.id))).toContain(`reply to the director ${tag}`);
+      expect((await owner.get("/api/v1/school-chat/conversations")).body.data.conversations.map((c) => c.id)).toContain(g.body.data.id);
+      expect((await unlinked.get("/api/v1/school-chat/conversations")).status).toBe(403);
+    } finally {
+      await owner.ctx.dispose();
+      await unlinked.ctx.dispose();
+    }
+  });
+
   test("6. the old in-memory chat store is gone", async () => {
     const r = await maker.ctx.get("/api/chat");
     expect(r.status()).toBe(404);
@@ -269,6 +289,25 @@ test.describe.serial("chat-one: the header chat is school chat", () => {
         await expect(drawer.getByLabel("Class section")).toBeVisible({ timeout: 15_000 });
         await page.screenshot({ path: testInfo.outputPath(`header-chat-new-group-${v.name}.png`) });
         await testInfo.attach(`new-group-${v.name}`, { path: testInfo.outputPath(`header-chat-new-group-${v.name}.png`), contentType: "image/png" });
+      } finally {
+        await context.close();
+      }
+    }
+
+    // An owner's login with no staff row (the director's) has the button too.
+    {
+      const ownerSession: DemoSession = { persona: "staff", fullName: "E2E Director Nostaffrow", email: "director@e2e.invalid", roleCode: "principal", tenantSlug: fx.sessions.office.tenantSlug, academicYearCode: AY_CURRENT };
+      const context = await browser.newContext({ baseURL: APP_URL, viewport: { width: 1280, height: 800 }, colorScheme: "light" });
+      try {
+        await context.addCookies([{ name: "bhb_demo_session", value: sessionCookieHeader(ownerSession).split("=").slice(1).join("="), url: APP_URL }]);
+        const page = await context.newPage();
+        await page.goto("/home");
+        const button = page.getByTestId("header-chat-button");
+        await expect(button).toBeVisible({ timeout: 60_000 });
+        await button.click();
+        await expect(page.getByTestId("header-chat-drawer").getByText(`Director's group ${tag}`)).toBeVisible({ timeout: 30_000 });
+        await page.screenshot({ path: testInfo.outputPath("header-chat-owner-desktop-light.png") });
+        await testInfo.attach("owner-desktop-light", { path: testInfo.outputPath("header-chat-owner-desktop-light.png"), contentType: "image/png" });
       } finally {
         await context.close();
       }

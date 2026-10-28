@@ -19,6 +19,7 @@ import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { MessageCircle, X } from "lucide-react";
+import { QueryError } from "@/components/data/QueryError";
 import { ChatsPanel, unreadTotal, useConversations } from "@/components/schoolChat/SchoolChatPanel";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
 
@@ -60,7 +61,10 @@ export function ChatDrawer({ label, testId, onClose, children }: { label: string
 
 export function SchoolChatHeaderButton() {
   const session = useDemoSessionOptional();
-  const staff = session?.persona === "staff" && !!session.staffId;
+  // Every staff login: the server decides who it chats as (its staff row, or
+  // for an owner's account with none, a login id — schoolChat.server
+  // staffChatId) and says so plainly when it cannot.
+  const staff = session?.persona === "staff";
   const [open, setOpen] = useState(false);
   const convs = useConversations(undefined, { enabled: staff, pollMs: open ? 10_000 : 30_000 });
   const unread = unreadTotal(convs.data);
@@ -100,7 +104,7 @@ export function SchoolChatHeaderButton() {
             </span>
           </div>
           <ChatsPanel view={convs.data} loading={convs.isLoading} reload={convs.refetch} initial="" compact />
-          {convs.isError ? <p className="text-xs text-[var(--danger)]">Could not read your chats — check the connection; it retries by itself.</p> : null}
+          {convs.isError ? <QueryError what="your chats" error={convs.error} retry={convs.refetch} /> : null}
         </ChatDrawer>
       ) : null}
     </>
