@@ -45,11 +45,6 @@ import {
   pushHomeworkDeskToDb,
 } from "@/lib/homeworkNormalized.server";
 import { defaultRbacState } from "@/lib/rbac";
-import { emptyMastersShell } from "@/lib/masters";
-import {
-  fetchMastersDeskFromDb,
-  pushMastersDeskToDb,
-} from "@/lib/mastersNormalized.server";
 import type { PaymentsState } from "@/lib/payments";
 import {
   fetchPaymentDeskFromDb,
@@ -239,28 +234,12 @@ async function ensurePrimaryModule(id: DeskModuleId): Promise<EnsureDeskAction> 
       break;
     }
     case "masters": {
-      const { meta, readFailed } = await fetchMastersDeskFromDb();
-      // A failed read is unknown, not "no masters" — seeding an empty shell
-      // over a timed-out read is the exact 2026-08-10 orphaning path.
-      if (readFailed) {
-        return { module: id, action: "skip", detail: "desk read failed" };
-      }
-      const deskRows = meta?.sliceCount ?? 0;
-      if (deskRows === 0) {
-        const ok = (await pushMastersDeskToDb(emptyMastersShell(), {
-          // Bootstrap only: with no revision the writer refuses any desk
-          // that has ever been written.
-          baseUpdatedAt: null,
-        })).ok;
-        return {
-          module: id,
-          action: ok ? "seed" : "skip",
-          detail: "empty masters shell",
-        };
-      }
-      // Desk exists → it is the truth. The school_mirror_state masters blob
-      // is a frozen legacy copy and is never written back over the desk.
-      break;
+      // Nothing to do here since data-layer 2.2f: the desk is the truth, the
+      // legacy masters blob is never written back over it, and an EMPTY desk
+      // is no longer "seeded" with an empty shell (R6 — unknown is never
+      // empty; a new school's Masters is set up on the Masters screen, element
+      // by element). The old bootstrap was the last whole-book write from here.
+      return { module: id, action: "skip", detail: "masters desk is set up on the Masters screen" };
     }
     case "payments": {
       const desk = await fetchPaymentDeskFromDb();
