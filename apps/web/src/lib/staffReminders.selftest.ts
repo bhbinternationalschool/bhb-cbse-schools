@@ -287,7 +287,8 @@ function deps(w: World, nowMs: number, o: Overrides = {}): ReminderDeps {
     now: () => nowMs,
     log: () => undefined,
   };
-  const { settingsValue: _s, ...rest } = o;
+  const rest: Partial<ReminderDeps> = { ...o };
+  delete (rest as Overrides).settingsValue;
   return { ...base, ...rest };
 }
 

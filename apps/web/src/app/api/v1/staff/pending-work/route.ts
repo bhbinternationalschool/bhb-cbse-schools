@@ -1,5 +1,6 @@
 import { apiErr, apiOk, ApiError } from "@/lib/api/v1/errors";
 import { resolveApiAuth } from "@/lib/api/v1/auth";
+import { staffSectionScope } from "@/lib/api/v1/staffScope";
 import { istTodayIso } from "@/lib/monthRange";
 import { reminderLinks, reminderText, REMINDER_RULE_LABELS } from "@/lib/staffReminders";
 import { staffPendingWorkFor } from "@/lib/staffReminders.server";
@@ -20,6 +21,10 @@ export async function GET(request: Request) {
   try {
     const ctx = await resolveApiAuth(request);
     if (ctx.session.persona !== "staff") throw new ApiError("forbidden", "Staff session required", 403);
+    // The same gate as "Waiting for you" (/api/v1/staff/approvals): a staff
+    // session whose classes can be worked out (403 / 503 otherwise). Every
+    // item below is the caller's OWN work, decided by the reminder rules.
+    await staffSectionScope(ctx);
     const staffId = ctx.session.staffId || "";
     const date = istTodayIso();
     if (!staffId) return apiOk({ date, items: [], unknown: [] });
