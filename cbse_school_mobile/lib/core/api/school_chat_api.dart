@@ -25,7 +25,7 @@ class SchoolChatConversation {
 
   final String id;
 
-  /// class / subject / group (made by a member of staff) / dm_staff / dm_parent
+  /// class / subject / dm_staff / dm_parent
   final String kind;
   final String title;
   final String? lastMessage;
@@ -33,7 +33,7 @@ class SchoolChatConversation {
   final int unread;
   final bool oversight;
 
-  bool get isGroup => kind == "class" || kind == "subject" || kind == "group";
+  bool get isGroup => kind == "class" || kind == "subject";
 }
 
 class SchoolChatList {
@@ -127,15 +127,6 @@ String _chatQs(Map<String, String?> q) {
 }
 
 extension SchoolChatApi on ApiClient {
-  /// Unread messages across the caller's conversations (the chat button's badge).
-  Future<int> fetchSchoolChatUnread({String? studentId}) async =>
-      _i(
-        await _getData(
-          "/api/v1/school-chat/unread${_chatQs({"studentId": studentId})}",
-        ),
-        "unread",
-      );
-
   Future<SchoolChatList> fetchSchoolChats({
     String? studentId,
   }) async => SchoolChatList.fromJson(
