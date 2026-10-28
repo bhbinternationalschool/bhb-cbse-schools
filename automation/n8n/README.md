@@ -6,7 +6,7 @@ and driven by Claude. Phase 1 gives the school two employees and a daily meeting
 | Employee | Workflow | Runs | Models |
 |---|---|---|---|
 | **Receptionist** | `workflows/receptionist.json` | every minute (Gmail poll) + every 5 min (approvals) | Haiku 5.5 sorts, Sonnet 5.5 drafts |
-| **Academic Incharge** | `workflows/academic-incharge.json` | 06:00 IST daily | Sonnet 5.5 |
+| **Academic Incharge** | `workflows/academic-incharge.json` | 08:30 IST daily | Sonnet 5.5 |
 | **Morning huddle** (chair + roster) | `workflows/morning-huddle.json` | 06:30 IST daily | Sonnet 5.5 |
 
 They coordinate through four `office_*` tables in the ERP's Supabase project
@@ -178,7 +178,7 @@ existed is ignored, and each draft is decided once.
 
 ### Academic Incharge (`workflows/academic-incharge.json`)
 
-06:00 IST. Reads, for today:
+08:30 IST (after the morning register is marked). Reads, for today:
 
 - approved `staff_leave_requests` covering today;
 - today's `staff_attendance_desk_registers` row and its `_marks` with status `A` (absent), `L` (late), `LE` (left early) — if the register is not marked yet, the plan says so;
@@ -239,7 +239,7 @@ draft is a no-op). One poller per bot: never set a webhook on
    keyboard disappears), a typed decision gets a reply. "No draft #99 is
    waiting." / "Draft #42 is already decided." when it is not pending.
 3. Commands: `/drafts` lists pending drafts (with ✅/❌ buttons per draft for
-   the director); `/tasks` lists open `office_tasks`; `/huddle` the latest
+   the director); `/tasks` lists open `office_tasks` (the director gets ✅ Done / 💤 Snooze buttons per task and a ✅ Clear-all button; or reply `/done <id>`, `/snooze <id>`, `/done all`); `/huddle` the latest
    minutes and decisions; `/plan` today's latest Academic Incharge note, or
    "No plan yet today — last plan <date>".
 

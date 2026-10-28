@@ -944,7 +944,7 @@ function buildAcademicIncharge() {
   );
   const W = "academic-incharge";
 
-  const trigger = cron(wf, "Every day 06:00 IST", "0 6 * * *");
+  const trigger = cron(wf, "Every day 08:30 IST", "30 8 * * *");
   const ctx = code(
     wf,
     "Context",
@@ -1247,10 +1247,11 @@ for (let i = 0; i < $runIndex; i += 1) {
 }
 const transcript = [{ role: 'chair', text: it.opening }, ...turns.map((t) => ({ role: t.role, text: t.text }))];
 const mine = it.agenda.filter((a) => a.asks === it.role || a.asks === 'all');
-const user = 'Morning huddle, ' + it.today + '. You are speaking as ' + it.role + '.\\n\\nAgenda:\\n' + it.agenda.map((a, i) => (i + 1) + '. ' + a.item + ' (asks: ' + a.asks + ')').join('\\n')
+let user = 'Morning huddle, ' + it.today + '. You are speaking as ' + it.role + '.\\n\\nAgenda:\\n' + it.agenda.map((a, i) => (i + 1) + '. ' + a.item + ' (asks: ' + a.asks + ')').join('\\n')
   + '\\n\\nTranscript so far:\\n' + transcript.map((t) => t.role + ': ' + t.text).join('\\n\\n')
   + '\\n\\nYesterday\\'s notes:\\n' + (it.notes_digest.join('\\n') || '(none)') + '\\n\\nOpen tasks:\\n' + (it.tasks_digest.join('\\n') || '(none)')
   + '\\n\\nGive your turn: answer the agenda items addressed to you (' + (mine.length || 'none') + ') in at most three sentences each — what you will do, by when — and name anything that needs the director. Return only {"turn":"...","proposed_tasks":[{"title":"...","detail":"...","due_on":"YYYY-MM-DD","to_role":"' + it.role + ' or director"}]}.';
+user += ' Do NOT propose a task that repeats an already-open task shown above; reference its #id instead and only propose genuinely new work.';
 return [{ json: { ...it, transcript, request: claudeRequest({ model: ${JSON.stringify(MODELS.write)}, system: CHARTERS[it.role], user, maxTokens: 900, effort: 'medium' }) } }];
 `,
     { row: 1 },
@@ -1282,10 +1283,13 @@ const turns = $input.all().map((i) => i.json).filter((t) => t && t.role).sort((a
 const first = turns[0] || $('Roster').first().json;
 const transcript = [{ role: 'chair', text: first.opening }, ...turns.map((t) => ({ role: t.role, text: t.text }))];
 const proposed = turns.flatMap((t) => (t.proposed_tasks || []).map((p) => ({ ...p, by: t.role })));
-const user = 'Huddle of ' + first.today + ' is over. Agenda:\\n' + first.agenda.map((a, i) => (i + 1) + '. ' + a.item + ' (' + a.asks + ')').join('\\n')
+const openRows = (() => { try { return $('Fetch: open tasks').all().map((i) => i.json).filter((t) => t && t.id); } catch (e) { return []; } })();
+const open_digest = openRows.map((t) => '#' + t.id + ' [' + t.to_role + '] ' + t.title);
+let user = 'Huddle of ' + first.today + ' is over. Agenda:\\n' + first.agenda.map((a, i) => (i + 1) + '. ' + a.item + ' (' + a.asks + ')').join('\\n')
   + '\\n\\nTranscript:\\n' + transcript.map((t) => t.role + ': ' + t.text).join('\\n\\n')
   + '\\n\\nTasks the employees proposed:\\n' + (proposed.map((p) => '- [' + p.by + '] ' + p.title + ' → ' + (p.to_role || p.by) + (p.due_on ? ' by ' + p.due_on : '') + (p.detail ? ': ' + p.detail : '')).join('\\n') || '(none)')
   + '\\n\\nWrite the minutes and the decisions. Every decision is a task for one role with a due date; questions the employees could not settle go to "director". Return only the JSON object described in your charter under "Minutes".';
+user += ' Already-open tasks (do NOT raise any of these again - they are already tracked; if unresolved, reference the #id in the minutes and wait, do not create a new task for it): ' + (open_digest.join(' | ') || '(none)');
 return [{ json: { today: first.today, agenda: first.agenda, transcript, proposed, request: claudeRequest({ model: ${JSON.stringify(MODELS.write)}, system: SYSTEM, user, maxTokens: 1500, effort: 'medium' }) } }];
 `,
   );
@@ -1388,6 +1392,10 @@ for (const u of updates) {
     const m = /^(approve|reject):(\\d+)$/.exec(data);
     if (m && role === 'director') { out.push({ json: { kind: 'decision', decision: m[1], task_id: Number(m[2]), via: 'tap', ...base } }); continue; }
     if (m) { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const ta = /^(done|snooze):(\\d+)$/.exec(data);
+    if (ta && role === 'director') { out.push({ json: { kind: 'taskaction', action: ta[1], task_id: Number(ta[2]), ...base } }); continue; }
+    if ((ta || data === 'doneall') && role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    if (data === 'doneall') { out.push({ json: { kind: 'taskaction', action: 'doneall', task_id: null, ...base } }); continue; }
     if (data === 'tasks') { out.push({ json: { kind: 'command', cmd: 'tasks', ...base } }); continue; }
     continue;
   }
@@ -1404,6 +1412,15 @@ for (const u of updates) {
     continue;
   }
   if (!role) continue;
+  const ta = /^\\/(done|close|snooze)\\s+#?(\\d+|all)\\b/i.exec(text);
+  if (ta) {
+    if (role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const act = ta[1].toLowerCase() === 'close' ? 'done' : ta[1].toLowerCase();
+    const arg = ta[2].toLowerCase();
+    if (arg === 'all') { if (act === 'done') out.push({ json: { kind: 'taskaction', action: 'doneall', task_id: null, ...base } }); continue; }
+    out.push({ json: { kind: 'taskaction', action: act, task_id: Number(arg), ...base } });
+    continue;
+  }
   let decision = null; let m = text.match(APPROVE);
   if (m) decision = 'approve'; else { m = text.match(REJECT); if (m) decision = 'reject'; }
   if (!decision) continue;
@@ -1414,7 +1431,7 @@ return out;
 `,
   );
   wf.chain(tick, buildPoll, poll, parse);
-  const kind = switchOn(wf, "Switch: update kind", "kind", ["decision", "command"]);
+  const kind = switchOn(wf, "Switch: update kind", "kind", ["decision", "command", "taskaction"]);
   wf.link(parse, kind);
 
   /* ── decisions ── */
@@ -1580,7 +1597,7 @@ for (const a of asks) {
   if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });
   if (a.cmd === 'start') {
     const who = a.role ? 'You are the ' + a.role + '.' : 'This chat is not registered yet. Give the office this chat id: <code>' + tgEscape(a.chat_id) + '</code>';
-    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n/drafts — replies waiting for your decision\\n/tasks — open office tasks\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan' : ''));
+    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n/drafts — replies waiting for your decision\\n/tasks — open tasks (tap to close or defer)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan' : ''));
     continue;
   }
   if (a.cmd === 'not_director') { send(a.chat_id, 'Only the director decides drafts.'); continue; }
@@ -1593,7 +1610,14 @@ for (const a of asks) {
     continue;
   }
   if (a.cmd === 'tasks') {
-    send(a.chat_id, tasks.length ? '<b>Open tasks (' + tasks.length + ')</b>\\n' + tasks.map((t) => tgEscape(line(t))).join('\\n') : 'No open tasks.');
+    if (!tasks.length) { send(a.chat_id, 'No open tasks.'); continue; }
+    const body = '<b>Open tasks (' + tasks.length + ')</b>\\n' + tasks.map((t) => tgEscape(line(t))).join('\\n');
+    let keyboard = null;
+    if (a.role === 'director') {
+      keyboard = tasks.slice(0, 8).map((t) => [{ text: '✅ Done ' + t.id, callback_data: 'done:' + t.id }, { text: '💤 Snooze ' + t.id, callback_data: 'snooze:' + t.id }]);
+      keyboard.push([{ text: '✅ Clear all ' + tasks.length, callback_data: 'doneall' }]);
+    }
+    send(a.chat_id, body + (tasks.length > 8 ? '\\n\\n(Buttons for the first 8 - for the rest reply /done <id> or /snooze <id>.)' : ''), keyboard);
     continue;
   }
   if (a.cmd === 'huddle') {
@@ -1615,6 +1639,52 @@ return out;
   );
   wf.link(plan, commandReplies);
   wf.link(commandReplies, reply);
+
+  /* -- task actions: done / snooze / clear -- */
+  const applyTaskActions = code(
+    wf,
+    "Apply: task actions",
+    `${JS_TG}${JS_DATES}
+return (async () => {
+const asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'taskaction');
+const SB = String($env.SUPABASE_URL || '').replace(/\\/$/, '');
+const KEY = String($env.SUPABASE_SERVICE_ROLE_KEY || '');
+const TENANT = String($env.OFFICE_TENANT_ID || '');
+const H = { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json', Prefer: 'return=representation' };
+const now = new Date().toISOString();
+const tomorrow = isoDate(new Date(istNow().getTime() + 86400000));
+const sb = async (method, pathq, body) => {
+  const res = await this.helpers.httpRequest({ method, url: SB + '/rest/v1/' + pathq, headers: H, body: body ? JSON.stringify(body) : undefined });
+  if (typeof res === 'string') { try { return JSON.parse(res); } catch (e) { return []; } }
+  return res;
+};
+const open = await sb('GET', 'office_tasks?tenant_id=eq.' + TENANT + '&status=in.(open,doing)&select=id,to_role,title,due_on,payload&order=created_at.asc&limit=200');
+const openArr = Array.isArray(open) ? open : [];
+const openIds = new Set(openArr.map((t) => Number(t.id)));
+const out = [];
+const seen = new Set();
+for (const a of asks) {
+  if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });
+  let ids = [];
+  if (a.action === 'doneall') ids = openArr.map((t) => Number(t.id));
+  else if (a.task_id && openIds.has(Number(a.task_id))) ids = [Number(a.task_id)];
+  if (!ids.length) { out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: a.chat_id, text: a.task_id ? 'No open task #' + a.task_id + '.' : 'No open tasks to clear.' } } }); continue; }
+  let done = 0;
+  for (const id of ids) {
+    if (seen.has(id)) continue; seen.add(id);
+    const cur = openArr.find((t) => Number(t.id) === id) || {};
+    const patch = a.action === 'snooze' ? { due_on: tomorrow, updated_at: now, payload: { ...(cur.payload || {}), snoozed_until: tomorrow, snoozed_by: 'director' } } : { status: 'done', decided_by: 'director', decided_at: now, updated_at: now };
+    try { await sb('PATCH', 'office_tasks?id=eq.' + id + '&tenant_id=eq.' + TENANT, patch); done += 1; } catch (e) {}
+  }
+  const label = a.action === 'doneall' ? ('Cleared ' + done + ' open task' + (done === 1 ? '' : 's') + '.') : (a.action === 'snooze' ? ('Task #' + ids[0] + ' snoozed to ' + tomorrow + '.') : ('Task #' + ids[0] + ' closed.'));
+  out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: a.chat_id, text: '✅ ' + label } } });
+}
+return out;
+})();
+`,
+  );
+  wf.link(kind, applyTaskActions, 2);
+  wf.link(applyTaskActions, reply);
   return wf;
 }
 
