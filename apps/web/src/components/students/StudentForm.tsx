@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { hasDeskLoaded } from "@/lib/deskHydrateGuard";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
 import { PincodeFill } from "@/components/ui/open-lookup-fields";
 import { pushToast } from "@/components/shell/Toast";
 import { useRouter } from "next/navigation";
@@ -238,6 +240,35 @@ export function StudentForm({
   const filledFor = useRef("");
   const [notice, setNotice] = useState<string | null>(null);
   const [missing, setMissing] = useState(false);
+  /**
+   * Editing reads the student from the SIS roster: "Student not found" is
+   * decided only once the roster has loaded on this page — an unloaded
+   * roster is unknown, not empty (R6). Since data-layer 2.3a the shell no
+   * longer holds every screen back for the old hydrates, so the form can
+   * mount before the roster lands.
+   */
+  const [sisReady, setSisReady] = useState(
+    () => mode !== "edit" || !isSupabaseConfigured() || hasDeskLoaded("sis"),
+  );
+  useEffect(() => {
+    if (sisReady) return;
+    let live = true;
+    void (async () => {
+      try {
+        const [{ ensureSisHydrated }, { withHydrationSlot }] = await Promise.all([
+          import("@/lib/sisPersistence"),
+          import("@/lib/deskHydrateGuard"),
+        ]);
+        await withHydrationSlot(() => ensureSisHydrated());
+      } catch {
+        /* decided below from what loaded */
+      }
+      if (live) setSisReady(true);
+    })();
+    return () => {
+      live = false;
+    };
+  }, [sisReady]);
   const [tab, setTab] = useState<Tab>("basic");
 
   const [admissionNo, setAdmissionNo] = useState("");
@@ -344,7 +375,7 @@ export function StudentForm({
 
   useEffect(() => {
     const fillKey = `${mode}|${studentId ?? ""}|${session.academicYearCode}`;
-    if (!masters || filledFor.current === fillKey) return;
+    if (!masters || !sisReady || filledFor.current === fillKey) return;
     filledFor.current = fillKey;
     const m = masters;
     const sis = loadSis();
@@ -487,7 +518,7 @@ export function StudentForm({
     setPendingRequest(null);
     // Filled once per (mode, student, year) from the first Masters answer:
     // re-running on a background refetch would wipe what the office has typed.
-  }, [masters, mode, studentId, session.academicYearCode]);
+  }, [masters, sisReady, mode, studentId, session.academicYearCode]);
 
   const sectionsForClass = useMemo(() => {
     if (!masters || !classId) return [];
@@ -1167,7 +1198,7 @@ export function StudentForm({
   if (mastersError) {
     return <QueryError what="the school's classes and sections" error={mastersError} retry={retryMasters} />;
   }
-  if (!masters) {
+  if (!masters || !sisReady) {
     return <p className="text-sm text-[var(--muted)]">Loading…</p>;
   }
 
