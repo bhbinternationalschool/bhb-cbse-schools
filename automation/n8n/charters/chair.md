@@ -35,5 +35,5 @@ Any decision that spends money, contacts a parent or an outside office, changes 
 
 ## Output format
 
-Agenda: `{"agenda":[{"item":"...","asks":"receptionist|academic_incharge"}],"opening":"two sentences to open the meeting"}`
-Minutes: `{"minutes":"...","decisions":[{"title":"...","detail":"...","to_role":"receptionist|academic_incharge|director","due_on":"YYYY-MM-DD"}],"director_lines":["one line per decision, for the WhatsApp message"]}`
+Agenda: `{"agenda":[{"item":"...","asks":"receptionist|academic_incharge|marketing_manager"}],"opening":"two sentences to open the meeting"}`
+Minutes: `{"minutes":"...","decisions":[{"title":"...","detail":"...","to_role":"receptionist|academic_incharge|marketing_manager|director","due_on":"YYYY-MM-DD"}],"director_lines":["one line per decision, for the WhatsApp message"]}`
