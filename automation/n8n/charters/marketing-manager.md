@@ -23,9 +23,13 @@ You do not know any spend figure, cost per lead, click count, impression, villag
 
 Which beats to work first and how to group them; how to word a draft; how to split an existing cap across weeks and channels within its own unit; which of your open tasks to pick first; what to note for the huddle.
 
+## Ask the director for the budget every month
+
+At the start of every month you ask the director for that month's advertising budget, **portal by portal** — Google Ads, Facebook (Meta / Instagram) and WhatsApp — and for the **school** and the **ITI** separately. You ask for any portal × unit that has no cap set for the current month, so a fresh month always prompts and the ask clears on its own as each figure is set. Give last month's figure for context where you have it, never a guessed one. The director replies in the Telegram console in plain words ("Google 5000, Facebook 3000, WhatsApp 2000 for the school") and the office records it. You never set or change a budget yourself.
+
 ## What needs the director (draft, mark pending, stop)
 
-- The monthly budget figure and its split across units and channels, before any of it is set.
+- The monthly budget figure and its split across units and channels, before any of it is set (you ask for this every month — see above).
 - Raising a cap, adding a channel, or any spend where no cap exists.
 - Publishing any Google, Meta or WhatsApp ad or broadcast, or any public post.
 - Starting or un-pausing a paid campaign (the account is paused until verification clears).

@@ -1744,8 +1744,17 @@ for (const a of asks) {
     }
     // Spend vs budget (caps are live from the budget table; spent is from the note).
     lines.push('\\n<b>Spend vs budget</b>');
-    if (!thisMonth.length) lines.push('• No budget set for ' + month + ' yet — the director must set the monthly figure and the school/ITI split.');
-    else for (const b of thisMonth) lines.push(tgEscape('• ' + (b.unit || '?') + ' / ' + (b.channel || '?') + ': cap ' + inr(b.cap_amount) + ', allocated ' + inr(b.allocated) + ', spent ' + (b.spent != null ? inr(b.spent) : 'not known')));
+    for (const b of thisMonth) lines.push(tgEscape('• ' + (b.unit || '?') + ' / ' + (b.channel || '?') + ': cap ' + inr(b.cap_amount) + ', allocated ' + inr(b.allocated) + ', spent ' + (b.spent != null ? inr(b.spent) : 'not known')));
+    // Monthly per-portal ask: Google Ads, Facebook, WhatsApp, for school + ITI.
+    const askPortals = [['google_ads', 'Google Ads'], ['meta', 'Facebook'], ['whatsapp', 'WhatsApp']];
+    const askUnits = [['school', 'School'], ['iti', 'ITI']];
+    const have = new Set(thisMonth.map((b) => (b.unit || '') + '/' + (b.channel || '')));
+    const missing = [];
+    for (const [u, uL] of askUnits) for (const [c, cL] of askPortals) if (!have.has(u + '/' + c)) missing.push(uL + ' / ' + cL);
+    if (missing.length) {
+      lines.push(tgEscape('Not set for ' + month + ' yet: ' + missing.join(', ') + '.'));
+      lines.push(tgEscape('Reply with the amounts and I\\'ll set them — e.g. "Google 5000, Facebook 3000, WhatsApp 2000 for the school".'));
+    }
     // Week's beat plan.
     const beats = Array.isArray(f.beat_plan) ? f.beat_plan : [];
     if (beats.length) {
@@ -2201,17 +2210,39 @@ const cplLines = cpl.map((c) => '• ' + (c.unit || '?') + ' / ' + (c.channel ||
 const svbLines = svb.map((s) => '• ' + (s.unit || '?') + ' / ' + (s.channel || '?') + ': cap ' + inr(s.cap) + ', allocated ' + inr(s.allocated) + ', spent ' + (s.spent == null || s.spent === '' ? 'not known' : (typeof s.spent === 'number' ? inr(s.spent) : s.spent)));
 const beatLines = beats.slice(0, 10).map((b) => (b.rank ? b.rank + '. ' : '• ') + (b.beat || (Array.isArray(b.villages) ? b.villages.slice(0, 3).join(', ') : '')) + (b.child_population ? ' — ~' + b.child_population + ' children' : '') + (b.past_enquiries != null ? ', ' + b.past_enquiries + ' past enq' : ''));
 const head = '📣 Marketing — week of ' + it.ctx.weekStart;
+
+// Monthly budget ask — Google Ads, Facebook (Meta), WhatsApp, for the school
+// and the ITI. We ask whenever a cap is missing for the CURRENT month, so each
+// new month (which starts with no caps) prompts the director, and the nudge
+// auto-clears per portal as each is set. The director answers in the Telegram
+// console — "Google 5000, Facebook 3000, WhatsApp 2000 for the school" — and
+// the ERP records it (set_marketing_budget). No figure is ever guessed here.
+const ASK_PORTALS = [['google_ads', 'Google Ads'], ['meta', 'Facebook'], ['whatsapp', 'WhatsApp']];
+const ASK_UNITS = [['school', 'School'], ['iti', 'ITI']];
+const allBudget = (() => { try { return $('Fetch: budget this month').all().map((i) => i.json).filter((r) => r && r.month); } catch (e) { return []; } })();
+const prevMonthStart = (() => { const d = new Date(it.ctx.monthStart + 'T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 10); })();
+const capRow = (m, u, c) => allBudget.find((r) => String(r.month || '').slice(0, 10) === m && (r.unit || '') === u && (r.channel || '') === c);
+const askMissing = [];
+for (const [u, uLabel] of ASK_UNITS) for (const [c, cLabel] of ASK_PORTALS) {
+  if (!capRow(it.ctx.monthStart, u, c)) { const prev = capRow(prevMonthStart, u, c); askMissing.push({ u, c, uLabel, cLabel, prevCap: prev ? Number(prev.cap_amount || 0) : null }); }
+}
+const monthName = (() => { try { return new Date(it.ctx.monthStart + 'T00:00:00Z').toLocaleString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' }); } catch (e) { return String(it.ctx.monthStart || '').slice(0, 7); } })();
+const budgetAsk = askMissing.length
+  ? '🧮 Ad budget for ' + monthName + ' not set yet:\\n' + askMissing.map((m) => '• ' + m.uLabel + ' / ' + m.cLabel + (m.prevCap != null ? ' (last month ' + inr(m.prevCap) + ')' : '')).join('\\n') + '\\n\\nReply here with the amounts and I\\'ll set them — e.g. "Google 5000, Facebook 3000, WhatsApp 2000 for the school".'
+  : '';
+
 const wa_text = [head, summary,
   it.ads_status !== 'ok' ? 'Google Ads: not known — waiting on verification/keys.' : '',
   cplLines.length ? 'Cost per lead:\\n' + cplLines.join('\\n') : '',
-  svbLines.length ? 'Spend vs budget:\\n' + svbLines.join('\\n') : (it.budget_set ? '' : 'No monthly budget set — needs the director (figure + school/ITI split).'),
+  svbLines.length ? 'Spend vs budget:\\n' + svbLines.join('\\n') : '',
+  budgetAsk,
   beatLines.length ? 'This week\\'s beats:\\n' + beatLines.join('\\n') : '',
   (proposals.length || drafts.length) ? (proposals.length + drafts.length) + ' proposal(s) below for your Approve/Reject.' : ''].filter(Boolean).join('\\n\\n');
 
 const note_row = { tenant_id: $env.OFFICE_TENANT_ID, role: 'marketing_manager', note_date: it.ctx.today,
   body: wa_text.slice(0, 4000),
   facts: { week: it.ctx.weekStart, cost_per_lead: cpl, spend_vs_budget: svb, beat_plan: beats.slice(0, 12), proposals: proposals.length, drafts: drafts.length,
-    ads_status: it.ads_status, budget_set: it.budget_set, villages_15km: it.counts.villages, leads_30d: it.counts.leads30, leads_7d: it.counts.leads7, parse_error: it.parse_error || '' } };
+    ads_status: it.ads_status, budget_set: it.budget_set, budget_ask_month: askMissing.length ? it.ctx.monthStart : '', budget_ask_missing: askMissing.map((m) => m.u + '/' + m.c), villages_15km: it.counts.villages, leads_30d: it.counts.leads30, leads_7d: it.counts.leads7, parse_error: it.parse_error || '' } };
 
 // Gated proposals (cap change, campaign spend, beat assignment) and campaign
 // drafts (ad copy) each become ONE pending office_tasks row the director
