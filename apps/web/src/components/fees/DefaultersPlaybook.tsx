@@ -1,5 +1,6 @@
 "use client";
 
+import { useSisRosterLanded } from "@/components/data/useSisRosterLanded";
 import { useDuesInputs } from "@/components/fees/useDuesInputs";
 import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { useEffect, useMemo, useState } from "react";
@@ -140,10 +141,12 @@ export function DefaultersPlaybook() {
   // list built before the transport desk arrived left every family's bus
   // dues out of who is a defaulter and by how much (15 Oct 2026).
   const duesInputs = useDuesInputs();
+  // …and when the SIS roster lands (who the children are).
+  const sisLanded = useSisRosterLanded();
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [includeUpcoming, rosterMode, ay, duesInputs.tick]);
+  }, [includeUpcoming, rosterMode, ay, duesInputs.tick, sisLanded]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

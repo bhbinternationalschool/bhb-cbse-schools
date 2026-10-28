@@ -16,6 +16,7 @@
  * it needs the same right as writing off a bill, and it says so on the button.
  */
 
+import { useSisRosterLanded } from "@/components/data/useSisRosterLanded";
 import { ErpPanel, ErpTable, ErpTableBody, ErpTableHead, ErpTableShell } from "@/components/ui/erp-roster";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -79,9 +80,11 @@ export function DefaulterHoldPanel() {
   const [standing, setStanding] = useState<StandingDecision[] | null>(null);
   const [liftReason, setLiftReason] = useState("");
 
+  // Read again once the SIS roster has landed.
+  const sisLanded = useSisRosterLanded();
   useEffect(() => {
     setSis(loadSis());
-  }, []);
+  }, [sisLanded]);
 
   const loadPolicy = useCallback(async () => {
     setError("");
