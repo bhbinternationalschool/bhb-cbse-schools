@@ -9,11 +9,11 @@ import { ExportMenu } from "@/components/ui/erp-grid";
 
 export type ErpMetricTone = "green" | "rose" | "sky" | "violet" | "amber" | "navy";
 
-// "title" is the same accent blue across every tone — it equals --chart-1,
-// so route it through the token rather than a repeated literal. The icon
-// colors below are a genuine categorical tone system (unrelated to
-// danger/success semantics), so they're left as-is.
-const METRIC_TITLE_CLASS = "text-[var(--chart-1)]";
+// Operate-mode (director, 2026-10-27): the label is a quiet caption so the
+// NUMBER reads first — muted, not the old accent blue that competed with the
+// value on every tile. One muted token for all tones (the category signal
+// lives in the icon tint below, a genuine categorical system left as-is).
+const METRIC_TITLE_CLASS = "text-[var(--muted)]";
 const METRIC_TONES: Record<
   ErpMetricTone,
   { title: string; icon: string }
@@ -97,10 +97,10 @@ export function ErpMetricCard({
   const content = (
     <>
       <div className="min-w-0">
-        <div className={cn("text-sm font-semibold", t.title)}>{title}</div>
-        <div className="mt-1 flex items-baseline gap-2">
+        <div className={cn("text-sm font-medium", t.title)}>{title}</div>
+        <div className="mt-1.5 flex items-baseline gap-2">
           {/* data-testid: the e2e gate reads a dashboard number here (step 1.1). */}
-          <span data-testid="metric-value" className="text-3xl font-bold tabular-nums text-[var(--foreground)]">
+          <span data-testid="metric-value" className="text-3xl font-bold leading-none tracking-tight tabular-nums text-[var(--foreground)]">
             {value}
           </span>
           {delta ? (
@@ -122,7 +122,11 @@ export function ErpMetricCard({
       {icon ? (
         <span
           className={cn(
-            "inline-flex h-14 w-14 shrink-0 items-center justify-center rounded-full",
+            // Smaller, calmer badge (was h-14/28px icon): a decorative icon
+            // shouldn't out-weigh the number. The svg size is normalised here
+            // so every caller's icon renders at 20px regardless of what it
+            // passed (director, 2026-10-27, operate-mode pass).
+            "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full [&_svg]:h-5 [&_svg]:w-5",
             t.icon,
           )}
         >
