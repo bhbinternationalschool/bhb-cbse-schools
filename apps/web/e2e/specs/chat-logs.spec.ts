@@ -115,9 +115,10 @@ test.describe("chat-logs: school chat in the staff and household message logs", 
       const page = await context.newPage();
       try {
         await page.goto(`/staff/${encodeURIComponent(staffSession(A).staffId!)}/edit`);
-        await page.getByRole("button", { name: "Messages", exact: true }).first().click({ timeout: 30_000 });
+        await page.getByRole("tab", { name: "Messages", exact: true }).first().click({ timeout: 30_000 });
         await expect(page.getByText(`Timetable swap tomorrow? ${tag}`)).toBeVisible({ timeout: 20_000 });
         await expect(page.getByText(`Yes, period 3 ${tag}`)).toBeVisible();
+        await page.getByText(`Yes, period 3 ${tag}`).scrollIntoViewIfNeeded();
         await page.screenshot({ path: testInfo.outputPath(`staff-messages-${v.name}.png`) });
 
         await page.goto("/students?tab=register");
@@ -127,6 +128,7 @@ test.describe("chat-logs: school chat in the staff and household message logs", 
         await dialog.getByRole("button", { name: "Messages", exact: true }).click();
         await expect(dialog.getByText(`We will come at 10 ${tag}`)).toBeVisible({ timeout: 20_000 });
         await expect(dialog.getByText(`Please meet the class teacher on Friday ${tag}`)).toBeVisible();
+        await dialog.getByText(`We will come at 10 ${tag}`).scrollIntoViewIfNeeded();
         await page.screenshot({ path: testInfo.outputPath(`student-messages-${v.name}.png`) });
       } finally {
         await context.close();
