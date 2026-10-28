@@ -252,7 +252,10 @@ test("/__kernel: a failed masters view is \"could not load\" + Try again, never 
       await expect(page.getByRole("list", { name: "Classes", exact: true })).toHaveCount(0);
     });
     const shownAfterMs = Date.now() - t0;
-    expect(hits, "one read + two retries").toBe(3);
+    // The shell's read + two retries (since 2.3a the shell waits on it);
+    // the screen, mounted once the tab's copy holds Masters anyway, asks
+    // once more with its own two retries.
+    expect(hits, "at most two rounds of one read + two retries").toBeLessThanOrEqual(6);
     await test.step("Try again (read restored) brings the classes back without a reload", async () => {
       await page.unroute("**/api/data/views/masters");
       await page.getByRole("button", { name: "Try again" }).click();

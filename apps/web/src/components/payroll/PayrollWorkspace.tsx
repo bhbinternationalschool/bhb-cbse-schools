@@ -1422,7 +1422,7 @@ export function PayrollWorkspace() {
         <TallySyncPanel academicYearCode={ay} />
       ) : null}
 
-      {tab === "audit" && seesTab("audit") ? <PayrollAuditPanel /> : null}
+      {tab === "audit" && seesTab("audit") ? <PayrollAuditPanel deskTick={tick} /> : null}
 
       {tab === "holds" && allowed ? <JuneHoldPanel /> : null}
 
@@ -3077,13 +3077,18 @@ function PayslipCard({
   );
 }
 
-function PayrollAuditPanel() {
+/**
+ * `deskTick`: the workspace's — it moves once the payroll desk (and the
+ * others the workspace loads) has landed, so a panel opened first re-reads
+ * the log then (data-layer 2.3a: screens no longer wait behind the old gate).
+ */
+function PayrollAuditPanel({ deskTick }: { deskTick: number }) {
   const [rows, setRows] = useState<PayrollAuditEntry[]>([]);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     setRows(listPayrollAudit(100));
-  }, [tick]);
+  }, [tick, deskTick]);
   // Folded by the IST month the event happened in, newest open.
   const auditMonths = useMonthGroups({
     rows,

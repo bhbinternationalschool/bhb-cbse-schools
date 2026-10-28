@@ -12,6 +12,9 @@
  *   2. Failed read: views/masters (or views/staff-list) answering 503 makes the
  *      screen say "could not load" + Try again and draw no list; Try again
  *      brings it back. On origin/main these screens never ask the views.
+ *      Since 2.3a the shell's own wait shows a views/masters failure for the
+ *      whole page, and a views/staff-list failure stops the module gate
+ *      ("the staff list did not load") before the panel draws.
  */
 import type { Browser, Page } from "@playwright/test";
 import { APP_URL, collectPageErrors, expect, fx, metric, signIn, test, type Who } from "../support";
@@ -250,12 +253,13 @@ const FAILS: Fail[] = [
     name: "/masters Attendance rules (staff list)",
     who: "office",
     view: "staff-list",
-    open: async (p) => {
-      await p.goto("/masters?tab=leave");
-      await p.getByText("4 · Attendance rules", { exact: true }).click({ timeout: 20_000 });
-    },
+    // The module gate decides with the staff list (2.3a): it fails first.
+    open: async (p) => { await p.goto("/masters?tab=leave"); },
     absent: (p) => p.getByText(/No active staff/),
-    recovered: async (p) => { await expect(p.getByRole("row").filter({ hasText: /E2E-\d{3} · / })).toHaveCount(ACTIVE_STAFF, { timeout: 15_000 }); },
+    recovered: async (p) => {
+      await p.getByText("4 · Attendance rules", { exact: true }).click({ timeout: 20_000 });
+      await expect(p.getByRole("row").filter({ hasText: /E2E-\d{3} · / })).toHaveCount(ACTIVE_STAFF, { timeout: 15_000 });
+    },
   },
 ];
 
@@ -266,7 +270,8 @@ test.describe("a failed read is shown as a failure, never as an empty list", () 
       const lift = await failView(page, f.view);
       const t0 = Date.now();
       await f.open(page);
-      await expect(page.getByText(/could not load/i).first()).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByText(f.view === "staff-list" ? /did not load|could not load/i : /could not load/i).first()).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText("Access restricted")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Try again" }).first()).toBeVisible();
       const shownAfterMs = Date.now() - t0;
       await expect(f.absent(page)).toHaveCount(0);
@@ -281,9 +286,12 @@ test.describe("a failed read is shown as a failure, never as an empty list", () 
 
 /**
  * Masters not answered yet (2.1h review): the Masters-drawn Exams tabs and
- * the Exam report runner (Exams → Result reports) say "Loading…" — on the
- * branch before the review fix they drew nothing (an empty tab) or an
- * "All classes"-only picker. views/masters is held until "Loading…" is seen.
+ * the Exam report runner (Exams → Result reports) never draw an empty tab or
+ * an "All classes"-only picker — on the branch before the review fix they
+ * did. views/masters is held until a loading state is seen. Since 2.3a the
+ * shell waits for that answer on every page, so the loading state seen is
+ * the shell's "Loading school data…" (no Exams tab is drawn at all); the
+ * screens' own "Loading…" is reached only if their answer is missing later.
  */
 async function holdView(page: Page, name: "masters"): Promise<() => void> {
   let release: () => void = () => undefined;
@@ -313,12 +321,14 @@ test.describe("while Masters loads the screen says so, never an empty tab", () =
         const errors = collectPageErrors(page);
         const release = await holdView(page, "masters");
         await page.goto("/exams");
-        await page.getByRole("tab", { name: c.tab, exact: true }).click({ timeout: 30_000 });
-        const loading = page.getByText("Loading…", { exact: true });
-        await expect(loading.first()).toBeVisible({ timeout: 10_000 });
+        const loading = page.getByText("Loading school data…", { exact: true });
+        await expect(loading.first()).toBeVisible({ timeout: 20_000 });
+        await expect(page.getByRole("tab", { name: c.tab, exact: true }), "no Exams tab drawn before Masters answered").toHaveCount(0);
         await page.screenshot({ path: testInfo.outputPath(`loading-${phone ? "375-dark" : "desktop"}.png`) });
         release();
         await expect(loading).toHaveCount(0, { timeout: 30_000 });
+        await page.getByRole("tab", { name: c.tab, exact: true }).click({ timeout: 30_000 });
+        await expect(page.getByText("Loading…", { exact: true })).toHaveCount(0, { timeout: 30_000 });
         const ready = c.ready(page);
         if (ready) await expect(ready).toBeVisible({ timeout: 30_000 });
         await expect(page.getByText(/could not load/i)).toHaveCount(0);

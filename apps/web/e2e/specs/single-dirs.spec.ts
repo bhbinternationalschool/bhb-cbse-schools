@@ -405,9 +405,12 @@ test("accounts voucher: no views/masters read until the daily-rate spread is tic
   await expect(spread).toBeVisible({ timeout: 20_000 });
   // Long enough for a mount-time read to have gone out (the screen's other reads have).
   await page.waitForLoadState("networkidle");
-  expect(reads, "a plain voucher asks nothing of the masters view").toBe(0);
+  // Since 2.3a the shell itself waits for the masters view on every page
+  // (director's Q5): one read, before the screen draws. The voucher screen
+  // adds none of its own; ticking the spread uses the tab's answer.
+  expect(reads, "a plain voucher asks nothing more than the shell's one masters read").toBe(1);
   await spread.check();
-  await expect.poll(() => reads, { timeout: 15_000 }).toBeGreaterThan(0);
   await expect(page.getByText(/day\(s\) ×/)).toBeVisible({ timeout: 20_000 });
+  expect(reads, "the spread reads the shared answer — no further request").toBe(1);
   await page.context().close();
 });

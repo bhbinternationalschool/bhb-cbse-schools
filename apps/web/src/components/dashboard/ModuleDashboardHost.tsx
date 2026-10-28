@@ -13,6 +13,7 @@ import {
 } from "@/lib/moduleDashboards";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
 import { openWaMe } from "@/lib/waMe";
+import { useMasters } from "@/lib/data/client/hooks";
 
 export function ModuleDashboardHost({
   moduleId,
@@ -28,16 +29,23 @@ export function ModuleDashboardHost({
   const session = useDemoSessionOptional();
   const [model, setModel] = useState<ModuleDashboardModel | null>(null);
   const [mastersTick, setMastersTick] = useState(0);
+  // A Masters answer (the shell's, or one after a Masters change the
+  // versions poll saw) has been laid on the page copy the dashboard builders
+  // read: redraw (data-layer 2.3a — was 'bhb-masters-updated'). Asks nothing
+  // itself (enabled: false reads the tab's cache), so the field hub, which
+  // has no shell, adds no request.
+  const { dataUpdatedAt: mastersAnsweredAt } = useMasters({ enabled: false });
+  useEffect(() => {
+    if (mastersAnsweredAt) setMastersTick((t) => t + 1);
+  }, [mastersAnsweredAt]);
 
   useEffect(() => {
     const onDataUpdated = () => setMastersTick((t) => t + 1);
-    window.addEventListener("bhb-masters-updated", onDataUpdated);
     window.addEventListener("bhb-sis-updated", onDataUpdated);
     // Desks loaded on first read (admissions, fees, payments, attendance)
     // land after mount; redraw then rather than showing their empty memory.
     window.addEventListener("bhb-desk-hydrated", onDataUpdated);
     return () => {
-      window.removeEventListener("bhb-masters-updated", onDataUpdated);
       window.removeEventListener("bhb-sis-updated", onDataUpdated);
       window.removeEventListener("bhb-desk-hydrated", onDataUpdated);
     };
@@ -73,6 +81,15 @@ export function ModuleDashboardHost({
       // Re-read even when another screen did the loading: the first render
       // came from an empty page memory (10 Oct 2026).
       if (!gone) setMastersTick((t) => t + 1);
+      // Most dashboards count children from the SIS roster (a core desk, one
+      // shared read). Until data-layer 2.3a its landing raised
+      // 'bhb-masters-updated' (the students projection) and that redrew the
+      // dashboard; redraw once when it lands instead.
+      if (moduleId !== "students") {
+        const { ensureSisHydrated } = await import("@/lib/sisPersistence");
+        const changed = await withHydrationSlot(() => ensureSisHydrated()).catch(() => false);
+        if (changed && !gone) setMastersTick((t) => t + 1);
+      }
     })();
     return () => {
       gone = true;

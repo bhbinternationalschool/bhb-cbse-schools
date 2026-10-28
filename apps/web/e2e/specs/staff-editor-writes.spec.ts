@@ -21,8 +21,9 @@
  *     staff write of any kind and sis_staff unchanged (count and every
  *     revision).
  *     A roster that never answers is a different case: the page gate
- *     (ErpModuleGate, since 12 Oct) shows "Checking access…" and no screen
- *     opens, so there is no form to save from. Test 5 pins that.
+ *     (ErpModuleGate, since 12 Oct; on the staff-list view since 2.3a) shows
+ *     "Checking access…" and no screen opens, so there is no form to save
+ *     from. Test 5 pins that.
  *
  * Writes staff records, so it runs in the staff-sensitive project after every
  * reader, and puts each record back.
@@ -241,7 +242,8 @@ test.describe.serial("the staff editor writes rows (data-layer 2.2d)", () => {
       const writes = staffWrites(page);
       // The answer never comes: access is never decided yes or no, so the
       // Masters screen (and its fee-head form) does not open.
-      await page.route("**/api/school-data/staff-roster", () => undefined);
+      // Since 2.3a the roster permission checks decide with is the staff-list view.
+      await page.route("**/api/data/views/staff-list", () => undefined);
       await page.goto("/masters?tab=fee-heads");
       await expect(page.getByText("Checking access…")).toBeVisible({ timeout: 30_000 });
       await page.waitForTimeout(3_000);
@@ -249,7 +251,7 @@ test.describe.serial("the staff editor writes rows (data-layer 2.2d)", () => {
       await expect(page.locator("input[placeholder='SPORTS']"), "no fee-head form while access is unknown").toHaveCount(0);
       expect(writes, "nothing written").toEqual([]);
     } finally {
-      await page.unroute("**/api/school-data/staff-roster");
+      await page.unroute("**/api/data/views/staff-list");
       await context.close();
     }
   });

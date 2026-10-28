@@ -127,12 +127,6 @@ async function hydrateMastersOnce(): Promise<boolean> {
   // masters-desk re-read after every element write would have sent a refused
   // fee save's stale book again. A failed save says so and is redone by hand.)
   const changedAnything = mirrorChanged || normChanged;
-  // Tell the screens already painted from the old copy. Until now only
-  // saveMasters() and the staff hydrate raised this, so a workspace that
-  // mounted before this hydrate kept showing what localStorage held then.
-  if (changedAnything && typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("bhb-masters-updated"));
-  }
   return changedAnything;
 }
 

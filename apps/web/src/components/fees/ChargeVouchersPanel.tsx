@@ -1,5 +1,6 @@
 "use client";
 
+import { useSisRosterLanded } from "@/components/data/useSisRosterLanded";
 import { useEffect, useMemo, useState } from "react";
 import {
   createChargeVoucher,
@@ -78,9 +79,11 @@ export function ChargeVouchersPanel({
     setRows(listChargeVouchers(loadFees(), { includeVoided: true }));
   }
 
+  // The student search is the SIS roster: read it again once it has landed.
+  const sisLanded = useSisRosterLanded();
   useEffect(() => {
     refresh();
-  }, [tick, ay]);
+  }, [tick, ay, sisLanded]);
 
   useEffect(() => {
     if (!sis || !masters) return;

@@ -177,7 +177,7 @@ void (async () => {
   const doc = (main: ElementLike | null) => el(null, main ? [main] : []);
   assert.equal(pageContentReady(null), false);
   assert.equal(pageContentReady(doc(null)), false, "no <main> yet (Loading workspace…)");
-  assert.equal(pageContentReady(doc(el(null, [el("status")], "main"))), false, "CoreDataGate spinner");
+  assert.equal(pageContentReady(doc(el(null, [el("status")], "main"))), false, "ShellDataWait spinner");
   assert.equal(pageContentReady(doc(el(null, [el(null)], "main"))), false, "Checking access…");
   assert.equal(pageContentReady(doc(el(null, [el(null, [], "erp-module-root")], "main"))), false, "an empty module root");
   assert.equal(pageContentReady(doc(el(null, [el(null, [el("status")], "erp-module-root")], "main"))), false, "the route skeleton");

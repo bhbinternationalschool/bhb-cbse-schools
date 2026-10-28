@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef } from "react";
-import type { MastersState } from "@/lib/masters";
+import { readMastersPageCopyRaw, type MastersState } from "@/lib/masters";
 import { useMasters, useMastersBuiltFrom } from "@/lib/data/client/hooks";
 import type { Versions } from "@/lib/data/client/queryKernel";
 import { screenMastersOf } from "@/lib/data/client/mastersBridge";
@@ -37,22 +37,26 @@ export function useScreenMasters(opts: { enabled?: boolean } = {}): ScreenMaster
   const q = useMasters(opts);
   const access = useAccessData();
   const accessMasters = access.ready ? access.masters : null;
-  // useAccessData re-reads its copy on every desk event, so its identity
-  // moves far more often than the roster does. Keep the previous staff side
-  // while it is the same content: a screen's effects keyed on `masters` (a
-  // teacher's default class, say) must not re-run because another desk loaded.
+  // The staff side comes from the access copy (useStaffList, 2.3a); the
+  // students projection (PAGE_OWNED_MASTERS_KEYS: built in this tab from the
+  // SIS roster, never in a view) from the tab's page copy, re-read with each
+  // answer of either read. Keep the previous value while it is the same
+  // content: a screen's effects keyed on `masters` (a teacher's default
+  // class, say) must not re-run because a read answered again unchanged.
   const staffSide = useRef<{ sig: string; value: MastersState } | null>(null);
   const stableAccess = useMemo(() => {
+    void q.dataUpdatedAt;
     if (!accessMasters) return null;
+    const students = readMastersPageCopyRaw()?.students ?? [];
     const sig = JSON.stringify([
       accessMasters.staff,
       accessMasters.departments,
       accessMasters.designations,
-      accessMasters.students,
+      students,
     ]);
-    if (staffSide.current?.sig !== sig) staffSide.current = { sig, value: accessMasters };
+    if (staffSide.current?.sig !== sig) staffSide.current = { sig, value: { ...accessMasters, students } };
     return staffSide.current.value;
-  }, [accessMasters]);
+  }, [accessMasters, q.dataUpdatedAt]);
   const masters = useMemo(() => screenMastersOf(q.data, stableAccess), [q.data, stableAccess]);
   // A failed BACKGROUND refetch keeps the last good answer on screen (React
   // Query keeps `data`); only a read that never produced one is an error.
