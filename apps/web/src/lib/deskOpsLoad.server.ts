@@ -18,7 +18,6 @@ import type { MastersState } from "@/lib/masters";
 import { emptyMastersShell } from "@/lib/masters";
 import {
   fetchMastersDeskFromDb,
-  pushMastersDeskToDb,
 } from "@/lib/mastersNormalized.server";
 import type { SisState } from "@/lib/sis";
 import { fetchSisFromDb } from "@/lib/sisNormalized.server";
@@ -77,15 +76,6 @@ export async function loadOpsMasters(): Promise<MastersState> {
     return { version: 2, ...bundle };
   }
   return emptyMastersShell();
-}
-
-/** `baseUpdatedAt`: the masters revision the state was read at (sync meta). */
-export async function saveOpsMasters(
-  state: MastersState,
-  baseUpdatedAt: string | null,
-): Promise<void> {
-  const result = await pushMastersDeskToDb(state, { baseUpdatedAt });
-  if (!result.ok) throw new Error(result.error || "masters desk push failed");
 }
 
 export async function loadOpsSis(): Promise<SisState> {
