@@ -39,6 +39,7 @@ import {
 import { DEFAULT_AY } from "@/lib/masters";
 import { QueryError } from "@/components/data/QueryError";
 import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { useSisRosterLanded } from "@/components/data/useSisRosterLanded";
 import { loadSis, type SisState } from "@/lib/sis";
 import {
   designationName,
@@ -220,6 +221,14 @@ export function CertificatesWorkspace() {
   useEffect(() => {
     refresh();
   }, []);
+
+  // 2.3a removed the gate that held this screen until the register landed:
+  // read it again once it has, and say "Loading" (never "No students match")
+  // before then.
+  const sisLanded = useSisRosterLanded();
+  useEffect(() => {
+    if (sisLanded) refresh();
+  }, [sisLanded]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -735,7 +744,7 @@ export function CertificatesWorkspace() {
               <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto">
                 {hits.length === 0 ? (
                   <li className="rounded-lg bg-[var(--surface-sunken)] px-3 py-3 text-sm text-[var(--muted)]">
-                    No students match.
+                    {sisLanded ? "No students match." : "Loading students…"}
                   </li>
                 ) : (
                   hits.slice(0, 12).map((h) => (
