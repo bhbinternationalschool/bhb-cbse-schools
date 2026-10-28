@@ -15,6 +15,7 @@ import {
   cartProgress,
   languageKindOf,
   languagesRequired,
+  resolveStudentSubjects,
   validateCurriculum,
   type StudentCurriculum,
 } from "./studentCurriculum";
@@ -106,6 +107,18 @@ assert.deepEqual(errorsOf(middle, "VI", ["URDU"]), [], "…or Urdu as R3");
 const middleFrench = mastersWith([["VI", "ENG"], ["VI", "HIN"], ["VI", "MAT"], ["VI", "FRE", true], ["VI", "SKT", true]]);
 assert.match(errorsOf(middleFrench, "VI", ["FRE"]).join(" "), /at least 2 of the languages must be Indian/);
 assert.deepEqual(errorsOf(middleFrench, "VI", ["FRE", "SKT"]), [], "adding Sanskrit fixes it (French as a 4th language)");
+
+// Masters' Optional tick decides, not a hard-coded list: on 28 Oct 2026
+// Sanskrit was linked COMPULSORY to VI–VIII and marks entry still hid it,
+// because SKT sat on a built-in list of middle-stage options and none of the
+// 42 children had a subject list of their own.
+const sktCompulsory = mastersWith([["VI", "HIN"], ["VI", "ENG"], ["VI", "MAT"], ["VI", "SKT"]]);
+const codesFor = (m: MastersState) =>
+  resolveStudentSubjects({ ...student("VI"), curriculum: undefined } as never, m, { forAssessment: true }).map((x) => x.code).sort();
+assert.deepEqual(codesFor(sktCompulsory), ["ENG", "HIN", "MAT", "SKT"], "Sanskrit linked compulsory in Masters → on every VI child's marks list");
+const sktOptional = mastersWith([["VI", "HIN"], ["VI", "ENG"], ["VI", "MAT"], ["VI", "SKT", true]]);
+assert.deepEqual(codesFor(sktOptional), ["ENG", "HIN", "MAT"], "ticked Optional in Masters → only for a child who chose it");
+assert.deepEqual(errorsOf(sktCompulsory, "VI", []), [], "compulsory Sanskrit is the third language — nothing to choose");
 
 // Live shape (30 Sep 2026): VI links English and Hindi only through their
 // components. They still count as English and Hindi.
