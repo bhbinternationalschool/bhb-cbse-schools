@@ -2094,7 +2094,7 @@ the staff list — nothing was sent" when the roster was not read. Six report ca
 student attendance, staff leave, transport) refuse with `MASTERS_NOT_LOADED_MESSAGE` (`lib/data/requireData.ts`,
 shared with the academics batch) instead of reading the copy. Not in this batch: the fee and payroll report catalogs
 (MONEY batches 4/5), `feeAgreementPdf`, `receiptArchive.server`, `DefaultersPlaybook` (fees), the exam / teaching /
-timetable catalogs (academics batch). Ratchet `load_masters_calls_src` 340 → 316.
+timetable catalogs (academics batch). Ratchet `load_masters_calls_src` 317 → 293 (after the academics batch, #732).
 **Proof.** Self-test `test:rbac-guard-access` (11 cases): 7 fail on origin/main cad6c512 (every "not loaded" case, and a
 real "no" the old headless read let through). New `error.spec` case: the certificates clerk (role by assignment) saves
 Birthday settings while the rbac page copy 503s — the save goes out, no "You do not have permission". It passes on old
