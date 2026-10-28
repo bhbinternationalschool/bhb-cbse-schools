@@ -259,7 +259,9 @@ export async function POST(request: Request) {
 
     // The receipt number from the records, not this instance's copy
     // (data-layer 2.2e): max(the RECEIPT counter, the highest receipt on
-    // record + 1). No such series in Masters = the built-in numbering.
+    // record + 1), RESERVED in the database (masters_series_claim) so a desk
+    // collecting at the same instant gets another number. No such series in
+    // Masters = the built-in numbering.
     const { nextSeriesNumberServer, recordSeriesUseServer } = await import("@/lib/data/server/numberSeriesNext.server");
     const issued = await nextSeriesNumberServer("RECEIPT", ay);
     if (!issued.ok && issued.status !== 404) {

@@ -9,6 +9,13 @@
  * numberSeriesIssued). A counter found behind its records is LIFTED
  * (masters_series_bump, monotone) and the lift is logged.
  *
+ * RECEIPT and SRN are RESERVED, not peeked (masters_series_claim, migration
+ * 20261027090000): the database computes the same max under the series lock
+ * and moves the counter past the number in the same transaction, so two
+ * counters asking at the same instant get two numbers. A claimed number that
+ * is then not saved leaves a gap — never a repeat. ADMISSION (the student
+ * form's suggestion, asked when the form opens) keeps the peek + lift below.
+ *
  * `authorize(code)` runs after the series is read and before anything moves;
  * a string it returns is the refusal (403).
  */
@@ -16,7 +23,10 @@ import "server-only";
 import { invalidateServerMastersCache } from "@/lib/api/v1/auth";
 import { clearDeskProbeCache } from "@/lib/deskProbeCache.server";
 import { maxIssuedNumber, nextOf, seriesIssuedOnRecord, seriesPrefix, tailNumber } from "./numberSeriesIssued";
-import { bumpNumberSeries, readNumberSeries } from "./repo";
+import { bumpNumberSeries, claimNumberSeries, readNumberSeries } from "./repo";
+
+/** The series issued at save time, whose numbers are reserved in the database. */
+export const CLAIMED_SERIES: ReadonlySet<string> = new Set(["RECEIPT", "SRN"]);
 
 export type SeriesNextAnswer =
   | { ok: true; series: string; next: number; formatted: string; lifted: boolean }
@@ -37,6 +47,17 @@ export async function nextSeriesNumberServer(
   const code = String(stored.code ?? "");
   const refusal = authorize(code);
   if (refusal) return { ok: false, status: 403, kind: "auth", message: refusal };
+
+  if (CLAIMED_SERIES.has(code)) {
+    const claimed = await claimNumberSeries(code, ay);
+    if (!claimed.ok) {
+      return { ok: false, status: claimed.status, kind: claimed.kind === "auth" ? "auth" : claimed.kind, message: claimed.message };
+    }
+    if (claimed.lifted) console.warn(`[number-series] ${code}: counter was behind the records — claimed ${claimed.formatted}`);
+    clearDeskProbeCache("masters-desk-rows");
+    invalidateServerMastersCache();
+    return { ok: true, series: code, next: claimed.number, formatted: claimed.formatted, lifted: claimed.lifted };
+  }
 
   const current = nextOf(stored, ay);
   const prefix = seriesPrefix(stored, ay);
