@@ -9,8 +9,15 @@
  *   (POST /api/data/masters.subjects, on the element's `_rev`). OLD then sends the shapes an old tab
  *   sends — a section save of `subjects` (its pre-write copy, renamed back,
  *   and one without the subject) with its old stamp, and a whole-book save
- *   with the old desk revision. Each is refused (409) and the kernel's value
- *   and the subject stay.
+ *   with the old desk revision. Since data-layer 2.2f each is answered 410
+ *   `build_stale` (reload) with `X-Bhb-Build-Stale: 1` (it was 409 before),
+ *   and the kernel's value and the subject stay.
+ *
+ *   masters-desk POST, every body (2.2f): a whole book, a section save, a
+ *   teacher's `{classSubjects}` (the function-only save — 200 `functionOnly`
+ *   and written, before 2.2f), `{}` and an empty body — all 410, and the
+ *   masters revision (masters_desk_sync_meta.updated_at, served by erp_versions
+ *   and the desk GET) does not move.
  *
  *   Rows: an old build's POST /api/data/sis.students with no base (the shape
  *   every caller sent before 1.5) after the kernel wrote the row: 409
@@ -30,6 +37,25 @@ const revOf = (list: Record<string, unknown>, id: string) => String((list.rows a
 
 async function json(r: Awaited<ReturnType<APIRequestContext["get"]>>) {
   return (await r.json()) as Record<string, unknown>;
+}
+
+/** The masters-desk POST since data-layer 2.2f: 410, reload, the stale header — nothing written. */
+async function expectGone(r: Awaited<ReturnType<APIRequestContext["post"]>>) {
+  const text = await r.text();
+  expect(r.status(), text.slice(0, 200)).toBe(410);
+  expect(r.headers()["x-bhb-build-stale"], "X-Bhb-Build-Stale").toBe("1");
+  const body = JSON.parse(text) as { ok?: boolean; reason?: string; reload?: boolean };
+  expect(body).toMatchObject({ ok: false, reason: "build_stale", reload: true });
+}
+
+/** masters_desk_sync_meta.updated_at, as erp_versions serves it ("masters") and as the desk GET reports it. */
+async function mastersRevision(req: APIRequestContext): Promise<{ versions: string; desk: string }> {
+  const v = await json(await req.get("/api/data/views/versions"));
+  const d = await json(await req.get("/api/school-data/masters-desk"));
+  return {
+    versions: String(((v.versions as Record<string, { updated_at?: string } | null>).masters ?? {}).updated_at ?? ""),
+    desk: String(d.updatedAt ?? ""),
+  };
 }
 
 test("a whole-desk POST from a pre-write copy is refused and does not revert or remove the kernel's write", async ({ browser }) => {
@@ -55,25 +81,28 @@ test("a whole-desk POST from a pre-write copy is refused and does not revert or 
       expect(w.status()).toBe(200);
     });
 
-    await test.step("old shape 1: section save of its pre-write subjects (renamed back) → 409", async () => {
+    await test.step("old shape 1: section save of its pre-write subjects (renamed back) → 410 build_stale", async () => {
       const r = await old.page.request.post("/api/school-data/masters-desk", {
+        headers: { "x-bhb-build": "previous-build-e2e" },
         data: { version: 2, subjects: oldSubjects, sliceBases: { subjects: oldStamp } },
       });
-      expect(r.status()).toBe(409);
+      await expectGone(r);
     });
-    await test.step("old shape 2: the same copy WITHOUT the subject (a removal) → 409", async () => {
+    await test.step("old shape 2: the same copy WITHOUT the subject (a removal) → 410 build_stale", async () => {
       const r = await old.page.request.post("/api/school-data/masters-desk", {
+        headers: { "x-bhb-build": "previous-build-e2e" },
         data: { version: 2, subjects: oldSubjects.filter((s) => s.id !== SUBJECT), sliceBases: { subjects: oldStamp } },
       });
-      expect(r.status()).toBe(409);
+      await expectGone(r);
     });
-    await test.step("old shape 3: a whole-book save against the old desk revision → 409", async () => {
+    await test.step("old shape 3: a whole-book save against the old desk revision → 410 build_stale", async () => {
       const book: Record<string, unknown> = { ...desk };
       for (const k of ["sliceStamps", "updatedAt", "ok"]) delete book[k];
       const r = await old.page.request.post("/api/school-data/masters-desk", {
+        headers: { "x-bhb-build": "previous-build-e2e" },
         data: { ...book, subjects: oldSubjects, baseUpdatedAt: oldRevision },
       });
-      expect(r.status()).toBe(409);
+      await expectGone(r);
     });
     await test.step("the kernel's value and the subject are still there", async () => {
       const list = await json(await now.page.request.get("/api/data/masters.subjects?limit=1000"));
@@ -116,5 +145,68 @@ test("a whole-desk POST from a pre-write copy is refused and does not revert or 
     }
     await old.context.close();
     await now.context.close();
+  }
+});
+
+test("masters-desk POST (2.2f): every body — whole book, section save, a teacher's classSubjects, {} and empty — is 410 and moves nothing", async ({ browser }) => {
+  const principal = await openAs(browser, "principal");
+  const teacher = await openAs(browser, "teacher");
+  const NURSERY = "e2e_cls_01";
+  type Link = { id: string; classId: string; subjectId: string; isOptional?: boolean; _rev?: number };
+  let touched: Link | undefined;
+  try {
+    const before = await mastersRevision(principal.page.request);
+    expect(before.versions, "the stack has a masters revision").not.toBe("");
+    const desk = await json(await principal.page.request.get("/api/school-data/masters-desk"));
+    const book: Record<string, unknown> = { ...desk };
+    for (const k of ["sliceStamps", "updatedAt", "ok", "meta", "source", "classCount", "feeHeadCount", "subjectCount", "sliceCount"]) delete book[k];
+    const stamps = desk.sliceStamps as Record<string, string>;
+
+    // The teacher's own copy (the teaching subset) with ONE real change in her
+    // own class: the function-only save the old route accepted and wrote.
+    const tDesk = await json(await teacher.page.request.get("/api/school-data/masters-desk"));
+    const tLinks = tDesk.classSubjects as Link[];
+    touched = tLinks.find((l) => l.classId === NURSERY && l.subjectId === "e2e_sub_music");
+    expect(touched, "Nursery's Music link in the teacher's copy").toBeTruthy();
+    const teacherBody = { version: 2, classSubjects: tLinks.map((l) => (l.id === touched!.id ? { ...l, isOptional: !l.isOptional } : l)) };
+
+    const cases: { name: string; ctx: typeof principal; send: () => Promise<Awaited<ReturnType<APIRequestContext["post"]>>> }[] = [
+      { name: "whole book at the desk revision", ctx: principal, send: () => principal.page.request.post("/api/school-data/masters-desk", { data: { ...book, version: 2, baseUpdatedAt: String(desk.updatedAt) } }) },
+      { name: "section save (sliceBases)", ctx: principal, send: () => principal.page.request.post("/api/school-data/masters-desk", { data: { version: 2, subjects: desk.subjects, sliceBases: { subjects: stamps.subjects } } }) },
+      { name: "teacher {classSubjects}", ctx: teacher, send: () => teacher.page.request.post("/api/school-data/masters-desk", { data: teacherBody }) },
+      { name: "{}", ctx: principal, send: () => principal.page.request.post("/api/school-data/masters-desk", { data: {} }) },
+      { name: "empty body", ctx: principal, send: () => principal.page.request.post("/api/school-data/masters-desk", { headers: { "content-type": "application/json" }, data: "" }) },
+    ];
+    // Every body is sent and its answer recorded first, so a failure shows ALL
+    // of them (on the code before 2.2f: the whole book 200, the section save
+    // 409, the teacher's classSubjects 200 functionOnly …).
+    const answers: Record<string, string> = {};
+    for (const c of cases) {
+      const r = await c.send();
+      const body = (await r.json().catch(() => ({}))) as { reason?: string; functionOnly?: boolean };
+      answers[c.name] = `${r.status()} ${body.reason ?? (body.functionOnly ? "functionOnly" : "")} stale=${r.headers()["x-bhb-build-stale"] ?? "-"}`.trim();
+    }
+    expect(answers, "every body → 410 build_stale + X-Bhb-Build-Stale").toEqual(
+      Object.fromEntries(cases.map((c) => [c.name, "410 build_stale stale=1"])),
+    );
+    await test.step("the masters revision did not move; the teacher's link is as it was", async () => {
+      const after = await mastersRevision(principal.page.request);
+      expect(after, "masters_desk_sync_meta.updated_at").toEqual(before);
+      const links = (await json(await principal.page.request.get("/api/data/masters.class-subjects?limit=1000"))).rows as Link[];
+      expect(links.find((l) => l.id === touched!.id)?.isOptional ?? false).toBe(touched!.isOptional ?? false);
+    });
+  } finally {
+    // Old code wrote the teacher's change: put it back through the kernel.
+    if (touched) {
+      const links = (await json(await principal.page.request.get("/api/data/masters.class-subjects?limit=1000"))).rows as Link[];
+      const now = links.find((l) => l.id === touched!.id);
+      if (now && (now.isOptional ?? false) !== (touched.isOptional ?? false)) {
+        await principal.page.request.post("/api/data/masters.class-subjects", {
+          data: { ops: [{ op: "upsert", id: now.id, base: String(now._rev ?? 0), row: { isOptional: touched.isOptional ?? false } }] },
+        });
+      }
+    }
+    await principal.context.close();
+    await teacher.context.close();
   }
 });

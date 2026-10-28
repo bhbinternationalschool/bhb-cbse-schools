@@ -13,14 +13,13 @@
  *     this action also sets = a conflict, nothing sent);
  *  3. sends them as ONE all-or-none batch (POST /api/data/masters/batch →
  *     desk_slice_rows_write): one user action, one request, all or nothing;
- *  4. re-reads the tab's masters copy (the old loadMasters readers) and
- *     invalidates the masters view, also after a refusal — the screen must
- *     show what the server holds.
+ *  4. invalidates the masters view and waits for its next answer, which
+ *     replaces the tab's masters copy (the old loadMasters readers) — also
+ *     after a refusal: the screen must show what the server holds.
  *
  * Never throws.
  */
-import { invalidateTabDesks } from "./hooks";
-import { bridgeMastersDeskAfterWrite } from "./mastersDeskBridge";
+import { invalidateTabDesks, refetchMastersAnswer } from "./hooks";
 import { readAll } from "./query";
 import {
   mastersListCollection,
@@ -99,8 +98,8 @@ export async function writeMastersChanges(
   return out;
 }
 
-/** The tab's masters copy and the masters view follow the server. */
+/** The masters view (and through it the tab's page copy) follow the server. */
 async function settle(): Promise<void> {
   invalidateTabDesks(["masters"]);
-  await bridgeMastersDeskAfterWrite();
+  await refetchMastersAnswer();
 }

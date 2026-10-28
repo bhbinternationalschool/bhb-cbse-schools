@@ -10,11 +10,12 @@
  *     (2.2e); other keys → `rest`.
  *  2. applyStaffLinkChange: laid on the record as stored.
  *  3. mastersElementPending: the per-element overlay and its `_rev` proof.
- *  4. guardFoundationListsOverwrite: the old path may not remove > 1 element.
+ *  4. (gone in 2.2f with the old whole-book path it guarded)
  */
 import assert from "node:assert/strict";
 import { applyStaffLinkChange, MASTERS_BATCH_PATH, MAX_REMOVALS, planMastersElementCommit } from "./mastersElementPlan";
-import { bridgeMastersDeskAfterWrite, mastersDeskBridgeSettled } from "./mastersDeskBridge";
+import { QueryClient } from "@tanstack/react-query";
+import { refetchMastersAnswer } from "./hooks";
 import { objectDraftStep } from "@/components/masters/useObjectDraft";
 import { bumpSeriesOnServer, fetchSeriesNext } from "@/lib/numberSeries";
 import { seriesPrefix, tailNumber } from "../server/numberSeriesIssued";
@@ -28,7 +29,6 @@ import {
   withPending,
   type PendingElement,
 } from "@/components/masters/mastersElementPending";
-import { guardFoundationListsOverwrite } from "@/lib/mastersWriteGuard";
 import { asRevision } from "../types";
 
 type Row = Record<string, unknown>;
@@ -238,19 +238,6 @@ function main(): void {
     console.log("  ✓ overlay per element: held until an answer serves its _rev (or it is gone); failed saves drop");
   }
 
-  /* ── 4. The old path ── */
-  {
-    const stored = { subjects: [{ id: "a" }, { id: "b" }, { id: "c" }], classes: [{ id: "c1" }] };
-    assert.equal(guardFoundationListsOverwrite(stored, { subjects: [{ id: "a" }, { id: "b" }] }).allow, true, "one removal");
-    assert.equal(guardFoundationListsOverwrite(stored, { subjects: [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }] }).allow, true, "additions");
-    const two = guardFoundationListsOverwrite(stored, { subjects: [{ id: "a" }] });
-    assert.equal(two.allow, false, "two removals");
-    assert.equal(guardFoundationListsOverwrite(stored, { subjects: [{ id: "x" }, { id: "y" }, { id: "z" }] }).allow, false, "a made-up list");
-    assert.equal(guardFoundationListsOverwrite(stored, { classes: [] }).allow, false, "emptied");
-    assert.equal(guardFoundationListsOverwrite(stored, { feeHeads: [] }).allow, true, "not a Foundation list");
-    console.log("  ✓ old whole-book path: > 1 removal from a Foundation list (or emptying one) refused");
-  }
-
   /* ── 5. (review) Objects: the form's LOADED stamp is the base ── */
   {
     // A loaded the profile at stamp S1 and typed; B saved (S2). A's save must be on S1 → a conflict, not a revert.
@@ -339,30 +326,40 @@ async function asyncChecks(): Promise<void> {
     console.log("  ✓ series bump: one retry on a blink; a refusal or a standing failure is said on screen");
   }
 
-  /* ── 9. (review) Concurrent desk re-reads share one follow-up ── */
+  /* ── 9. (2.2f) After a lib/ write the masters view is asked again, mounted or not ── */
   {
-    let hydrates = 0;
-    let release: () => void = () => undefined;
-    const deps = {
-      reset: () => undefined,
-      hydrate: () =>
-        new Promise<boolean>((res) => {
-          hydrates += 1;
-          release = () => res(true);
-        }),
-    };
-    const a = bridgeMastersDeskAfterWrite(deps);
-    const b = bridgeMastersDeskAfterWrite(deps);
-    const c = bridgeMastersDeskAfterWrite(deps);
-    assert.equal(hydrates, 1);
-    release();
-    await a;
-    await new Promise((r) => setTimeout(r, 0));
-    release();
-    await Promise.all([b, c]);
-    await mastersDeskBridgeSettled();
-    assert.equal(hydrates, 2, "three writes → the running read + ONE follow-up");
-    console.log("  ✓ desk re-reads: writes during a re-read share one follow-up");
+    // The masters-desk bridge (a ~235 KB re-read of the old route) went with
+    // the whole-book save; the lib/ writers now wait for the masters VIEW's
+    // next answer, which the 2.1 bridge lays on the page copy. It must ask
+    // even when no screen observes the view, share an in-flight read, and
+    // never throw.
+    const realFetch = globalThis.fetch;
+    let reads = 0;
+    let fail = false;
+    const book = { classes: [{ id: "c1" }], sections: [], subjects: [{ id: "s1" }] };
+    globalThis.fetch = (async (input: string | URL) => {
+      if (!String(input).includes("/api/data/views/masters")) throw new Error(`unexpected ${String(input)}`);
+      reads += 1;
+      await new Promise((r) => setTimeout(r, 5));
+      if (fail) return new Response(JSON.stringify({ ok: false, error: "down" }), { status: 503 });
+      return new Response(JSON.stringify({ ok: true, data: { scope: "full", masters: book }, versions: { masters: { updated_at: "2026-10-27T10:00:00Z", count: 1 } } }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      assert.equal(await refetchMastersAnswer(null), false, "no tab client: nothing to ask");
+      assert.equal(await refetchMastersAnswer(client), true);
+      assert.equal(reads, 1, "asked with no screen mounted");
+      const cached = client.getQueryData<{ data: { masters: typeof book } }>(["masters", "/api/data/views/masters"]);
+      assert.deepEqual(cached?.data.masters, book, "the answer is the masters view's cache entry");
+      const [x, y] = await Promise.all([refetchMastersAnswer(client), refetchMastersAnswer(client)]);
+      assert.ok(x && y);
+      assert.equal(reads, 2, "two writes at once share one read");
+      fail = true;
+      assert.equal(await refetchMastersAnswer(client), false, "a failed read is false, not a throw");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    console.log("  ✓ after a write: the masters view is asked again (no screen needed), one read shared, never throws");
   }
 }
 

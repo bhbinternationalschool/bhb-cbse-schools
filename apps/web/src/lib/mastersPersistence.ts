@@ -10,7 +10,6 @@ import {
 import { setMirrorSlice } from "@/lib/schoolDataMirror";
 import {
   hydrateMastersDeskFromDb,
-  scheduleMastersDeskSync,
 } from "@/lib/mastersNormalizedClient";
 import { mergeDbDeskIntoMastersState } from "@/lib/mastersNormalizedMerge";
 import { mastersReadFromDbEnabled } from "@/lib/mastersDbConfig";
@@ -18,7 +17,6 @@ import { deskSkipMirrorBlobSliceClient } from "@/lib/deskCutover";
 import { dedupeHydration, isDeskHydrated, markDeskHydrated, resetDeskHydrated } from "@/lib/deskHydrateGuard";
 import { readCache, writeCacheOrInvalidate } from "@/lib/browserStorage";
 import { guardMastersOverwrite } from "@/lib/mastersWriteGuard";
-import { trackServerWork } from "@/lib/serverWork";
 
 const MODULE = "masters";
 
@@ -67,52 +65,6 @@ export function writeMastersLocalRaw(state: MastersState): void {
   const safe = protectLocalClasses(state);
   writeCacheOrInvalidate(STORAGE_KEY, JSON.stringify({ ...safe, version: 2 }));
   setMirrorSlice("masters", safe);
-}
-
-export function scheduleMastersSync(state: MastersState) {
-  if (typeof window === "undefined") {
-    void trackServerWork(pushMastersRemoteServer(state));
-    return;
-  }
-  scheduleMastersDeskSync(state);
-}
-
-export async function pushMastersRemoteServer(
-  state: MastersState,
-): Promise<{ ok: boolean; error?: string }> {
-  const { pushMastersDeskToDb } = await import("@/lib/mastersNormalized.server");
-  // A server-side copy carries no desk revision, so it can only bootstrap a
-  // desk that has never been written — never overwrite one (the writer
-  // refuses "unversioned"). Masters edits go through the browser's push.
-  const desk = await pushMastersDeskToDb(state, { baseUpdatedAt: null });
-  if (!desk.ok) return { ok: false, error: desk.error };
-
-  const { deskSkipMirrorBlobSlice } = await import("@/lib/deskCutover");
-  if (deskSkipMirrorBlobSlice("masters")) return { ok: true };
-
-  const { fetchServerBlob, pushServerBlob } = await import("@/lib/serverBlob");
-  const { stripStaffFromMastersForBlob } = await import("@/lib/staffPersistence");
-  const remote = await fetchServerBlob<{ masters?: MastersState }>(
-    "school_mirror_state",
-  );
-  const remoteClasses = remote.state?.masters?.classes?.length ?? 0;
-  const nextClasses = state.classes?.length ?? 0;
-  if (nextClasses < remoteClasses && remote.state?.masters) return { ok: true };
-
-  const mirror = remote.state ?? {
-    version: 1 as const,
-    updatedAt: new Date().toISOString(),
-    sis: null,
-    fees: null,
-    payments: null,
-    masters: null,
-    admissions: null,
-  };
-  return pushServerBlob("school_mirror_state", {
-    ...mirror,
-    masters: stripStaffFromMastersForBlob(state),
-    updatedAt: new Date().toISOString(),
-  });
 }
 
 export async function ensureMastersHydrated(): Promise<boolean> {
@@ -169,10 +121,6 @@ async function hydrateMastersOnce(): Promise<boolean> {
       }),
     );
     normChanged = true;
-    // DB-read mode: hydrate is pull-only — edits sync via saveMasters().
-    if (!readFromDb) {
-      scheduleMastersSync(loadMasters());
-    }
   }
   // (data-layer 2.2c: a read no longer re-sends "local edits that never
   // reached the DB" — that pushed the tab's whole copy from a READ, and the

@@ -33,7 +33,6 @@ import {
   setSessionWriteLock,
   setWorkspaceBootstrapPending,
 } from "@/lib/sessionWriteGuard";
-import { applyFeeDiscountSeedNow } from "@/lib/feeDiscountImportHydrate";
 import { consumeFreshLoginSession, flushAllDeskSyncPending, resetAllWorkspacePersistenceCaches } from "@/lib/workspaceClientSession";
 import { useWorkspaceInactivityLogout } from "./useWorkspaceInactivityLogout";
 import { ToastHost } from "./Toast";
@@ -235,7 +234,6 @@ export function AppShell({
 
       bootstrapAyRef.current = session.academicYearCode;
       setYears(listSessionYearOptions());
-      applyFeeDiscountSeedNow();
       setWorkspaceBootstrapPending(false);
       setBootReady(true);
 

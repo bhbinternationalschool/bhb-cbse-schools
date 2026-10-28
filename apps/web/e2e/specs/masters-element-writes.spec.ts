@@ -12,7 +12,7 @@
  *     both rename IV-A — B is refused as stale ("Not saved — …"), A's name
  *     stays on the server.
  *  3. Subject wipe: an old whole-book body that drops two subjects is refused
- *     by masters-desk (409 foundation_shrink) and nothing is removed; two
+ *     by masters-desk (410 build_stale since 2.2f) and nothing is removed; two
  *     removals in one kernel request are refused (400); deleting a subject on
  *     the real screen sends exactly one delete op and no list.
  *  4. The teacher (Nursery-A's class teacher, the Class subjects function):
@@ -173,8 +173,8 @@ test("subject wipe: an old body dropping two subjects is refused; the kernel tak
       },
     });
     const oldBody = (await old.json().catch(() => ({}))) as { reason?: string };
-    expect(old.status(), `old body: ${JSON.stringify(oldBody).slice(0, 200)}`).toBe(409);
-    expect(oldBody.reason).toBe("foundation_shrink");
+    expect(old.status(), `old body: ${JSON.stringify(oldBody).slice(0, 200)}`).toBe(410);
+    expect(oldBody.reason).toBe("build_stale");
     expect(listOf(await mastersView(a.request), "subjects").length, "nothing removed").toBe(before);
 
     // (b) two removals in one kernel request

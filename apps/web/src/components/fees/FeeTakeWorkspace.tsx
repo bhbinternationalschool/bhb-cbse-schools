@@ -16,6 +16,7 @@ import {
   earliestCollectionDate,
   feeBackdateVerdict,
 } from "@/lib/feeBackdate";
+import { istTodayIso } from "@/lib/monthRange";
 import {
   decodeTenderChannel,
   encodeTenderChannel,
@@ -267,8 +268,14 @@ type TenderComposer = {
   amount: string;
 };
 
+/**
+ * Today in India. The receipt's back-dating rule (lib/fees collectPayment,
+ * feeBackdateVerdict) judges the collection date against India's today; the
+ * UTC date is a day behind from 00:00 to 05:30 IST, and a clerk who may not
+ * back-date was then refused on every Collect.
+ */
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return istTodayIso();
 }
 
 function emptyComposer(channel = ""): TenderComposer {
@@ -548,7 +555,6 @@ export function FeeTakeWorkspace() {
       scheduleClientSchoolMirrorSync({
         sis: s,
         fees: f,
-        masters: m,
         payments: loadPayments(),
       });
     });
@@ -576,14 +582,6 @@ export function FeeTakeWorkspace() {
       if (wipe.wiped) {
         flash(
           `Cleared ${wipe.removedVouchers} local receipt(s) — ready for re-import`,
-        );
-      }
-      const { applyFeeDiscountSeedNow } =
-        await import("@/lib/feeDiscountImportHydrate");
-      const discount = applyFeeDiscountSeedNow();
-      if (discount.applied > 0) {
-        flash(
-          `Applied ${discount.applied} student discount grant${discount.applied === 1 ? "" : "s"}`,
         );
       }
       refresh();

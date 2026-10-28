@@ -11,7 +11,7 @@
  * other one ("fee-writes", playwright.config.ts).
  *
  *  1. Fee-line wipe: an old whole-book body for the fee lists is refused by
- *     masters-desk (409 fee_setup_elements) — dropping two lines, or changing
+ *     masters-desk (410 build_stale since 2.2f) — dropping two lines, or changing
  *     one — and nothing changes; the kernel takes one removal per request.
  *  2. Overlap: two principals edit DIFFERENT fee lines from screens loaded
  *     together — both land, no "Not saved", B's request is B's line alone.
@@ -187,8 +187,8 @@ test("fee-line wipe: an old whole-book body for the fee lists is refused; the ke
       },
     });
     const dropBody = (await drop.json().catch(() => ({}))) as { reason?: string };
-    expect(drop.status(), `old body (drop two): ${JSON.stringify(dropBody).slice(0, 200)}`).toBe(409);
-    expect(dropBody.reason).toBe("fee_setup_elements");
+    expect(drop.status(), `old body (drop two): ${JSON.stringify(dropBody).slice(0, 200)}`).toBe(410);
+    expect(dropBody.reason).toBe("build_stale");
     // (b) the whole list with one amount changed — still the old path: refused
     const edit = await a.request.post("/api/school-data/masters-desk", {
       data: {
@@ -197,7 +197,7 @@ test("fee-line wipe: an old whole-book body for the fee lists is refused; the ke
         sliceBases: { feeStructureLines: desk.sliceStamps?.feeStructureLines ?? "" },
       },
     });
-    expect(edit.status(), "old body (edit one)").toBe(409);
+    expect(edit.status(), "old body (edit one)").toBe(410);
     // (c) two removals in one kernel request
     const book = await mastersView(a.request);
     const two = await writeElements(a.request, "masters.fee-structure-lines", [
@@ -765,6 +765,27 @@ test("receipt number: after a phone receipt the tab never saw, with the counter 
     await office.context().close();
   }
   expect(errors, "no page errors").toEqual([]);
+});
+
+// ── Between midnight and 05:30 IST the counter's date is India's today ────
+// Fee Take defaulted the collection date to the UTC date, while the receipt's
+// back-dating rule (lib/fees collectPayment) judges it against India's today.
+// From 00:00 to 05:30 IST those differ by a day: a clerk who may not back-date
+// pressed Collect and nothing was saved (every CI run after 00:00 IST on
+// 28 Oct 2026 failed the clerk case). The browser's clock is put at 00:30 IST.
+test("collection date: at 00:30 IST the counter offers India's today — the date the back-dating rule judges against", async ({ browser }) => {
+  const context = await browser.newContext({ baseURL: APP_URL, viewport: { width: 1440, height: 900 } });
+  await signIn(context, "office");
+  const page = await context.newPage();
+  try {
+    // 28 Oct 00:30 IST = 27 Oct 19:00 UTC.
+    await page.clock.install({ time: new Date("2026-10-27T19:00:00.000Z") });
+    await page.goto(`/fees?tab=collect&q=${encodeURIComponent(CHILD.admissionNo)}`);
+    await page.getByRole("button", { name: new RegExp(CHILD.admissionNo) }).first().click({ timeout: 30_000 });
+    await expect(page.getByRole("textbox", { name: "Collection date" })).toHaveValue("2026-10-28", { timeout: 30_000 });
+  } finally {
+    await context.close();
+  }
 });
 
 // ── Seen: the screens this step touches, desktop-light and 375-dark ───────

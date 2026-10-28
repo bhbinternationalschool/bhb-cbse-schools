@@ -31,7 +31,6 @@ import { applyStaffLinkChange, MASTERS_BATCH_PATH, type ElementRequest, type Sta
 import { writeRecords } from "./mutate";
 import { readAll } from "./query";
 import { mastersListCommitOps, mastersObjectCommitOp } from "./mastersCommit";
-import { bridgeMastersDeskAfterWrite } from "./mastersDeskBridge";
 import { bridgeStaffAfterWrite } from "./staffBridge";
 import type { UseSaveMutation } from "./useSaveMutation";
 
@@ -70,11 +69,6 @@ export function useMastersMutation(sliceKey: string): UseMastersMutation {
   const target = useMemo(() => mastersCollectionFor(sliceKey), [sliceKey]);
   const mutation = useErpMutation<Row>(target?.id ?? `masters.unknown-${sliceKey}`, {
     desk: ["masters"],
-    // The old whole-book save's base follows the server (mastersDeskBridge).
-    onSaved: () => void bridgeMastersDeskAfterWrite(),
-    onFailed: (r) => {
-      if (r.kind === "conflict") void bridgeMastersDeskAfterWrite();
-    },
   });
   const view = masters.data;
   const { save } = mutation;
@@ -166,8 +160,6 @@ export function useMastersElementWrites(): (requests: readonly ElementRequest[],
       } finally {
         if (requests.length) {
           invalidateDesks(client, ["masters"]);
-          // Not awaited: the old save waits for it (mastersDeskBridgeSettled).
-          void bridgeMastersDeskAfterWrite();
         }
         if (staff.length) {
           invalidateDesks(client, STAFF_DESKS);

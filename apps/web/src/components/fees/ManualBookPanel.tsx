@@ -34,9 +34,11 @@ import { useDemoSession } from "@/components/shell/SessionContext";
 import { loadSis, type SisState, type SisStudent } from "@/lib/sis";
 import { StudentNameLabel } from "@/components/students/StudentAvatar";
 import { DueBreakupPicker } from "@/components/fees/DueBreakupPicker";
+import { istTodayIso } from "@/lib/monthRange";
 
+/** Today in India — the day the back-dating rule judges against (not the UTC date). */
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return istTodayIso();
 }
 
 type TenderLine = {
