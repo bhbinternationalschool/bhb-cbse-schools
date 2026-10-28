@@ -125,14 +125,20 @@ export function ShellDataWait({ children }: { children: React.ReactNode }) {
     };
   }, [copiesReady]);
 
-  if (!remote) return <>{children}</>;
-  if (failedNoAnswer) {
-    if (copyHasMasters && copiesReady) return <>{children}</>;
-    if (copyHasMasters === false) {
-      return <QueryError what="the school's classes, subjects and staff" error={masters.error} retry={masters.refetch} />;
-    }
+  // Once the screens are shown they stay shown. A screen mounting its own
+  // useMasters() re-asks a failed read, and React Query puts a query with no
+  // answer back to "pending" while it does: without this latch the shell
+  // would take the screen away again on every retry (a mount/retry loop).
+  const show = !remote || (copiesReady && (masters.data !== undefined || (failedNoAnswer && copyHasMasters === true)));
+  const [released, setReleased] = useState(false);
+  useEffect(() => {
+    if (show && !released) setReleased(true);
+  }, [show, released]);
+
+  if (show || released) return <>{children}</>;
+  if (failedNoAnswer && copyHasMasters === false) {
+    return <QueryError what="the school's classes, subjects and staff" error={masters.error} retry={masters.refetch} />;
   }
-  if (masters.data !== undefined && copiesReady) return <>{children}</>;
   return (
     <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 text-sm text-[var(--muted)]" role="status">
       <span className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--brand)]" aria-hidden />
