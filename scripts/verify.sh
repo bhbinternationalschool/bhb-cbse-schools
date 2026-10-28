@@ -600,6 +600,7 @@ SELFTESTS=(
   test:wa-student-link
   test:leave-command
   test:daily-brief
+  test:staff-reminders
   test:automation-approvals
   test:automation-schedule
   test:server-fallback-saves

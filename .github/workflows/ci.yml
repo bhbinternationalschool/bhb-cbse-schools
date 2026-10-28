@@ -742,6 +742,7 @@ jobs:
           npm run test:desk-feature-rev
           npm run test:staff-requests
           npm run test:notify
+          npm run test:staff-reminders
           npm run test:push-voice
           npm run test:survey-team-plan
           npm run test:parent-api-scope

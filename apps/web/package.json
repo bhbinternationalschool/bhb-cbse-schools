@@ -527,6 +527,7 @@
     "test:reference-views": "npx tsx src/lib/data/server/views.selftest.ts",
     "test:staff-requests": "npx tsx src/lib/staffRequests.selftest.ts",
     "test:notify": "npx tsx src/lib/notify/notify.selftest.ts && npx tsx src/lib/notify/inbox.selftest.ts",
+    "test:staff-reminders": "npx tsx src/lib/staffReminders.selftest.ts",
     "test:survey-team-plan": "npx tsx src/lib/surveyTeamPlan.selftest.ts",
     "test:parent-api-scope": "npx tsx src/lib/data/server/parentApiScope.selftest.ts",
     "test:outdoor-duty-staff-id": "npx tsx src/lib/outdoorDutyStaffId.selftest.ts",
