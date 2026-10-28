@@ -6,7 +6,7 @@ import { useMasters } from "@/lib/data/client/hooks";
 import { hasDeskLoaded } from "@/lib/deskHydrateGuard";
 import { isSupabaseConfigured } from "@/lib/supabase/client";
 
-/** How long the page copies of the roles and the roster are waited for (as CoreDataGate did for staff). */
+/** How long the page copy of the roster is waited for (as CoreDataGate did for staff). */
 const PAGE_COPY_WAIT_MS = 5_000;
 
 /** One wait per tab for every mount that asks (the shell mounts once per page load). */
@@ -19,8 +19,9 @@ let pageCopies: Promise<void> | null = null;
  * above all. Until 2.3a useAccessData started these two hydrates on every
  * page and the module gate waited for them; the access DECISIONS now come
  * from the views (useAccessData), but a save made before the copies landed
- * would be judged on built-in defaults. Each is waited for at most 5 s and a
- * failure does not block: nothing on screen is decided from them.
+ * would be judged on built-in defaults. The roles and the module registry are
+ * waited for until their read settles; the roster at most 5 s; a
+ * failure does not block (the views decide the module gate and the menu).
  */
 function loadPageCopies(): Promise<void> {
   if (pageCopies) return pageCopies;
@@ -38,14 +39,21 @@ function loadPageCopies(): Promise<void> {
           withHydrationSlot(run).catch(() => false),
           new Promise((r) => setTimeout(r, PAGE_COPY_WAIT_MS)),
         ]);
+      // Until settled, not capped: the roles (and, below, which modules are
+      // on) are what the lib/ permission helpers that take no rbac argument
+      // read (visibleModuleTabs, canSeeModuleTab … → loadRbac()), and nothing
+      // tells a screen when this copy lands later — a tab list decided on
+      // the built-in defaults stays wrong (CI 28 Oct: Attendance's Students
+      // tab). Before 2.3a the module gate waited for this copy the same way.
+      const settled = (run: () => Promise<unknown>) => withHydrationSlot(run).catch(() => false);
       await Promise.all([
-        hasDeskLoaded("rbac") ? null : capped(() => ensureRbacHydrated()),
+        hasDeskLoaded("rbac") ? null : settled(() => ensureRbacHydrated()),
         hasDeskLoaded("staff") ? null : capped(() => ensureStaffHydrated()),
         // Which modules are switched on (canAccessModuleHref reads its page
         // copy): a default-off module the school enabled must not be refused
         // before the registry is in. Until 2.3a the access copy re-decided
         // on its hydrate event.
-        hasDeskLoaded("module_registry") ? null : capped(() => ensureModuleRegistryHydrated()),
+        hasDeskLoaded("module_registry") ? null : settled(() => ensureModuleRegistryHydrated()),
       ]);
     } catch {
       /* best-effort: the views decide what is shown */
@@ -62,7 +70,8 @@ function loadPageCopies(): Promise<void> {
  * (useMasters — ~1 request; its answer is laid on the tab's page copy by the
  * 2.1 bridge before the query resolves, so the ~346 synchronous loadMasters()
  * readers see the school's classes, subjects and settings), and once the
- * page copies of the roles and the roster have loaded or 5 s have passed.
+ * page copies of the roles and the module registry have settled and the roster
+ * has loaded or 5 s have passed.
  *
  * A failed masters read is never an empty school (R6): when the tab's copy
  * holds Masters anyway (the old hydrate below) the screens render and each
