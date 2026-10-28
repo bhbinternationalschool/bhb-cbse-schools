@@ -407,11 +407,11 @@ h3,
   background:
     radial-gradient(
       ellipse 80% 60% at 10% 0%,
-      rgba(197, 160, 40, 0.35),
-      transparent 55%
+      rgba(197, 160, 40, 0.26),
+      transparent 58%
     ),
     linear-gradient(135deg, #203050 0%, #2a3d66 48%, #384870 100%);
-  box-shadow: 0 16px 40px rgba(32, 48, 80, 0.22);
+  box-shadow: 0 10px 28px rgba(32, 48, 80, 0.16);
 }
 
 .module-dash-panel {

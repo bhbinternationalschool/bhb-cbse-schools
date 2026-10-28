@@ -75,7 +75,6 @@ export function scheduleClientSchoolMirrorSync(partial: {
   sis?: unknown;
   fees?: unknown;
   payments?: unknown;
-  masters?: unknown;
   admissions?: unknown;
 }): void {
   if (typeof window === "undefined") return;
@@ -87,7 +86,6 @@ export function scheduleClientSchoolMirrorSync(partial: {
   maybeAdd("sis", partial.sis);
   maybeAdd("fees", partial.fees);
   maybeAdd("payments", partial.payments);
-  maybeAdd("masters", partial.masters);
   maybeAdd("admissions", partial.admissions);
   if (Object.keys(body).length === 0) return;
   void trackServerWork(fetch("/api/school-data/mirror", {
@@ -126,14 +124,12 @@ export function pushFullSchoolMirrorToServer(): void {
     const { loadSis } = await import("@/lib/sis");
     const { loadFees } = await import("@/lib/fees");
     const { loadPayments } = await import("@/lib/payments");
-    const { loadMasters } = await import("@/lib/masters");
     const { loadAdmissions } = await import("@/lib/admissions");
     const admissions = loadAdmissions();
     const partial: {
       sis?: unknown;
       fees?: unknown;
       payments?: unknown;
-      masters?: unknown;
       admissions?: unknown;
     } = {};
     if (!deskSkipMirrorBlobSliceClient("fees")) {
@@ -141,9 +137,6 @@ export function pushFullSchoolMirrorToServer(): void {
     }
     if (!deskSkipMirrorBlobSliceClient("payments")) {
       partial.payments = loadPayments();
-    }
-    if (!deskSkipMirrorBlobSliceClient("masters")) {
-      partial.masters = loadMasters();
     }
     if (!deskSkipMirrorBlobSliceClient("sis")) {
       partial.sis = loadSis();

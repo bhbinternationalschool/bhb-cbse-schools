@@ -62,9 +62,6 @@ run() {
 SELFTESTS=(
   test:session-cookie
   test:masters-write-guard
-  test:masters-revision-guard
-  test:masters-revision-lifecycle
-  test:masters-revision-everywhere
   test:masters-cold-client
   test:masters-teacher-no-fees
   test:screen-masters-dues
@@ -133,7 +130,6 @@ SELFTESTS=(
   test:parent-bot-day-app
   test:comms-tab-access
   test:fee-store-discount
-  test:masters-subject-guard
   test:subject-requests
   test:custom-fields
   test:custom-fields-import
@@ -268,7 +264,6 @@ SELFTESTS=(
   test:serial-save
   test:desk-load-guard
   test:desk-on-demand
-  test:masters-section-saves
   test:accounts-row-stamps
   test:desk-stamps
   test:attendance-row-stamps

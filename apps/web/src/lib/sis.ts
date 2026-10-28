@@ -1666,13 +1666,6 @@ export function loadSis(): SisState {
       const slim = slimSisJson(next);
       if (slim !== cachedRaw) writeCacheOrInvalidate(STORAGE_KEY, slim);
       syncSisIntoMasters(next, masters);
-      if (next.students.length > 0) {
-        void trackServerWork(import("@/lib/feeDiscountImportHydrate").then(
-          ({ mergeAndPersistFeeDiscountSeed }) => {
-            mergeAndPersistFeeDiscountSeed(masters, next);
-          },
-        ));
-      }
       return next;
     }
     const empty = emptySisState();
