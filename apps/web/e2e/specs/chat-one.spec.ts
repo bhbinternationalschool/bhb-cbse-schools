@@ -254,7 +254,11 @@ test.describe.serial("chat-one: the header chat is school chat", () => {
       { name: "phone375-dark", viewport: { width: 375, height: 812 }, colorScheme: "dark" as const, isMobile: true },
     ]) {
       // Something unread for the class teacher (each pass reads it).
-      expect((await member.post("/api/v1/school-chat/send", { conversationId: groupId, body: `unread for you on ${v.name} ${tag}` })).status).toBe(200);
+      {
+        const m = await api(staffSession(MEMBER));
+        expect((await m.post("/api/v1/school-chat/send", { conversationId: groupId, body: `unread for you on ${v.name} ${tag}` })).status).toBe(200);
+        await m.ctx.dispose();
+      }
       const context = await browser.newContext({ baseURL: APP_URL, viewport: v.viewport, colorScheme: v.colorScheme, isMobile: v.isMobile, hasTouch: v.isMobile });
       try {
         await signIn(context, "teacher");
@@ -317,7 +321,11 @@ test.describe.serial("chat-one: the header chat is school chat", () => {
     const context = await browser.newContext({ baseURL: APP_URL, viewport: { width: 375, height: 812 }, colorScheme: "dark", isMobile: true, hasTouch: true });
     try {
       await context.addCookies([{ name: "bhb_demo_session", value: sessionCookieHeader(parentSession(famA.householdId)).split("=").slice(1).join("="), url: APP_URL }]);
-      expect((await maker.post("/api/v1/school-chat/send", { conversationId: sectionGroupId, body: `For parents ${tag}` })).status).toBe(200);
+      // A fresh request context: the long browser stretch above outlives the
+      // server's keep-alive, and a reused socket can be reset (ECONNRESET).
+      const fresh = await api(staffSession(MAKER));
+      expect((await fresh.post("/api/v1/school-chat/send", { conversationId: sectionGroupId, body: `For parents ${tag}` })).status).toBe(200);
+      await fresh.ctx.dispose();
       const page = await context.newPage();
       await page.goto("/parent");
       const button = page.getByTestId("parent-chat-button").first();
