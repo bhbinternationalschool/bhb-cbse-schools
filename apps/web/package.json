@@ -565,6 +565,7 @@
     "test:comms-reach": "npx tsx src/lib/commsReach.selftest.ts",
     "test:wa-timeline": "npx tsx src/lib/waTimeline.selftest.ts",
     "test:parents-on-app": "npx tsx src/lib/parentsOnApp.selftest.ts",
+    "test:office-assistant": "npx tsx src/lib/officeAssistant.selftest.ts",
     "import:leads": "npx tsx scripts/import-lead-excels.ts",
     "import:fee-discounts": "npx tsx scripts/import-fee-discounts-excel.ts",
     "clear:collections": "npx tsx scripts/clear-fee-collections.ts",
@@ -581,6 +582,7 @@
     "sync:bigquery:dry": "npx tsx scripts/bigquery-sync.ts --dry-run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
     "@base-ui/react": "^1.6.0",
     "@bhb/time": "*",
     "@google-cloud/bigquery": "^7.9.4",
