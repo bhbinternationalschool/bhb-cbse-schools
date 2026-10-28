@@ -41,8 +41,9 @@ import { askErpGrounded } from "@/lib/erpCommands.server";
 import { buildPrincipalSnapshot } from "@/lib/principalSnapshot.server";
 import { listLiveDefaulters } from "@/lib/playbook";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
-import { loadSis, householdWhatsApp } from "@/lib/sis";
-import { loadMasters, currentAcademicYearCode } from "@/lib/masters";
+import { householdWhatsApp, type SisState } from "@/lib/sis";
+import { currentAcademicYearCode, type MastersState } from "@/lib/masters";
+import { loadServerMasters } from "@/lib/api/v1/auth";
 import { staffAttendanceStatusForWa } from "@/lib/staffAttendance.server";
 import { readStaffHrServer } from "@/lib/api/v1/staffLeave";
 import { renderTableReportPdf } from "@/lib/reportPdf.server";
@@ -137,8 +138,16 @@ type Pending = {
   ranAction: boolean;
 };
 
-async function classIdForLabel(label: string): Promise<{ id: string; name: string } | null> {
-  const masters = loadMasters();
+/** Grounded data for the tools, via the SERVER readers (not the browser
+ * mirror loaders loadMasters()/loadSis(), which the data-layer migration is
+ * ratcheting to zero). masters is always present; sis is null if the mirror
+ * could not be read. */
+async function officeData(): Promise<{ masters: MastersState; sis: SisState | null }> {
+  const [masters, mirror] = await Promise.all([loadServerMasters(), ensureSchoolMirrorHydrated()]);
+  return { masters, sis: (mirror.sis ?? null) as SisState | null };
+}
+
+function classIdForLabel(label: string, masters: MastersState): { id: string; name: string } | null {
   const want = label.toLowerCase().replace(/[^a-z0-9]/g, "");
   for (const c of masters.classes ?? []) {
     const n = (c.name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -148,9 +157,7 @@ async function classIdForLabel(label: string): Promise<{ id: string; name: strin
 }
 
 /** A plain name/admission-number match over the active roster. */
-function findStudents(query: string, limit = 3): { id: string; name: string; admissionNo: string; classLabel: string; householdId: string }[] {
-  const sis = loadSis();
-  const masters = loadMasters();
+function findStudents(query: string, sis: SisState, masters: MastersState, limit = 3): { id: string; name: string; admissionNo: string; classLabel: string; householdId: string }[] {
   const ay = currentAcademicYearCode(masters);
   const q = query.trim().toLowerCase();
   const tokens = q.replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
@@ -181,8 +188,7 @@ function findStudents(query: string, limit = 3): { id: string; name: string; adm
   }));
 }
 
-function householdMobileFor(householdId: string): string {
-  const sis = loadSis();
+function householdMobileFor(householdId: string, sis: SisState): string {
   const hh = (sis.households as unknown as { id: string }[]).find((h) => h.id === householdId);
   return hh ? householdWhatsApp(hh as unknown as Parameters<typeof householdWhatsApp>[0]) : "";
 }
@@ -290,13 +296,14 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
         return { text: `${list.length} defaulter household(s). Showing ${shown.length}:\n${body}` };
       }
       case "student_lookup": {
-        await ensureSchoolMirrorHydrated();
-        const matches = findStudents(String(input.query || ""));
+        const { masters, sis } = await officeData();
+        if (!sis) return { text: "The student roster is unavailable right now." };
+        const matches = findStudents(String(input.query || ""), sis, masters);
         if (!matches.length) return { text: "No student matches that name or admission number." };
         const defaulters = listLiveDefaulters();
         const lines = matches.map((m) => {
           const due = defaulters.find((d) => d.studentId === m.id);
-          const mobile = householdMobileFor(m.householdId);
+          const mobile = householdMobileFor(m.householdId, sis);
           return [
             `${m.name} (${m.admissionNo || "no adm no"}) — ${m.classLabel || "class unknown"}`,
             `  Dues: ${due ? `${rupees(due.overdueAmountPaise)} overdue (${due.overdueDays}d)` : "no overdue dues on record"}`,
@@ -306,7 +313,7 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
         return { text: lines.join("\n\n") };
       }
       case "staff_lookup": {
-        const masters = loadMasters();
+        const masters = await loadServerMasters();
         const q = String(input.query || "").toLowerCase().trim();
         const tokens = q.split(/\s+/).filter(Boolean);
         const staff = (masters.staff ?? []).filter((s) => {
@@ -347,7 +354,7 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
       }
       case "report": {
         const kind = String(input.kind || "");
-        const masters = loadMasters();
+        const masters = await loadServerMasters();
         try {
           if (kind === "daily_brief") {
             const brief = await buildDailyBrief({ dateIso: todayIso });
@@ -380,7 +387,7 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
         if (!body) return { text: "The notice body is empty — ask the director what to say." };
         if (audience === "class") {
           const label = String(input.class_label || "");
-          const cls = await classIdForLabel(label);
+          const cls = classIdForLabel(label, await loadServerMasters());
           if (!cls) return { text: `No class matches "${label}".` };
           pending.draft = {
             draft: { audience: "class", recipientLabel: `${cls.name} parents`, recipient: { classLabel: cls.name, classId: cls.id } as AssistantDraft["recipient"], title, body, channel: "whatsapp", meta: { templateFamily: "comms_notice" } },
@@ -395,12 +402,13 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
         return { text: "Draft school-wide notice is ready for your approval.", terminal: true };
       }
       case "draft_fee_reminder": {
+        const { masters, sis } = await officeData();
         const custom = input.body ? String(input.body) : "";
         if (input.student_query) {
-          await ensureSchoolMirrorHydrated();
-          const m = findStudents(String(input.student_query), 1)[0];
+          if (!sis) return { text: "The student roster is unavailable right now." };
+          const m = findStudents(String(input.student_query), sis, masters, 1)[0];
           if (!m) return { text: "No student matches that name or admission number." };
-          const mobile = householdMobileFor(m.householdId);
+          const mobile = householdMobileFor(m.householdId, sis);
           const defaulters = listLiveDefaulters();
           const due = defaulters.find((d) => d.studentId === m.id);
           const body = custom || `This is a gentle reminder regarding the pending school fees for ${m.name}${due ? ` (${rupees(due.overdueAmountPaise)} overdue)` : ""}. Kindly clear at your earliest convenience. Thank you.`;
@@ -411,7 +419,7 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
           return { text: `Draft fee reminder for ${m.name}'s family is ready for your approval.`, terminal: true };
         }
         const label = input.class_label ? String(input.class_label) : "";
-        const cls = label ? await classIdForLabel(label) : null;
+        const cls = label ? classIdForLabel(label, masters) : null;
         if (label && !cls) return { text: `No class matches "${label}".` };
         const body = custom || "This is a gentle reminder regarding pending school fees. Kindly clear the dues at your earliest convenience. Thank you.";
         pending.draft = {
@@ -421,12 +429,13 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
         return { text: `Draft fee reminder is ready for your approval.`, terminal: true };
       }
       case "draft_parent_message": {
-        await ensureSchoolMirrorHydrated();
+        const { masters, sis } = await officeData();
         const text = String(input.text || "").trim();
         if (!text) return { text: "The message is empty." };
-        const m = findStudents(String(input.student_query || ""), 1)[0];
+        if (!sis) return { text: "The student roster is unavailable right now." };
+        const m = findStudents(String(input.student_query || ""), sis, masters, 1)[0];
         if (!m) return { text: "No student matches that name or admission number." };
-        const mobile = householdMobileFor(m.householdId);
+        const mobile = householdMobileFor(m.householdId, sis);
         if (!mobile) return { text: `${m.name}'s family has no WhatsApp number on record — tell the director.` };
         pending.draft = {
           draft: { audience: "parent", recipientLabel: `${m.name}'s family`, recipient: { studentId: m.id, mobile }, title: "Message", body: text, channel: "whatsapp", meta: { templateFamily: "comms_notice" } },
@@ -435,7 +444,7 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
         return { text: `Draft message to ${m.name}'s family is ready for your approval.`, terminal: true };
       }
       case "draft_staff_message": {
-        const masters = loadMasters();
+        const masters = await loadServerMasters();
         const text = String(input.text || "").trim();
         if (!text) return { text: "The message is empty." };
         const q = String(input.staff_query || "").toLowerCase().trim();
