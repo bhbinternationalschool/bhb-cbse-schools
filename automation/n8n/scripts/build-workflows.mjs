@@ -1387,18 +1387,23 @@ const updates = res.ok && Array.isArray(res.result) ? res.result : [];
 if (!updates.length) return [];
 const st = $getWorkflowStaticData('global');
 st.tg_offset = Math.max(...updates.map((u) => Number(u.update_id || 0))) + 1;
+// Director/principal come from env (tgRoleOf); anyone the director added with
+// /adduser is a 'reader' from the office_bot_users table. roleOf prefers env.
+const users = (() => { try { return $('Fetch: bot users').all().map((i) => i.json).filter((u) => u && u.chat_id); } catch (e) { return []; } })();
+const userRole = (id) => { const u = users.find((x) => String(x.chat_id) === String(id)); return u ? (u.role || 'reader') : ''; };
+const roleOf = (id) => tgRoleOf(id) || userRole(id);
 // (?![a-z]) instead of \\b: JS word boundaries are ASCII-only, so Devanagari words never matched.
 // End-anchored: a BARE approve/reject word (optionally a draft number) is a
 // decision; anything longer is a free-form instruction for the assistant.
 const APPROVE = /^\\s*\\/?(approve|approved|ok|okay|yes|haan|ha|हाँ|हां|ठीक)\\s*#?\\s*(\\d+)?\\s*$/i;
 const REJECT = /^\\s*\\/?(reject|rejected|cancel|nahi|nahin|नहीं|रद्द)\\s*#?\\s*(\\d+)?\\s*$/i;
-const COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan', marketing: 'marketing', transport: 'transport' };
+const COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan', marketing: 'marketing', transport: 'transport', users: 'users' };
 const out = [];
 for (const u of updates) {
   const cq = u.callback_query;
   if (cq) {
     const chat_id = String((cq.message && cq.message.chat && cq.message.chat.id) || (cq.from && cq.from.id) || '');
-    const role = tgRoleOf(chat_id);
+    const role = roleOf(chat_id);
     const data = String(cq.data || '');
     const base = { chat_id, role, callback_id: cq.id, message_id: cq.message ? cq.message.message_id : null, message_text: cq.message ? String(cq.message.text || '') : '' };
     if (!role) continue;
@@ -1410,6 +1415,13 @@ for (const u of updates) {
     if ((ta || data === 'doneall') && role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
     if (data === 'doneall') { out.push({ json: { kind: 'taskaction', action: 'doneall', task_id: null, ...base } }); continue; }
     if (data === 'tasks') { out.push({ json: { kind: 'command', cmd: 'tasks', ...base } }); continue; }
+    // Numbered-menu + delegation callbacks (parallel to the draft approve path).
+    const sel = /^tsel:(\\d+)$/.exec(data); if (sel) { if (role === 'director') out.push({ json: { kind: 'command', cmd: 'tpick', task_id: Number(sel[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const tcl = /^tclose:(\\d+)$/.exec(data); if (tcl) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'close', task_id: Number(tcl[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const tsz = /^tsnz:(\\d+)$/.exec(data); if (tsz) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'snooze', task_id: Number(tsz[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const tas = /^tasg:(\\d+)$/.exec(data); if (tas) { if (role === 'director') out.push({ json: { kind: 'command', cmd: 'tassign', task_id: Number(tas[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const ast = /^aset:(\\d+):(.+)$/.exec(data); if (ast) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'assign_set', task_id: Number(ast[1]), assignee: String(ast[2]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const dlg = /^(dok|dno):(\\d+)$/.exec(data); if (dlg) { if (role) out.push({ json: { kind: 'taskaction', action: dlg[1], task_id: Number(dlg[2]), ...base } }); continue; }
     continue;
   }
   const msg = u.message;
@@ -1418,13 +1430,36 @@ for (const u of updates) {
   const role = tgRoleOf(chat_id);
   const text = String(msg.text || '').trim();
   const base = { chat_id, role, callback_id: null, message_id: null, message_text: '' };
+  // Director-only user management (needs arguments, so handled before the
+  // plain-command match). /adduser <chatid> <name>, /removeuser <chatid>.
+  const au = /^\\/adduser\\s+(\\S+)(?:\\s+([\\s\\S]+))?$/i.exec(text);
+  if (au) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'adduser', add_chat: au[1].replace(/[^0-9-]/g, ''), add_name: String(au[2] || '').trim().slice(0, 60), ...base } }); else if (role) out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+  const ru = /^\\/removeuser\\s+(\\S+)/i.exec(text);
+  if (ru) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'removeuser', add_chat: ru[1].replace(/[^0-9-]/g, ''), ...base } }); else if (role) out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
   const cmd = /^\\/([a-z]+)(?:@\\w+)?\\b/i.exec(text);
   if (cmd && COMMANDS[cmd[1].toLowerCase()]) {
     const name = COMMANDS[cmd[1].toLowerCase()];
-    if (role || name === 'start') out.push({ json: { kind: 'command', cmd: name, ...base } });
+    if (name === 'start') { out.push({ json: { kind: 'command', cmd: 'start', ...base } }); continue; }
+    if (!role) continue;
+    if (name === 'users' && role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const READER_OK = ['tasks', 'huddle', 'plan', 'marketing', 'transport'];
+    if (role === 'reader' && !READER_OK.includes(name)) continue;
+    out.push({ json: { kind: 'command', cmd: name, ...base } });
     continue;
   }
   if (!role) continue;
+  // Numbered-menu typing (director): a bare number selects that task; "close N"
+  // / "snooze N" act on it; "assign N" opens the assignee menu. N is the display
+  // number from the last /tasks list (same created_at order everywhere).
+  const num = /^(\\d{1,3})$/.exec(text);
+  if (num && role === 'director') { out.push({ json: { kind: 'command', cmd: 'tpick', num: Number(num[1]), ...base } }); continue; }
+  const act = /^(close|snooze|assign)\\s+#?(\\d{1,3})$/i.exec(text);
+  if (act && role === 'director') {
+    const a1 = act[1].toLowerCase();
+    if (a1 === 'assign') out.push({ json: { kind: 'command', cmd: 'tassign', num: Number(act[2]), ...base } });
+    else out.push({ json: { kind: 'taskaction', action: a1, num: Number(act[2]), ...base } });
+    continue;
+  }
   const ta = /^\\/(done|close|snooze)\\s+#?(\\d+|all)\\b/i.exec(text);
   if (ta) {
     if (role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
@@ -1448,7 +1483,13 @@ for (const u of updates) {
 return out;
 `,
   );
-  wf.chain(tick, buildPoll, poll, parse);
+  const getUsers = sbGet(
+    wf,
+    "Fetch: bot users",
+    "office_bot_users",
+    `tenant_id=eq.${TENANT}&is_active=eq.true&select=chat_id,role,name&order=created_at.asc&limit=100`,
+  );
+  wf.chain(tick, getUsers, buildPoll, poll, parse);
   const kind = switchOn(wf, "Switch: update kind", "kind", ["decision", "command", "taskaction", "assistant"]);
   wf.link(parse, kind);
 
@@ -1696,9 +1737,13 @@ const mktg = rows('Fetch: latest marketing')[0] || null;
 const budgetRows = rows('Fetch: marketing budget');
 const trans = rows('Fetch: latest transport')[0] || null;
 const transBudgetRows = rows('Fetch: transport budget');
+const users = rows('Fetch: bot users').filter((u) => u.chat_id);
 const asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'command');
 const today = isoDate(istNow());
 const line = (t) => '#' + t.id + ' [' + t.to_role + '] ' + t.title + (t.due_on ? ' (due ' + t.due_on + ')' : '') + (t.approval_state === 'pending' ? ' — waiting for you' : '');
+// Resolve a task from a tap (task_id) or a typed display number (num); the
+// number is the task's 1-based position in the created_at-ordered open list.
+const pickTask = (a) => { if (a.task_id) { const i = tasks.findIndex((t) => Number(t.id) === Number(a.task_id)); return i >= 0 ? { t: tasks[i], n: i + 1 } : null; } if (a.num) { const t = tasks[a.num - 1]; return t ? { t, n: a.num } : null; } return null; };
 const out = [];
 const send = (chat_id, text, keyboard) => {
   const chunks = tgChunks(text);
@@ -1712,10 +1757,12 @@ for (const a of asks) {
   if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });
   if (a.cmd === 'start') {
     const who = a.role ? 'You are the ' + a.role + '.' : 'This chat is not registered yet. Give the office this chat id: <code>' + tgEscape(a.chat_id) + '</code>';
-    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n/drafts — replies waiting for your decision\\n/tasks — open tasks (tap to close or defer)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan\\n/marketing — cost per lead, spend vs budget, this week\\'s survey beats\\n/transport — fleet safety, fuel, spend vs budget' : ''));
+    const common = '/tasks — open tasks (pick a number to close, snooze or assign)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan\\n/marketing — cost per lead, spend vs budget\\n/transport — fleet safety, fuel, spend vs budget';
+    const dir = '\\n/drafts — replies waiting for your decision\\n/users — people you added · /adduser &lt;id&gt; &lt;name&gt; · /removeuser &lt;id&gt;';
+    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n' + common + (a.role === 'director' ? dir : '') : ''));
     continue;
   }
-  if (a.cmd === 'not_director') { send(a.chat_id, 'Only the director decides drafts.'); continue; }
+  if (a.cmd === 'not_director') { send(a.chat_id, 'Only the director can do that.'); continue; }
   if (a.cmd === 'drafts') {
     const drafts = tasks.filter((t) => t.approval_state === 'pending' && t.source === 'receptionist');
     if (!drafts.length) { send(a.chat_id, 'No draft is waiting for a decision.'); continue; }
@@ -1725,14 +1772,48 @@ for (const a of asks) {
     continue;
   }
   if (a.cmd === 'tasks') {
-    if (!tasks.length) { send(a.chat_id, 'No open tasks.'); continue; }
-    const body = '<b>Open tasks (' + tasks.length + ')</b>\\n' + tasks.map((t) => tgEscape(line(t))).join('\\n');
+    if (!tasks.length) { send(a.chat_id, 'No open tasks. 🎉'); continue; }
+    const numbered = tasks.map((t, i) => (i + 1) + '. ' + tgEscape(String(t.title || '').slice(0, 70))
+      + (t.to_role && t.to_role !== 'director' ? ' <i>[' + tgEscape(t.to_role) + ']</i>' : '')
+      + (t.payload && t.payload.assigned_name ? ' → <i>' + tgEscape(t.payload.assigned_name) + (t.approval_state === 'pending' ? ' (awaiting)' : '') + '</i>' : '')).join('\\n');
+    // Director: a row of number buttons (tap → the task's action menu), plus a
+    // typed-number / "close N" path. Others: read-only numbered list.
     let keyboard = null;
     if (a.role === 'director') {
-      keyboard = tasks.slice(0, 8).map((t) => [{ text: '✅ Done ' + t.id, callback_data: 'done:' + t.id }, { text: '💤 Snooze ' + t.id, callback_data: 'snooze:' + t.id }]);
-      keyboard.push([{ text: '✅ Clear all ' + tasks.length, callback_data: 'doneall' }]);
+      keyboard = []; let rowB = [];
+      tasks.slice(0, 15).forEach((t, i) => { rowB.push({ text: String(i + 1), callback_data: 'tsel:' + t.id }); if (rowB.length === 5) { keyboard.push(rowB); rowB = []; } });
+      if (rowB.length) keyboard.push(rowB);
     }
-    send(a.chat_id, body + (tasks.length > 8 ? '\\n\\n(Buttons for the first 8 - for the rest reply /done <id> or /snooze <id>.)' : ''), keyboard);
+    const hint = a.role === 'director' ? '\\n\\nTap a number — or reply with the number — to Close / Snooze / Assign it. You can also type "close 2", "snooze 2" or "assign 2".' : '';
+    send(a.chat_id, '<b>Open tasks (' + tasks.length + ')</b>\\n' + numbered + hint, keyboard);
+    continue;
+  }
+  if (a.cmd === 'tpick') {
+    const pick = pickTask(a);
+    if (!pick) { send(a.chat_id, 'That task is no longer open. Send /tasks for the current list.'); continue; }
+    const t = pick.t, n = pick.n;
+    const keyboard = [
+      [{ text: '✅ Close', callback_data: 'tclose:' + t.id }, { text: '💤 Snooze', callback_data: 'tsnz:' + t.id }],
+      [{ text: '👤 Assign for approval', callback_data: 'tasg:' + t.id }],
+      [{ text: '↩ Back to tasks', callback_data: 'tasks' }],
+    ];
+    send(a.chat_id, '▸ <b>Task ' + n + '</b> — ' + tgEscape(String(t.title || '')) + (t.detail ? '\\n' + tgEscape(String(t.detail).slice(0, 300)) : '')
+      + '\\n\\nClose it, snooze to tomorrow, or assign it to someone for approval.\\n(Or type "close ' + n + '" / "snooze ' + n + '" / "assign ' + n + '".)', keyboard);
+    continue;
+  }
+  if (a.cmd === 'tassign') {
+    const pick = pickTask(a);
+    if (!pick) { send(a.chat_id, 'That task is no longer open. Send /tasks for the current list.'); continue; }
+    if (!users.length) { send(a.chat_id, 'No people added yet. Add one with <code>/adduser &lt;chat id&gt; &lt;name&gt;</code> — they open the bot and tap Start to get their chat id.'); continue; }
+    const t = pick.t, n = pick.n;
+    const kb = users.slice(0, 12).map((u, i) => [{ text: (i + 1) + '. ' + (u.name || String(u.chat_id)), callback_data: 'aset:' + t.id + ':' + u.chat_id }]);
+    kb.push([{ text: '↩ Back', callback_data: 'tsel:' + t.id }]);
+    send(a.chat_id, 'Assign <b>Task ' + n + '</b> — ' + tgEscape(String(t.title || '')) + '\\n\\nWho should approve it?', kb);
+    continue;
+  }
+  if (a.cmd === 'users') {
+    if (!users.length) { send(a.chat_id, 'No people added yet.\\n\\nAdd one: <code>/adduser &lt;chat id&gt; &lt;name&gt;</code>\\nThey open the bot and tap Start to get their chat id.'); continue; }
+    send(a.chat_id, '<b>People (' + users.length + ')</b>\\n' + users.map((u, i) => (i + 1) + '. ' + tgEscape(u.name || '(no name)') + ' — <code>' + tgEscape(String(u.chat_id)) + '</code>' + (u.role && u.role !== 'reader' ? ' [' + tgEscape(u.role) + ']' : '')).join('\\n') + '\\n\\nAdd: <code>/adduser &lt;chat id&gt; &lt;name&gt;</code>\\nRemove: <code>/removeuser &lt;chat id&gt;</code>');
     continue;
   }
   if (a.cmd === 'huddle') {
@@ -1842,31 +1923,88 @@ const TENANT = String($env.OFFICE_TENANT_ID || '');
 const H = { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json', Prefer: 'return=representation' };
 const now = new Date().toISOString();
 const tomorrow = isoDate(new Date(istNow().getTime() + 86400000));
-const sb = async (method, pathq, body) => {
-  const res = await this.helpers.httpRequest({ method, url: SB + '/rest/v1/' + pathq, headers: H, body: body ? JSON.stringify(body) : undefined });
+const sb = async (method, pathq, body, prefer) => {
+  const h = prefer ? { ...H, Prefer: prefer } : H;
+  const res = await this.helpers.httpRequest({ method, url: SB + '/rest/v1/' + pathq, headers: h, body: body ? JSON.stringify(body) : undefined });
   if (typeof res === 'string') { try { return JSON.parse(res); } catch (e) { return []; } }
   return res;
 };
-const open = await sb('GET', 'office_tasks?tenant_id=eq.' + TENANT + '&status=in.(open,doing)&select=id,to_role,title,due_on,payload&order=created_at.asc&limit=200');
+const open = await sb('GET', 'office_tasks?tenant_id=eq.' + TENANT + '&status=in.(open,doing)&select=id,to_role,title,detail,source,due_on,payload,approval_state&order=created_at.asc&limit=200');
 const openArr = Array.isArray(open) ? open : [];
 const openIds = new Set(openArr.map((t) => Number(t.id)));
+// resolve a task by explicit id (tap) or typed display number (1-based)
+const resolve = (a) => { if (a.task_id && openIds.has(Number(a.task_id))) return openArr.find((t) => Number(t.id) === Number(a.task_id)); if (a.num && openArr[a.num - 1]) return openArr[a.num - 1]; return null; };
+const usersList = await sb('GET', 'office_bot_users?tenant_id=eq.' + TENANT + '&is_active=eq.true&select=chat_id,name,role');
+const usersArr = Array.isArray(usersList) ? usersList : [];
+const nameOf = (chat) => { const u = usersArr.find((x) => String(x.chat_id) === String(chat)); return u && u.name ? u.name : String(chat); };
 const out = [];
 const seen = new Set();
+const ack = (chat, text) => out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: chat, text: text, parse_mode: 'HTML', disable_web_page_preview: true } } });
 for (const a of asks) {
   if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });
+
+  // ── add / remove a bot user (director only; parse already gated) ──
+  if (a.action === 'adduser') {
+    const chat = String(a.add_chat || '').trim();
+    if (!chat) { ack(a.chat_id, 'Give a numeric chat id: /adduser &lt;chat id&gt; &lt;name&gt;'); continue; }
+    try { await sb('POST', 'office_bot_users?on_conflict=tenant_id,chat_id', { tenant_id: TENANT, chat_id: chat, role: 'reader', name: String(a.add_name || ''), added_by: String(a.chat_id || 'director'), is_active: true, updated_at: now }, 'resolution=merge-duplicates,return=representation');
+      ack(a.chat_id, '✅ Added <b>' + tgEscape(a.add_name || chat) + '</b> (<code>' + tgEscape(chat) + '</code>). They get the morning notes, the read commands, and can be assigned tasks to approve.'); }
+    catch (e) { ack(a.chat_id, 'Could not add that user: ' + tgEscape(String((e && e.message) || e).slice(0, 200))); }
+    continue;
+  }
+  if (a.action === 'removeuser') {
+    const chat = String(a.add_chat || '').trim();
+    try { await sb('PATCH', 'office_bot_users?tenant_id=eq.' + TENANT + '&chat_id=eq.' + encodeURIComponent(chat), { is_active: false, updated_at: now }); ack(a.chat_id, '✅ Removed <code>' + tgEscape(chat) + '</code>.'); }
+    catch (e) { ack(a.chat_id, 'Could not remove that user.'); }
+    continue;
+  }
+
+  // ── assign a task to someone for approval (director) ──
+  if (a.action === 'assign_set') {
+    const t = resolve(a);
+    if (!t) { ack(a.chat_id, 'That task is no longer open. Send /tasks for the current list.'); continue; }
+    const chat = String(a.assignee || ''); const nm = nameOf(chat);
+    try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { approval_state: 'pending', updated_at: now, payload: { ...(t.payload || {}), assigned_to: chat, assigned_name: nm, assigned_by: String(a.chat_id), assigned_at: now } }); }
+    catch (e) { ack(a.chat_id, 'Could not assign that task.'); continue; }
+    ack(a.chat_id, '📨 Assigned to <b>' + tgEscape(nm) + '</b> for approval: ' + tgEscape(String(t.title || '')));
+    out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: chat, parse_mode: 'HTML', disable_web_page_preview: true,
+      text: '📨 <b>For your approval</b>\\n' + tgEscape(String(t.title || '')) + (t.detail ? '\\n' + tgEscape(String(t.detail).slice(0, 400)) : ''),
+      reply_markup: { inline_keyboard: [[{ text: '✅ Approve', callback_data: 'dok:' + t.id }, { text: '❌ Reject', callback_data: 'dno:' + t.id }]] } } } });
+    continue;
+  }
+
+  // ── assignee (or director) approves / rejects an assigned task ──
+  if (a.action === 'dok' || a.action === 'dno') {
+    const t = resolve(a);
+    if (!t) { ack(a.chat_id, 'That task is no longer open.'); continue; }
+    const assigned = String((t.payload || {}).assigned_to || '');
+    const isDirector = tgRoleOf(a.chat_id) === 'director';
+    if (!isDirector && String(a.chat_id) !== assigned) { ack(a.chat_id, 'That task is not assigned to you.'); continue; }
+    const approve = a.action === 'dok';
+    const patch = approve
+      ? { approval_state: 'approved', status: 'done', decided_by: nameOf(a.chat_id), decided_at: now, updated_at: now, payload: { ...(t.payload || {}), approved_by: String(a.chat_id), approved_at: now } }
+      : { approval_state: 'rejected', status: 'open', updated_at: now, payload: { ...(t.payload || {}), rejected_by: String(a.chat_id), rejected_at: now } };
+    try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, patch); } catch (e) { ack(a.chat_id, 'Could not record that.'); continue; }
+    ack(a.chat_id, (approve ? '✅ You approved: ' : '🚫 You rejected: ') + tgEscape(String(t.title || '')));
+    if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, (approve ? '✅ ' : '🚫 ') + tgEscape(nameOf(a.chat_id)) + (approve ? ' approved' : ' rejected') + ' task #' + t.id + ' — ' + tgEscape(String(t.title || '')));
+    continue;
+  }
+
+  // ── close / snooze / clear-all (director) ──
   let ids = [];
   if (a.action === 'doneall') ids = openArr.map((t) => Number(t.id));
-  else if (a.task_id && openIds.has(Number(a.task_id))) ids = [Number(a.task_id)];
-  if (!ids.length) { out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: a.chat_id, text: a.task_id ? 'No open task #' + a.task_id + '.' : 'No open tasks to clear.' } } }); continue; }
-  let done = 0;
+  else { const t = resolve(a); if (t) ids = [Number(t.id)]; }
+  if (!ids.length) { ack(a.chat_id, a.num ? ('No task ' + a.num + ' — send /tasks for the list.') : (a.task_id ? 'No open task #' + a.task_id + '.' : 'No open tasks.')); continue; }
+  let done = 0; let dispNum = null;
   for (const id of ids) {
     if (seen.has(id)) continue; seen.add(id);
-    const cur = openArr.find((t) => Number(t.id) === id) || {};
+    const idx = openArr.findIndex((t) => Number(t.id) === id); if (dispNum == null) dispNum = idx + 1;
+    const cur = openArr[idx] || {};
     const patch = a.action === 'snooze' ? { due_on: tomorrow, updated_at: now, payload: { ...(cur.payload || {}), snoozed_until: tomorrow, snoozed_by: 'director' } } : { status: 'done', decided_by: 'director', decided_at: now, updated_at: now };
     try { await sb('PATCH', 'office_tasks?id=eq.' + id + '&tenant_id=eq.' + TENANT, patch); done += 1; } catch (e) {}
   }
-  const label = a.action === 'doneall' ? ('Cleared ' + done + ' open task' + (done === 1 ? '' : 's') + '.') : (a.action === 'snooze' ? ('Task #' + ids[0] + ' snoozed to ' + tomorrow + '.') : ('Task #' + ids[0] + ' closed.'));
-  out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: a.chat_id, text: '✅ ' + label } } });
+  const label = a.action === 'doneall' ? ('Cleared ' + done + ' open task' + (done === 1 ? '' : 's') + '.') : (a.action === 'snooze' ? ('Task ' + dispNum + ' snoozed to ' + tomorrow + '.') : ('Task ' + dispNum + ' closed.'));
+  ack(a.chat_id, '✅ ' + label);
 }
 return out;
 })();
