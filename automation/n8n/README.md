@@ -6,19 +6,23 @@ and driven by Claude. Phase 1 gives the school two employees and a daily meeting
 | Employee | Workflow | Runs | Models |
 |---|---|---|---|
 | **Receptionist** | `workflows/receptionist.json` | every minute (Gmail poll) + every 5 min (approvals) | Haiku 5.5 sorts, Sonnet 5.5 drafts |
-| **Academic Incharge** | `workflows/academic-incharge.json` | 06:00 IST daily | Sonnet 5.5 |
+| **Academic Incharge** | `workflows/academic-incharge.json` | 08:30 IST daily | Sonnet 5.5 |
+| **Marketing Manager** | `workflows/marketing-manager.json` | 06:00 IST Monday | Sonnet 5.5 |
 | **Morning huddle** (chair + roster) | `workflows/morning-huddle.json` | 06:30 IST daily | Sonnet 5.5 |
 
-They coordinate through four `office_*` tables in the ERP's Supabase project
-(migration `supabase/migrations/20261021120000_office_staff_room.sql`), talk to
-the school only through the ERP's own routes, and every message to a parent or
-vendor waits for the director's **APPROVE** on WhatsApp.
+They coordinate through the `office_*` tables in the ERP's Supabase project
+(migrations `supabase/migrations/20261021120000_office_staff_room.sql` and
+`20261028170000_office_marketing_budget.sql`), talk to the school only through
+the ERP's own routes, and every message to a parent or vendor — and every
+rupee of marketing spend — waits for the director's **APPROVE** on Telegram
+(WhatsApp before the bot token is set).
 
 ```
 Gmail inbox ──▶ Receptionist ──┬─▶ office_tasks (draft, pending) ──▶ director on WhatsApp ──APPROVE──▶ Gmail reply
                                ├─▶ office_tasks (CBSE/UDISE → academic_incharge)
                                └─▶ office_notes
 ERP tables (leave, attendance, timetable) ──▶ Academic Incharge ──▶ office_notes + WhatsApp plan + office_tasks (director)
+budget caps + 15km villages + leads + survey + Google Ads ──▶ Marketing Manager ──▶ office_notes + office_tasks (pending: spend/copy/beats) ──▶ director Approve/Reject
 office_notes + office_tasks ──▶ Morning huddle (chair → each employee → chair) ──▶ office_meetings + office_tasks + WhatsApp minutes
 every Claude call ──▶ office_ai_usage (tokens, estimated USD)
 ```
@@ -129,7 +133,12 @@ tunnel or domain is settled.
 supabase db push
 ```
 
-or paste `supabase/migrations/20261021120000_office_staff_room.sql` into the SQL editor. It is additive and safe to re-run.
+or paste `supabase/migrations/20261021120000_office_staff_room.sql` and
+`supabase/migrations/20261028170000_office_marketing_budget.sql` into the SQL
+editor. Both are additive and safe to re-run. The second adds the
+`office_marketing_budget` table (monthly per-unit, per-channel caps for the
+Marketing Manager) and widens the `office_tasks.source` check to allow
+`marketing` and `assistant`.
 
 **Import** the three workflows. Either in the editor (*Workflows → Import from file*, one by one) or from the VM in one go:
 
@@ -178,7 +187,7 @@ existed is ignored, and each draft is decided once.
 
 ### Academic Incharge (`workflows/academic-incharge.json`)
 
-06:00 IST. Reads, for today:
+08:30 IST (after the morning register is marked). Reads, for today:
 
 - approved `staff_leave_requests` covering today;
 - today's `staff_attendance_desk_registers` row and its `_marks` with status `A` (absent), `L` (late), `LE` (left early) — if the register is not marked yet, the plan says so;
@@ -201,6 +210,52 @@ The ERP's own `/api/ai/substitution-summary` route stays as it is: it needs a
 staff login and summarises a substitution the office already saved. This
 workflow reads the same tables the timetable desk writes and never writes
 them; arranging the substitution in the ERP remains the office's click.
+
+### Marketing Manager (`workflows/marketing-manager.json`)
+
+06:00 IST every **Monday** (before the 06:30 huddle). Runs the school's and
+the ITI's outreach — the two are one Google Ads account but never blended;
+every line is labelled `school` or `iti`. Reads, for the week:
+
+- `office_marketing_budget` — the monthly per-unit, per-channel caps the
+  director set (and the Manager's own allocations within them);
+- **Google Ads** — best effort: campaign cost, clicks and conversions for the
+  shared account (`290-560-8492`) over the last 30 days, split into school/ITI
+  by campaign name until proper labels are applied. The account is **paused
+  for advertiser verification** and no service-account key is on the VM yet,
+  so until both are done this reads `pending` and the note says *"Google Ads:
+  not known — waiting on verification/keys"* — it never invents a number. Set
+  the `GOOGLE_ADS_*` values in `.env` (see §2) to turn it on;
+- `village_travel` + `village_demographics` — the ~226 villages within 15 km
+  by road, with census child population, ranked for the beat plan;
+- `admission_lead_market_state` — past enquiries counted per village;
+- `admission_desk_leads` — enquiries by source over 30/7 days (for cost per
+  lead; paid-channel attribution is "not known" until ads run);
+- `survey_days` / `survey_captures` / `admission_survey_beats` — the last
+  fortnight's field survey and the active beats;
+- any director-approved cap change, and its own open `office_tasks`.
+
+**Claude Sonnet** returns the weekly review: cost per lead by unit and channel,
+spend against budget, a **ranked 15 km survey-beat plan** (child population +
+past enquiries), and Meta / WhatsApp campaign drafts. Then:
+
+- one `office_notes` row (`role = marketing_manager`) with the numbers in
+  `facts` — this is what `/marketing` reads;
+- within an **existing** cap the Manager writes its own allocation to
+  `office_marketing_budget` (an office table; no money moves); it also applies
+  a director-approved cap change there (idempotent). Raising a cap, adding a
+  channel, or spending where no cap is set is **not** done on its own;
+- every spend, ad copy and beat assignment is one `office_tasks` row
+  (`source = marketing`, `approval_state = pending`) with its own ✅ Approve /
+  ❌ Reject on Telegram — approving records the go-ahead (nothing publishes
+  from n8n; a person, or a later phase, acts);
+- the weekly note and a **📋 Open tasks** button go to the director and the
+  principal.
+
+Click-to-WhatsApp enquiries are **not** answered here — they route to the
+Receptionist / admissions. The ERP's own `/api/ai/marketing-content` route
+(staff login, `admissions:edit`) is the human-facing counterpart that drafts
+and then cross-posts; this workflow only drafts for the director's approval.
 
 ### Morning huddle (`workflows/morning-huddle.json`)
 
@@ -227,7 +282,7 @@ draft is a no-op). One poller per bot: never set a webhook on
    typed `APPROVE 42` / `REJECT 42` (same words as the WhatsApp poller: `ok`,
    `yes`, `haan`, `ठीक`, `no`, `nahi`, `नहीं`; a bare `APPROVE` when exactly one
    draft is pending). From either chat: `/drafts`, `/tasks` (or the **📋 Open
-   tasks** button), `/huddle`, `/plan`, `/start`, `/help`. Any other chat gets
+   tasks** button), `/huddle`, `/plan`, `/marketing`, `/start`, `/help`. Any other chat gets
    nothing — except its chat id in answer to `/start`, which is how the two
    ids are found.
 2. A decision: `Fetch: pending drafts` → `Match: decisions` → approve: **Gmail:
@@ -239,9 +294,11 @@ draft is a no-op). One poller per bot: never set a webhook on
    keyboard disappears), a typed decision gets a reply. "No draft #99 is
    waiting." / "Draft #42 is already decided." when it is not pending.
 3. Commands: `/drafts` lists pending drafts (with ✅/❌ buttons per draft for
-   the director); `/tasks` lists open `office_tasks`; `/huddle` the latest
+   the director); `/tasks` lists open `office_tasks` (the director gets ✅ Done / 💤 Snooze buttons per task and a ✅ Clear-all button; or reply `/done <id>`, `/snooze <id>`, `/done all`); `/huddle` the latest
    minutes and decisions; `/plan` today's latest Academic Incharge note, or
-   "No plan yet today — last plan <date>".
+   "No plan yet today — last plan <date>"; `/marketing` the latest weekly
+   marketing note — cost per lead by unit, spend vs the month's budget caps,
+   and this week's ranked survey beats.
 
 The Telegram calls are plain HTTP Request nodes against
 `api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/…` (`$env`, no n8n credential), so
@@ -251,7 +308,7 @@ token in it.
 
 ## 5. Guardrails
 
-- **No direct ERP writes.** The workflows write exactly four tables: `office_tasks`, `office_notes`, `office_meetings`, `office_ai_usage`. ERP data (timetable, attendance, leave, fees, admissions, students, staff) is read-only to them; a change there goes through the ERP's screens and authenticated routes, by a person. The service-role key is in n8n because PostgREST has no narrower key; the convention is enforced by review of `scripts/build-workflows.mjs`, where every `sbInsert` / `sbPatchTask` names its table.
+- **No direct ERP writes.** The workflows write only the office tables: `office_tasks`, `office_notes`, `office_meetings`, `office_ai_usage`, and `office_marketing_budget` (the Marketing Manager's own allocations within director-set caps). ERP data (timetable, attendance, leave, fees, admissions, students, staff, villages, leads, survey) is read-only to them; a change there goes through the ERP's screens and authenticated routes, by a person. The service-role key is in n8n because PostgREST has no narrower key; the convention is enforced by review of `scripts/build-workflows.mjs`, where every `sbInsert` / `sbPatchTask` names its table.
 - **Approval gate.** Anything addressed to a parent, a vendor, an official or the public is an `office_tasks` row with `approval_state = pending` and goes nowhere until the director taps **✅ Approve** (or replies `APPROVE <id>`) on Telegram — on WhatsApp before the bot token is set. Internal messages (the 6 am plan, the huddle minutes, acknowledgements) go to the director/principal only and are not gated.
 - **Telegram for internal messages only.** The bot talks to two chat ids and nothing else; a decision is accepted from the director's chat alone. No parent, vendor or official is ever messaged on Telegram.
 - **WhatsApp only through the ERP.** `POST /api/wa/dispatch` with `x-wa-dispatch-secret`; the ERP applies opt-outs, the 24-hour rule and logs the message in `wa_messages`. No Meta token lives in n8n.
@@ -321,6 +378,7 @@ automation/n8n/
 │   ├── _house-rules.md       prepended to every role: grounding, who decides, tone, safety
 │   ├── receptionist.md
 │   ├── academic-incharge.md
+│   ├── marketing-manager.md
 │   ├── chair.md
 │   └── office-approval-template.json   the Meta template for WhatsApp approvals outside the 24 h window (§9)
 ├── scripts/
@@ -329,8 +387,9 @@ automation/n8n/
 └── workflows/
     ├── receptionist.json
     ├── academic-incharge.json
+    ├── marketing-manager.json     Monday 06:00: budget, Google Ads, beats, campaign drafts
     ├── morning-huddle.json
-    └── telegram-office-bot.json   polls @BHB_Office_bot: decisions and commands
+    └── telegram-office-bot.json   polls @BHB_Office_bot: decisions and commands (incl. /marketing)
 ```
 
 Validation done on 21 Oct 2026: `check-workflows.mjs` passes; the three JSON
@@ -398,6 +457,7 @@ this workflow is imported — the poller selects `button_id`.
    tasks - open office tasks
    huddle - this morning's minutes
    plan - today's substitution plan
+   marketing - cost per lead, spend vs budget, this week's beats
    help - what this bot does
    ```
 3. Open the bot from the director's phone and send `/start`; it answers with
