@@ -1953,6 +1953,26 @@ shows "Receipt details", fresh stack) — pre-existing locally, CI decides. Fee 
 `test:desk-load-guard` (verify.sh, not CI) fails on origin/main too. `apps/web/scripts/qa-curriculum-pass.mts` still
 imports `saveMasters` (scripts are left alone; it no longer runs). Production log line not yet measured
 (`masters-desk-post-gone` count after deploy).
+*(2.2f PR B built 28 Oct 2026, PR #720 — server Masters writers on the batch kernel; no migration.)*
+- **Subject-request approval** (Masters → Subjects → Requests, `POST /api/masters/subject-requests`): the subjects and
+  class links the approval adds / changes / removes are planned on the elements as stored now and written as ONE
+  all-or-none batch (`diffMastersLists` → `writeMastersChangesServer` → `repo.writeMastersBatch`); before, the whole
+  book went through `pushMastersDeskToDb` (every slice re-written). Re-read and re-planned up to three times on a refusal.
+  The staff app's endpoint (`/api/v1/staff/subject-requests`, filing and withdrawing — `api_client.dart`
+  `fetchSubjectRequests` / `postSubjectRequest`) is unchanged; it never wrote Masters.
+- **ensureDeskCutover** no longer seeds an empty masters shell over an empty desk (R6); masters is "skip" there.
+- **`deskOpsLoad.saveOpsMasters` deleted** — its only caller was `apps/web/scripts/import-fee-discounts-excel.ts`
+  (left alone, not run; it now fails at that call before writing, and already passed one argument of two).
+  `pushMastersDeskToDb` stays for `e2e/seed.ts` and the seed / backfill scripts only.
+- `mastersRevisionEverywhere.selftest` asserts the two files no longer call `pushMastersDeskToDb`.
+**Proof.** `e2e/specs/subject-request-approval.spec.ts` (project `propagation`): the teacher files "add <subject>" through
+the staff app's endpoint, the principal approves; the link is stored as a kernel element and ONLY the `classSubjects` slice
+stamp moved. **Fail-on-old** (origin/main 2c5d822c, same stack): 28 slices moved (the whole book — midYearFeePolicy,
+schoolTiming, campuses, feeHeads …). This branch: 1/1.
+**Behaviour changes users will notice.** None on screen. An approval made while someone edits an unrelated part of Masters
+no longer conflicts.
+**Not proven.** A "remove" approval (several link deletes in one batch) is not exercised by a spec. The ensure-desk path for
+a brand-new school (empty masters desk) is not run on the stack.
 
 **2.3a Delete the gate and the events.** With every component reader on hooks: delete
 `CoreDataGate` (React Query's loading state replaces it), the `bhb-masters-updated` /
