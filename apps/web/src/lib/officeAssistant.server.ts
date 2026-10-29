@@ -288,7 +288,9 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
         await ensureSchoolMirrorHydrated();
         const classLabel = input.class_label ? String(input.class_label).toLowerCase() : null;
         const limit = Math.max(1, Math.min(100, Number(input.limit) || 20));
-        let list = listLiveDefaulters();
+        // Masters as data from the server's reference copy (data-layer 2.3b;
+        // was this process's mirror, loadMasters() inside listLiveDefaulters).
+        let list = listLiveDefaulters({ masters: await loadServerMasters() });
         if (classLabel) list = list.filter((d) => (d.classLabel || "").toLowerCase().includes(classLabel));
         if (!list.length) return { text: classLabel ? "No defaulters in that class." : "No defaulters on record." };
         const shown = list.slice(0, limit);
@@ -300,7 +302,7 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
         if (!sis) return { text: "The student roster is unavailable right now." };
         const matches = findStudents(String(input.query || ""), sis, masters);
         if (!matches.length) return { text: "No student matches that name or admission number." };
-        const defaulters = listLiveDefaulters();
+        const defaulters = listLiveDefaulters({ masters });
         const lines = matches.map((m) => {
           const due = defaulters.find((d) => d.studentId === m.id);
           const mobile = householdMobileFor(m.householdId, sis);
@@ -365,7 +367,7 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
           if (kind === "collection" || kind === "attendance" || kind === "defaulters") {
             await ensureSchoolMirrorHydrated();
             const snap = await buildPrincipalSnapshot();
-            const defaulters = kind === "defaulters" ? listLiveDefaulters() : [];
+            const defaulters = kind === "defaulters" ? listLiveDefaulters({ masters }) : [];
             const table = makeReportTable(kind, snap, defaulters, todayIso);
             const buf = await renderTableReportPdf(table, { requestedBy: "Director", channel: "whatsapp", atIso: new Date().toISOString() }, masters);
             pending.file = { caption: table.summary, fileBase64: Buffer.from(buf).toString("base64"), mime: "application/pdf", filename: table.filename };
@@ -409,7 +411,7 @@ function buildToolExecutor(pending: Pending, todayIso: string): RunTool {
           const m = findStudents(String(input.student_query), sis, masters, 1)[0];
           if (!m) return { text: "No student matches that name or admission number." };
           const mobile = householdMobileFor(m.householdId, sis);
-          const defaulters = listLiveDefaulters();
+          const defaulters = listLiveDefaulters({ masters });
           const due = defaulters.find((d) => d.studentId === m.id);
           const body = custom || `This is a gentle reminder regarding the pending school fees for ${m.name}${due ? ` (${rupees(due.overdueAmountPaise)} overdue)` : ""}. Kindly clear at your earliest convenience. Thank you.`;
           pending.draft = {

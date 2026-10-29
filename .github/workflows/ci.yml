@@ -519,6 +519,7 @@ jobs:
           npm run test:duty-roster
           npm run test:email
           npm run test:exam-invigilation
+          npm run test:timetable-substitution
           npm run test:exams
           npm run test:exam-date-sheet
           npm run test:parent-results
@@ -729,6 +730,7 @@ jobs:
           npm run test:versions-route
           npm run test:query-kernel
           npm run test:access-copy
+          npm run test:rbac-guard-access
           npm run test:view-load-metric
           npm run test:reference-views
           npm run test:masters-bridge
