@@ -138,7 +138,7 @@ export function ChatsPanel({
           </ul>
         )}
       </div>
-      <div className={compact ? (side ? "flex min-h-0 flex-1 flex-col" : "hidden") : side ? "" : "hidden md:block"}>
+      <div className={compact ? (side ? "flex min-h-0 flex-1 flex-col" : "hidden") : side ? "min-w-0" : "hidden min-w-0 md:block"}>
         {picking === "group" ? (
           <GroupMaker
             compact={compact}
@@ -214,7 +214,7 @@ function Thread({ id, studentId, compact, onBack, onSent }: { id: string; studen
     setNotice(r.ok ? { kind: "ok", text: `${label} ${mode === "mute" ? "muted" : "blocked"}. Lift it under Mute & block.` } : { kind: "error", text: r.error });
   }
   return (
-    <div className={`${card} flex ${compact ? "min-h-0 flex-1" : "h-[70vh]"} flex-col`} data-testid="school-chat-thread">
+    <div className={`${card} flex min-w-0 ${compact ? "min-h-0 flex-1" : "h-[70vh]"} flex-col`} data-testid="school-chat-thread">
       <div className="flex items-center gap-2 border-b border-[var(--border)] p-3">
         <button type="button" className={`${btn} ${compact ? "" : "md:hidden"}`} onClick={onBack}>
           Back
@@ -497,7 +497,6 @@ function WorkCardView({ card: c, mine, onWithdraw }: { card: NonNullable<Message
       </p>
       <p className="font-semibold">{c.title}</p>
       {c.body && c.body !== c.title ? <p className="whitespace-pre-wrap break-words">{c.body}</p> : null}
-      {c.bodyHi ? <p className="whitespace-pre-wrap break-words opacity-90">{c.bodyHi}</p> : null}
       {c.dueAt ? <p className="text-xs font-semibold">Due {c.dueAt}</p> : null}
       {c.attachments.length ? (
         <ul className="space-y-0.5 text-xs">
@@ -604,7 +603,7 @@ function WorkComposer({
   }
 
   return (
-    <div className="space-y-2 border-t border-[var(--border)] p-3 text-sm" data-testid="school-chat-work-composer">
+    <div className="min-w-0 max-h-[60%] space-y-2 overflow-y-auto border-t border-[var(--border)] p-3 text-sm" data-testid="school-chat-work-composer">
       <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="What to post">
         {(["homework", "classwork", "notice"] as const).map((k) => (
           <button
@@ -632,14 +631,14 @@ function WorkComposer({
       <input aria-label="Title" className={field} maxLength={140} placeholder={kind === "homework" ? "e.g. Ex 5.2, Q1–5" : kind === "classwork" ? "What was done in class" : "Notice title"} value={title} onChange={(e) => setTitle(e.target.value)} />
       <textarea aria-label="Details" className={`${field} min-h-[60px]`} maxLength={1800} placeholder="Details (optional)" value={body} onChange={(e) => setBody(e.target.value)} />
       {kind === "homework" ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="flex items-center gap-1 text-xs text-[var(--muted)]">
+        <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+          <label className="flex min-w-0 items-center gap-2 text-xs text-[var(--muted)]">
             Due
-            <input aria-label="Due date" type="date" className={`${field} w-auto`} value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
+            <input aria-label="Due date" type="date" className={`${field} min-w-0 flex-1`} value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
           </label>
-          <label className="text-xs text-[var(--muted)]">
-            <span className="mr-1">Photo / PDF</span>
-            <input aria-label="Attachments" type="file" accept={ATTACH_ACCEPT} multiple onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, 5))} />
+          <label className="block min-w-0 text-xs text-[var(--muted)]">
+            <span className="mb-0.5 block">Photo / PDF (up to 5)</span>
+            <input aria-label="Attachments" type="file" className="block w-full max-w-full text-xs" accept={ATTACH_ACCEPT} multiple onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, 5))} />
           </label>
         </div>
       ) : null}
@@ -648,7 +647,7 @@ function WorkComposer({
           {error}
         </p>
       ) : null}
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         <button type="button" className={btn} onClick={onClose}>
           Cancel
         </button>

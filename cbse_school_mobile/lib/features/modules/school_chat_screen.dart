@@ -6,6 +6,7 @@ import "../../core/api/api_client.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/theme/app_theme.dart";
 import "chat_inbox_screen.dart";
+import "homework_screen.dart";
 import "module_shell.dart";
 
 /// School chat — one screen for both apps (it imports nothing under
@@ -359,6 +360,74 @@ class _SchoolChatThreadScreenState extends State<SchoolChatThreadScreen> {
     }
   }
 
+  /// Homework (the Homework screen's own compose — Scan page, Upload file),
+  /// classwork or a notice. All three land in this chat; homework and
+  /// classwork are the Homework module's records.
+  Future<void> _postWork(SchoolChatCompose compose) async {
+    final hindi = Localizations.localeOf(context).languageCode == "hi";
+    final kind = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              key: const Key("school-chat-post-homework"),
+              leading: const Icon(Icons.menu_book_outlined),
+              title: Text(hindi ? "गृहकार्य" : "Homework"),
+              subtitle: Text(
+                hindi
+                    ? "स्कैन, फ़ाइल, नियत तिथि"
+                    : "Scan page, upload file, due date",
+              ),
+              onTap: () => Navigator.pop(context, "homework"),
+            ),
+            ListTile(
+              key: const Key("school-chat-post-classwork"),
+              leading: const Icon(Icons.edit_note_outlined),
+              title: Text(hindi ? "कक्षा कार्य" : "Classwork"),
+              onTap: () => Navigator.pop(context, "classwork"),
+            ),
+            ListTile(
+              key: const Key("school-chat-post-notice"),
+              leading: const Icon(Icons.campaign_outlined),
+              title: Text(hindi ? "सूचना" : "Notice"),
+              onTap: () => Navigator.pop(context, "notice"),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || kind == null) return;
+    final parts = widget.conversationId.split(":");
+    if (kind == "homework") {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => HomeworkScreen(
+            api: widget.api,
+            subtitle: widget.title,
+            classId: parts.length > 3 ? parts[2] : null,
+            sectionId: parts.length > 3 ? parts[3] : null,
+            canPost: true,
+          ),
+        ),
+      );
+      await _load();
+      return;
+    }
+    final posted = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _WorkSheet(
+        api: widget.api,
+        conversationId: widget.conversationId,
+        kind: kind,
+        compose: compose,
+      ),
+    );
+    if (posted == true) await _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
@@ -366,6 +435,15 @@ class _SchoolChatThreadScreenState extends State<SchoolChatThreadScreen> {
     final family = widget.studentId != null;
     return Scaffold(
       appBar: AppBar(
+        actions: [
+          if (t?.compose != null)
+            IconButton(
+              key: const Key("school-chat-post-work"),
+              tooltip: "Homework / classwork / notice",
+              onPressed: () => _postWork(t!.compose!),
+              icon: const Icon(Icons.post_add, color: Colors.white),
+            ),
+        ],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -552,13 +630,32 @@ class _Bubble extends StatelessWidget {
                 m.senderLabel,
                 style: AppText.labelSmall.copyWith(color: AppColors.accent),
               ),
-            Text(
-              m.removed ? l.schoolChatRemoved : m.body,
-              style: AppText.bodyMedium.copyWith(
-                color: fg,
-                fontStyle: m.removed ? FontStyle.italic : null,
+            if (m.card != null)
+              _CardBody(card: m.card!, fg: fg)
+            else if (m.isNotice) ...[
+              Text(
+                "NOTICE",
+                key: const Key("school-chat-notice-card"),
+                style: AppText.labelSmall.copyWith(
+                  color: mineVisible ? Colors.white70 : AppColors.accent,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
+              Text(
+                m.body.substring(8),
+                style: AppText.bodyMedium.copyWith(
+                  color: fg,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ] else
+              Text(
+                m.removed ? l.schoolChatRemoved : m.body,
+                style: AppText.bodyMedium.copyWith(
+                  color: fg,
+                  fontStyle: m.removed ? FontStyle.italic : null,
+                ),
+              ),
             if (m.held) ...[
               const SizedBox(height: 4),
               Row(
@@ -608,3 +705,175 @@ Widget staffSchoolChat(ApiClient api) => Builder(
     classTeacherThreadLabel: context.l10n.schoolChatParentInbox,
   ),
 );
+
+/// A homework / classwork card in a bubble.
+class _CardBody extends StatelessWidget {
+  const _CardBody({required this.card, required this.fg});
+  final SchoolChatCard card;
+  final Color fg;
+
+  @override
+  Widget build(BuildContext context) {
+    final hindi = Localizations.localeOf(context).languageCode == "hi";
+    final head = card.isHomework
+        ? (hindi ? "गृहकार्य" : "HOMEWORK")
+        : (hindi ? "कक्षा कार्य" : "CLASSWORK");
+    return Column(
+      key: Key("school-chat-card-${card.refId}"),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          card.subject.isEmpty ? head : "$head · ${card.subject}",
+          style: AppText.labelSmall.copyWith(
+            color: fg.withValues(alpha: 0.8),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        Text(
+          card.title,
+          style: AppText.bodyMedium.copyWith(
+            color: fg,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        if (card.body.isNotEmpty && card.body != card.title)
+          Text(card.body, style: AppText.bodyMedium.copyWith(color: fg)),
+        if (card.dueAt.isNotEmpty)
+          Text(
+            hindi ? "नियत: ${card.dueAt}" : "Due ${card.dueAt}",
+            key: const Key("school-chat-card-due"),
+            style: AppText.labelSmall.copyWith(
+              color: fg,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        if (card.attachments > 0)
+          Text(
+            hindi
+                ? "${card.attachments} फ़ाइल — गृहकार्य में खोलें"
+                : "${card.attachments} file${card.attachments == 1 ? "" : "s"} — open in Homework",
+            style: AppText.labelSmall.copyWith(color: fg),
+          ),
+      ],
+    );
+  }
+}
+
+/// Classwork or a notice: a title and the details.
+class _WorkSheet extends StatefulWidget {
+  const _WorkSheet({
+    required this.api,
+    required this.conversationId,
+    required this.kind,
+    required this.compose,
+  });
+  final ApiClient api;
+  final String conversationId;
+  final String kind;
+  final SchoolChatCompose compose;
+
+  @override
+  State<_WorkSheet> createState() => _WorkSheetState();
+}
+
+class _WorkSheetState extends State<_WorkSheet> {
+  final _title = TextEditingController();
+  final _body = TextEditingController();
+  late String _subject = widget.compose.fixedSubject;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _body.dispose();
+    super.dispose();
+  }
+
+  Future<void> _post() async {
+    if (_title.text.trim().isEmpty || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.api.postSchoolChatWork(
+        conversationId: widget.conversationId,
+        kind: widget.kind,
+        title: _title.text.trim(),
+        body: _body.text.trim(),
+        subjectId: _subject.isEmpty ? null : _subject,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = context.l10n.couldNotSendCheckYourConnection);
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final notice = widget.kind == "notice";
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        16,
+        16,
+        16 + MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(notice ? "Notice" : "Classwork", style: AppText.titleMedium),
+          if (!notice &&
+              widget.compose.subjects.isNotEmpty &&
+              widget.compose.fixedSubject.isEmpty)
+            DropdownButton<String>(
+              key: const Key("school-chat-work-subject"),
+              isExpanded: true,
+              value: _subject,
+              items: [
+                const DropdownMenuItem(value: "", child: Text("No subject")),
+                for (final s in widget.compose.subjects)
+                  DropdownMenuItem(value: s.id, child: Text(s.name)),
+              ],
+              onChanged: (v) => setState(() => _subject = v ?? ""),
+            ),
+          TextField(
+            key: const Key("school-chat-work-title"),
+            controller: _title,
+            maxLength: 140,
+            decoration: InputDecoration(
+              labelText: notice ? "Notice title" : "What was done in class",
+            ),
+          ),
+          TextField(
+            key: const Key("school-chat-work-body"),
+            controller: _body,
+            minLines: 2,
+            maxLines: 5,
+            maxLength: 1800,
+            decoration: const InputDecoration(labelText: "Details (optional)"),
+          ),
+          if (_error != null)
+            Text(
+              _error!,
+              style: AppText.bodySmall.copyWith(color: AppColors.danger),
+            ),
+          const SizedBox(height: 8),
+          FilledButton(
+            key: const Key("school-chat-work-post"),
+            onPressed: _busy ? null : _post,
+            child: Text(_busy ? "Posting…" : "Post"),
+          ),
+        ],
+      ),
+    );
+  }
+}

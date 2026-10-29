@@ -226,6 +226,11 @@ test.describe.serial("chat-homework: one record with the Homework module", () =>
         await composer.getByLabel("Subject").selectOption(MATH);
         await composer.getByLabel("Title").fill(`Colour page 4 ${v.name} ${tag}`);
         await composer.getByLabel("Due date").fill("2026-11-03");
+        // Every control of the composer is on the screen, not off its right edge.
+        for (const el of [composer.getByRole("button", { name: "Post" }), composer.getByLabel("Details"), composer.getByLabel("Attachments")]) {
+          const box = await el.boundingBox();
+          expect(box && box.x + box.width, "inside the screen").toBeLessThanOrEqual(v.viewport.width + 1);
+        }
         await page.screenshot({ path: testInfo.outputPath(`chat-homework-composer-${v.name}.png`) });
         await testInfo.attach(`composer-${v.name}`, { path: testInfo.outputPath(`chat-homework-composer-${v.name}.png`), contentType: "image/png" });
         await composer.getByRole("button", { name: "Post" }).click();
