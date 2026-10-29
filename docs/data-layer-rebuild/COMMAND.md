@@ -2071,12 +2071,17 @@ comms desk lands (it waits in the hydration queue behind the boot hydrates); the
 appeared ~1 s in and pushed the screen down ~41 px between a tap's press and its release, so the tap did nothing. On CI
 (where parent-web-tabs has seeded a staff notice before the write projects run — locally, without it, there is no strip)
 this was every "random" propagation / masters-element-writes / staff-month-register failure of 28–29 Oct: the Playwright
-trace's DOM snapshot before each lost click has no strip and the one after it has. `CommsRunningStrip` now draws its bar
-(empty, `aria-hidden`, a notice's exact line box) from the first paint until the desk has answered; a school with no
-notices loses the bar once that is known. `shell-no-shift.spec` (desktop) holds the comms desk back until the screen is up,
-then proves the step tab does not move and a press held while the strip lands still selects (both fail on main: 41.5 px,
-tap lost). `masters-overlay` blocks the app's service worker: it claims the page ~0.5 s in, and Playwright's `page.route`
-cannot see past it (the refused-save case had its 409 bypassed and saved for real).
+trace's DOM snapshot before each lost click has no strip and the one after it has. Fix: `ShellDataWait` also waits (at
+most 5 s, never blocking on failure) for the comms read the strip draws from — `staffNoticesLanded()` in
+`CommsRunningStrip`, one shared promise per tab, read outside the hydration queue — so the strip takes its final shape
+(notices, or no bar) in the render that shows the screen; past the 5 s cap the strip draws an empty bar of a notice's
+exact line box (`aria-hidden`) that the notices fill without moving anything. (A first cut with the empty bar alone
+collapsed it when the school has no notices, moving every screen UP 41 px — the desktop project on CI.) Only a school with
+no notices whose comms read takes over 5 s still loses a bar under an open screen. `shell-no-shift.spec` (desktop): the
+comms desk held back with a notice → the step tab does not move and a press held while the strip lands still selects
+(both fail on main: 41.5 px, tap lost); no notices, answering 1.5 s late → the screen does not move (fails on the first
+cut: 41.5 px up). `masters-overlay` blocks the app's service worker: it claims the page ~0.5 s in, and Playwright's
+`page.route` cannot see past it (the refused-save case had its 409 bypassed and saved for real).
 
 **2.3b Delete the four core hydrate tasks and the bridge.** Gated on the all-of-src
 `loadMasters(` occurrence ratchet reaching 0 (the 107 `lib/` readers converted to take `masters`
