@@ -519,6 +519,7 @@ jobs:
           npm run test:duty-roster
           npm run test:email
           npm run test:exam-invigilation
+          npm run test:timetable-substitution
           npm run test:exams
           npm run test:exam-date-sheet
           npm run test:parent-results
