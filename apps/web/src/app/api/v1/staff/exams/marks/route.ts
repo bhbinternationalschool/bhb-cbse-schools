@@ -82,6 +82,9 @@ export async function POST(request: Request) {
     await Promise.all([ensureSisHydratedServer(), ensureExamsHydratedServer()]);
     const ay = scope.academicYearCode;
     const state = loadExams();
+    // The register, read once from the server's hydrated cache and shared by
+    // both save paths (prepareMarkSheet needs it for either).
+    const sis = loadSis();
 
     // Co-scholastic grading: letters saved to the sheet's own co-scholastic
     // list (never among the marks, so numeric entry is untouched). Section
@@ -118,7 +121,7 @@ export async function POST(request: Request) {
         },
         state,
         existing,
-        { masters, sis: loadSis() },
+        { masters, sis },
       );
       if (!prepared.ok) throw new ApiError("bad_request", prepared.error, 400);
       const pushed = await pushExamSheetToDb(prepared.sheet, {
@@ -215,7 +218,7 @@ export async function POST(request: Request) {
       existing,
       // 2.3b: the school setup from the server's reference cache (503 when
       // unread), never an empty copy; the register as the lib used to load it.
-      { masters: await loadServerMasters(), sis: loadSis() },
+      { masters: await loadServerMasters(), sis },
     );
     if (!prepared.ok) throw new ApiError("bad_request", prepared.error, 400);
     const pushed = await pushExamSheetToDb(prepared.sheet, {
