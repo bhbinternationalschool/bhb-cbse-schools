@@ -25,7 +25,9 @@ export async function GET(request: Request) {
     // session whose classes can be worked out (403 / 503 otherwise). Every
     // item below is the caller's OWN work, decided by the reminder rules.
     await staffSectionScope(ctx);
-    const staffId = ctx.session.staffId || "";
+    // The key notify() addresses this person by: the roster id, or the login
+    // email for an owner login with no roster row (lib/pushSubject).
+    const staffId = ctx.session.staffId || (ctx.session.email || "").trim().toLowerCase();
     const date = istTodayIso();
     if (!staffId) return apiOk({ date, items: [], unknown: [] });
     const r = await staffPendingWorkFor(staffId, date);

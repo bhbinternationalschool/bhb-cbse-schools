@@ -6,6 +6,9 @@
  */
 import "server-only";
 
+import { createHash } from "node:crypto";
+import { readErpVersions } from "@/lib/data/server/versions";
+
 import { readServerMastersCopy, readServerRbacCopy } from "@/lib/api/v1/auth";
 import { readStaffHrServer } from "@/lib/api/v1/staffLeave";
 import { readTimetableStateServer } from "@/lib/api/v1/teachingServer.server";
@@ -27,6 +30,9 @@ import { waTemplateLanguageFor } from "@/lib/householdPrefs";
 import { normalizeWaTemplatesState, resolveTemplateForSend, templateVariablePositions, type WaTemplatesState } from "@/lib/waTemplates";
 import { sendWhatsAppTemplate } from "@/lib/waSend";
 import {
+  istDayStartIso,
+  isReminderRule,
+  outdoorDutyOnDay,
   normalizeReminderSettings,
   reminderKey,
   REMINDER_SETTINGS_KEY,
@@ -34,6 +40,8 @@ import {
 } from "@/lib/staffReminders";
 import {
   computePendingWork,
+  createPendingCache,
+  pendingItemsOf,
   pendingWorkFor,
   readUnanswered,
   runReminderTick,
@@ -42,15 +50,12 @@ import {
 } from "@/lib/staffRemindersRun";
 
 const CHUNK = 150;
+/** module_local_state: which rules today's scheduled ticks have finished. */
+const REMINDER_RUNS_KEY = "staff_reminder_runs";
 const WA_FAMILY = "staff_work_reminder";
 
 function fail(error: unknown): { ok: false; error: string } {
   return { ok: false, error: typeof error === "string" ? error : ((error as Error)?.message ?? String(error)) };
-}
-
-function istDayOf(iso: string): string {
-  const t = Date.parse(iso);
-  return Number.isFinite(t) ? new Date(t + 330 * 60_000).toISOString().slice(0, 10) : "";
 }
 
 /* ── Settings ───────────────────────────────────────────────────────────── */
@@ -91,17 +96,19 @@ export async function writeReminderSettings(
       .select("updated_at");
     if (error) return { ok: false, error: error.message };
     if (!data?.length) return { ok: false, conflict: true, error: "Someone else changed the reminder settings meanwhile — reload and try again." };
-    return { ok: true, updatedAt: now };
+    // The database's own spelling of the stamp, so the next save's base matches it exactly.
+    return { ok: true, updatedAt: String((data[0] as { updated_at?: string }).updated_at ?? now) };
   }
-  const { error } = await ctx.sb
+  const { data: inserted, error } = await ctx.sb
     .from("module_local_state")
-    .insert({ tenant_id: ctx.tenantId, module_key: REMINDER_SETTINGS_KEY, state, updated_at: now });
+    .insert({ tenant_id: ctx.tenantId, module_key: REMINDER_SETTINGS_KEY, state, updated_at: now })
+    .select("updated_at");
   if (error) {
     return /duplicate|unique/i.test(error.message)
       ? { ok: false, conflict: true, error: "Someone else saved the reminder settings meanwhile — reload and try again." }
       : { ok: false, error: error.message };
   }
-  return { ok: true, updatedAt: now };
+  return { ok: true, updatedAt: String((inserted?.[0] as { updated_at?: string } | undefined)?.updated_at ?? now) };
 }
 
 /* ── The reads ──────────────────────────────────────────────────────────── */
@@ -178,18 +185,25 @@ export const reminderDeps: ReminderDeps = {
   outdoorDuty: async (date) => {
     const ctx = await getServerTenantContext();
     if (!ctx) return fail("tenant unavailable");
+    // Bounded to sessions started today (India): a session never ended on an
+    // earlier day is not today's outdoor duty.
     const r = await fetchAllPages<{ staff_id: string; status: string; started_at: string }>((from, to) =>
       ctx.sb
         .from("staff_attendance_desk_outdoor_duty")
         .select("id, staff_id, status, started_at")
         .eq("tenant_id", ctx.tenantId)
+        .gte("started_at", istDayStartIso(date))
         .order("id", { ascending: true })
         .range(from, to),
     );
     if (r.error) return fail(r.error);
-    const out = new Set<string>();
-    for (const d of r.rows) if (d.status === "active" || istDayOf(String(d.started_at)) === date) out.add(String(d.staff_id));
-    return { ok: true, value: out };
+    return {
+      ok: true,
+      value: outdoorDutyOnDay(
+        r.rows.map((d) => ({ staffId: String(d.staff_id), status: String(d.status), startedAt: String(d.started_at) })),
+        date,
+      ),
+    };
   },
 
   students: async () => {
@@ -361,33 +375,70 @@ export const reminderDeps: ReminderDeps = {
 
   notify: (ev) => notify(ev),
 
-  whatsapp: async (p) => {
+  whatsappSender: async () => {
+    // Read once per tick (staffRemindersRun memoises the call).
     const { state: raw } = await fetchServerBlob<WaTemplatesState>("wa_templates_state");
     const templates = normalizeWaTemplatesState(raw);
     const language = waTemplateLanguageFor({});
     const resolved = resolveTemplateForSend({ state: templates, familyKey: WA_FAMILY, language });
-    // Not approved on Meta (both languages) = no message. Never free text:
-    // a business-initiated message outside the 24-hour window is a template
-    // or nothing.
-    if (!resolved.ok) return { ok: false, error: resolved.reason };
-    const values = { staffName: p.name, schoolName: TENANT.nameDisplay, pendingWork: language === "hi" ? p.line.hi : p.line.en };
-    const positions = templateVariablePositions(resolved.template, values);
-    const res = await sendWhatsAppTemplate({
-      toMobile: p.mobile,
-      name: resolved.template.metaName,
-      language: resolved.template.metaLanguage || resolved.template.language,
-      fromPhoneNumberId: resolved.sender?.phoneNumberId,
-      components: [
-        {
-          type: "body",
-          parameters: Object.keys(positions)
-            .sort((a, b) => Number(a) - Number(b))
-            .map((k) => ({ type: "text", text: positions[k]! })),
-        },
-      ],
-      clientMessageId: `staffremind:${p.rule}:${p.date}:${p.staffId}`,
-    });
-    return res.ok ? { ok: true } : { ok: false, error: res.error || "send failed" };
+    // Not approved on Meta (both languages) = no message, counted as a skip.
+    // Never free text: a business-initiated message outside the 24-hour
+    // window is a template or nothing.
+    if (!resolved.ok) return { ok: false, reason: `template ${WA_FAMILY} not approved — ${resolved.reason}` };
+    return {
+      ok: true,
+      send: async (p) => {
+        const values = { staffName: p.name, schoolName: TENANT.nameDisplay, pendingWork: language === "hi" ? p.line.hi : p.line.en };
+        const positions = templateVariablePositions(resolved.template, values);
+        const res = await sendWhatsAppTemplate({
+          toMobile: p.mobile,
+          name: resolved.template.metaName,
+          language: resolved.template.metaLanguage || resolved.template.language,
+          fromPhoneNumberId: resolved.sender?.phoneNumberId,
+          components: [
+            {
+              type: "body",
+              parameters: Object.keys(positions)
+                .sort((a, b) => Number(a) - Number(b))
+                .map((k) => ({ type: "text", text: positions[k]! })),
+            },
+          ],
+          clientMessageId: `staffremind:${p.rule}:${p.date}:${p.staffId}`,
+        });
+        return res.ok ? { ok: true } : { ok: false, error: res.error || "send failed" };
+      },
+    };
+  },
+
+  swept: async (date) => {
+    const ctx = await getServerTenantContext();
+    if (!ctx) return fail("tenant unavailable");
+    const { data, error } = await ctx.sb
+      .from("module_local_state")
+      .select("state")
+      .eq("tenant_id", ctx.tenantId)
+      .eq("module_key", REMINDER_RUNS_KEY)
+      .maybeSingle();
+    if (error) return fail(error.message);
+    const st = (data?.state ?? {}) as { date?: unknown; rules?: unknown };
+    const rules = st.date === date && Array.isArray(st.rules) ? st.rules.filter(isReminderRule) : [];
+    return { ok: true, value: new Set(rules) };
+  },
+
+  markSwept: async (rule, date) => {
+    const ctx = await getServerTenantContext();
+    if (!ctx) return;
+    const cur = await reminderDeps.swept(date);
+    const rules = [...new Set([...(cur.ok ? cur.value : []), rule])];
+    // One small row; two ticks racing can at worst drop a marker, which only
+    // costs the next tick a recomputation (the dedupe key still holds).
+    const { error } = await ctx.sb
+      .from("module_local_state")
+      .upsert(
+        { tenant_id: ctx.tenantId, module_key: REMINDER_RUNS_KEY, state: { date, rules }, updated_at: new Date().toISOString() },
+        { onConflict: "tenant_id,module_key" },
+      );
+    if (error) console.warn("[staff-reminders] could not record the run", error.message);
   },
 
   now: () => Date.now(),
@@ -395,6 +446,21 @@ export const reminderDeps: ReminderDeps = {
 };
 
 export const computeStaffPendingWork = (date: string) => computePendingWork(reminderDeps, { date });
-export const staffPendingWorkFor = (staffId: string, date: string) => pendingWorkFor(reminderDeps, staffId, date);
+const pendingCache = createPendingCache(60_000);
+
+/**
+ * The staff app card: this person's items from the day's school-wide
+ * computation, cached for at most a minute under (IST date, erp_versions).
+ * Versions unreadable = no cache, computed fresh.
+ */
+export async function staffPendingWorkFor(staffId: string, date: string) {
+  const v = await readErpVersions().catch(() => null);
+  if (!v || !v.ok) return pendingWorkFor(reminderDeps, staffId, date);
+  const key = `${date}|${createHash("sha1").update(JSON.stringify(v.versions)).digest("hex")}`;
+  const { results } = await pendingCache.get(key, Date.now(), async () => ({
+    results: (await computePendingWork(reminderDeps, { date })).results,
+  }));
+  return pendingItemsOf(results, staffId);
+}
 export const runStaffReminderTick = (opts: Parameters<typeof runReminderTick>[1] = {}) => runReminderTick(reminderDeps, opts);
 export const readUnansweredReminders = (date: string) => readUnanswered(reminderDeps, { date });

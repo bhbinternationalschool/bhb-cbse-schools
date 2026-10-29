@@ -131,6 +131,18 @@ export function normalizeReminderSettings(raw: unknown): ReminderSettings {
   };
 }
 
+/**
+ * Is the stored settings row still the one the editor loaded? Compared as
+ * instants: PostgREST answers "…+00:00" while a save answers "…Z" — the same
+ * moment spelt twice, which a string compare called a conflict. "" = never saved.
+ */
+export function settingsBaseMatches(stored: string, base: string): boolean {
+  if (!stored || !base) return !stored && !base;
+  const a = Date.parse(stored);
+  const b = Date.parse(base);
+  return Number.isFinite(a) && Number.isFinite(b) ? a === b : stored === base;
+}
+
 /* ── India time ─────────────────────────────────────────────────────────── */
 
 const IST_MS = 330 * 60_000;
@@ -182,7 +194,14 @@ export function rulePassed(settings: ReminderSettings, rule: ReminderRule, nowMs
 
 /* ── Results ────────────────────────────────────────────────────────────── */
 
-export type PendingLine = Text & { hi: string };
+export type PendingLine = Text & {
+  hi: string;
+  /** Marks only: this line's own exam deadline, and whether it has passed. */
+  dueOn?: string;
+  overdue?: boolean;
+  /** Marks only: the exam's name, for the brief ("UT1 due 20 Oct"). */
+  termLabel?: string;
+};
 
 export type PendingItem = {
   rule: ReminderRule;
@@ -191,7 +210,11 @@ export type PendingItem = {
   count: number;
   /** One per pending thing, e.g. "Class 5 · A". */
   lines: PendingLine[];
-  /** Marks only: the earliest deadline among the lines, and whether it has passed. */
+  /**
+   * Marks only: the earliest deadline among the lines still in their window
+   * (else the earliest overdue one), and true when EVERY line is overdue.
+   * Each line carries its own date (PendingLine.dueOn).
+   */
   dueOn?: string;
   overdue?: boolean;
   /** Approvals only: counts by kind, for the link. */
@@ -305,6 +328,25 @@ export function registerPending(input: {
   return byStaff([...out.values()]);
 }
 
+/** Staff on outdoor duty on `date` (India): a session STARTED that day. A
+ * session left "active" since an earlier day exempts nobody today. */
+export function outdoorDutyOnDay(
+  rows: readonly { staffId: string; status: string; startedAt: string }[],
+  date: string,
+): Set<string> {
+  const out = new Set<string>();
+  for (const r of rows) {
+    const t = Date.parse(r.startedAt);
+    if (Number.isFinite(t) && istDateOf(t) === date) out.add(r.staffId);
+  }
+  return out;
+}
+
+/** The UTC instant India's `date` begins (00:00 IST). */
+export function istDayStartIso(date: string): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) - IST_MS).toISOString();
+}
+
 /* ── 3. Homework ────────────────────────────────────────────────────────── */
 
 export type ReminderSlot = { weekday: number; subjectId: string; teacherId: string };
@@ -359,30 +401,40 @@ export function marksWindow(date: string, dueOn: string, leadDays: number): "bef
   return date >= addDaysIso(dueOn, -leadDays) ? "remind" : "before";
 }
 
-/** Gaps → one item per teacher. `overdue` gaps are kept (the brief escalates them). */
+/** An item's dueOn / overdue from its lines: the earliest live deadline wins. */
+function marksSummary(item: PendingItem): PendingItem {
+  const live = item.lines.filter((l) => !l.overdue).map((l) => l.dueOn ?? "").filter(Boolean).sort();
+  const late = item.lines.filter((l) => l.overdue).map((l) => l.dueOn ?? "").filter(Boolean).sort();
+  return { ...item, count: item.lines.length, dueOn: live[0] ?? late[0], overdue: live.length === 0 };
+}
+
+/**
+ * Gaps → one item per teacher, one line per exam × section × subject, each
+ * line with its OWN deadline. Overdue lines are kept (the card shows them,
+ * the brief escalates them); they never hide another exam still in its window.
+ */
 export function marksPending(input: { date: string; leadDays: number; gaps: readonly MarksGap[] }): PendingItem[] {
   const out = new Map<string, PendingItem>();
   const seen = new Set<string>();
   for (const g of input.gaps) {
     const w = marksWindow(input.date, g.dueOn, input.leadDays);
     if (w === "before") continue;
-    const line = { en: `${g.termLabel}: ${g.sectionLabel} · ${g.subjectName}`, hi: `${g.termLabel}: ${g.sectionLabel} · ${g.subjectName}` };
-    for (const id of g.teacherIds) {
-      const before = out.get(id)?.count ?? 0;
-      pushLine(out, "marks", id, line, `${g.termId}|${g.classId}:${g.sectionId}|${g.subjectName}`, seen);
-      const cur = out.get(id);
-      if (cur && cur.count > before) {
-        if (!cur.dueOn || g.dueOn < cur.dueOn) cur.dueOn = g.dueOn;
-        cur.overdue = (cur.dueOn ?? "") < input.date;
-      }
-    }
+    const text = `${g.termLabel} (due ${shortDay(g.dueOn)}): ${g.sectionLabel} · ${g.subjectName}`;
+    const hiText = `${g.termLabel} (अंतिम तिथि ${shortDay(g.dueOn)}): ${g.sectionLabel} · ${g.subjectName}`;
+    const line: PendingLine = { en: text, hi: hiText, dueOn: g.dueOn, overdue: w === "overdue", termLabel: g.termLabel };
+    for (const id of g.teacherIds) pushLine(out, "marks", id, line, `${g.termId}|${g.classId}:${g.sectionId}|${g.subjectName}`, seen);
   }
-  return byStaff([...out.values()]);
+  return byStaff([...out.values()].map(marksSummary));
 }
 
-/** The items the tick sends today: inside the window, not merely overdue. */
+/** What the tick sends today: only the lines inside their window. */
 export function marksToRemind(items: readonly PendingItem[], date: string): PendingItem[] {
-  return items.filter((i) => !i.overdue && (i.dueOn ?? "") >= date);
+  const out: PendingItem[] = [];
+  for (const i of items) {
+    const lines = i.lines.filter((l) => !l.overdue && (l.dueOn ?? "") >= date);
+    if (lines.length) out.push(marksSummary({ ...i, lines }));
+  }
+  return out;
 }
 
 /* ── 5. Approvals waiting ───────────────────────────────────────────────── */
@@ -396,7 +448,12 @@ export type WaitingThing = {
   audience: readonly AudienceRule[];
   /** Never the person it is about (a leave applicant, a request raiser). */
   exclude?: readonly string[];
+  /** "YYYY-MM-DD" it has waited since (leave start, raised on) — said in the reminder. */
+  since?: string;
 };
+
+/** Undecided leave whose last day is further back than this is no longer reminded. */
+export const STALE_LEAVE_DAYS = 14;
 
 const APPROVAL_LABELS: Record<ApprovalKind, { one: string; many: string; hi: string }> = {
   staff_leave: { one: "staff leave request", many: "staff leave requests", hi: "स्टाफ छुट्टी अनुरोध" },
@@ -414,11 +471,14 @@ export function approvalsPending(input: {
   resolve: (rules: readonly AudienceRule[], exclude: readonly string[]) => string[];
 }): PendingItem[] {
   const counts = new Map<string, Partial<Record<ApprovalKind, number>>>();
+  const oldest = new Map<string, string>(); // "staff|kind" → earliest since
   for (const t of input.things) {
     for (const id of input.resolve(t.audience, t.exclude ?? [])) {
       const c = counts.get(id) ?? {};
       c[t.kind] = (c[t.kind] ?? 0) + 1;
       counts.set(id, c);
+      const k = `${id}|${t.kind}`;
+      if (t.since && (!oldest.has(k) || t.since < oldest.get(k)!)) oldest.set(k, t.since);
     }
   }
   const out: PendingItem[] = [];
@@ -430,7 +490,11 @@ export function approvalsPending(input: {
       if (!n) continue;
       total += n;
       const l = APPROVAL_LABELS[k];
-      lines.push({ en: `${n} ${n === 1 ? l.one : l.many}`, hi: `${l.hi}: ${n}` });
+      const since = oldest.get(`${staffId}|${k}`);
+      lines.push({
+        en: `${n} ${n === 1 ? l.one : l.many}${since ? ` · since ${shortDay(since)}` : ""}`,
+        hi: `${l.hi}: ${n}${since ? ` · ${shortDay(since)} से` : ""}`,
+      });
     }
     out.push({ rule: "approvals", staffId, count: total, lines, kinds });
   }
@@ -580,7 +644,7 @@ const UNANSWERED_LABEL: Record<Exclude<ReminderRule, "approvals">, (i: PendingIt
   punch: () => "not punched in",
   register: (i) => `register not taken (${i.lines.map((l) => l.en.replace(/ register$/, "")).join(", ")})`,
   homework: (i) => `homework missing for ${i.count} class${i.count === 1 ? "" : "es"}`,
-  marks: (i) => `${i.overdue ? "marks overdue" : "marks due today"} (${i.count})`,
+  marks: (i) => i.lines.map((l) => l.en).join("; "),
 };
 
 /**
@@ -610,12 +674,24 @@ export function unansweredReminders(input: {
       continue;
     }
     for (const item of r.items) {
-      const dueToday = r.rule === "marks" && item.dueOn === input.date;
-      const keep = r.rule === "marks" ? item.overdue || (dueToday && !!reminded?.has(item.staffId)) : !!reminded?.has(item.staffId);
-      if (!keep) continue;
       const list = what.get(item.staffId) ?? [];
-      list.push(UNANSWERED_LABEL[r.rule](item));
-      what.set(item.staffId, list);
+      if (r.rule === "marks") {
+        // Per exam, with its own date: overdue whether or not reminded today;
+        // due today only when the reminder went.
+        const groups = new Map<string, number>();
+        for (const l of item.lines) {
+          const label = l.overdue
+            ? `marks overdue: ${l.termLabel ?? "exam"} due ${shortDay(l.dueOn ?? "")}`
+            : l.dueOn === input.date && reminded?.has(item.staffId)
+              ? `marks due today: ${l.termLabel ?? "exam"}`
+              : "";
+          if (label) groups.set(label, (groups.get(label) ?? 0) + 1);
+        }
+        for (const [label, n] of groups) list.push(`${label} (${n})`);
+      } else if (reminded?.has(item.staffId)) {
+        list.push(UNANSWERED_LABEL[r.rule](item));
+      }
+      if (list.length) what.set(item.staffId, list);
     }
   }
   const rows = [...what].map(([staffId, w]) => ({ staffId, name: input.nameOf(staffId) || staffId, what: w }));

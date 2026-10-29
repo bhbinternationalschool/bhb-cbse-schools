@@ -58,10 +58,14 @@ import {
   type WaitingThing,
   REMINDER_KIND,
   REMINDER_RULES,
+  STALE_LEAVE_DAYS,
+  addDaysIso,
 } from "@/lib/staffReminders";
 import { computeMarksGaps, termsInMarksWindow } from "@/lib/staffRemindersMarks";
 
 export type Read<T> = { ok: true; value: T } | { ok: false; error: string };
+
+export type WhatsAppReminder = { staffId: string; name: string; mobile: string; line: { en: string; hi: string }; rule: ReminderRule; date: string };
 
 export type ReminderDeps = {
   settings: () => Promise<Read<ReminderSettings>>;
@@ -93,8 +97,16 @@ export type ReminderDeps = {
   devices: (staff: readonly Pick<StaffRecord, "id" | "email">[]) => Promise<Read<Map<string, string[]>>>;
   prefs: (staffIds: readonly string[]) => Promise<Map<string, NotifyPrefs> | null>;
   notify: (ev: NotifyEvent) => Promise<NotifyResult>;
-  /** Business-initiated WhatsApp: an approved template or nothing. */
-  whatsapp: (p: { staffId: string; name: string; mobile: string; line: { en: string; hi: string }; rule: ReminderRule; date: string }) => Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Business-initiated WhatsApp: an approved template or nothing. Read ONCE per
+   * tick; `ok:false` = the template is not approved on Meta (yet) — a skip, not
+   * a failure.
+   */
+  whatsappSender: () => Promise<{ ok: true; send: (p: WhatsAppReminder) => Promise<{ ok: boolean; error?: string }> } | { ok: false; reason: string }>;
+  /** Rules a scheduled tick already finished today (null-safe: a failed read = none). */
+  swept: (date: string) => Promise<Read<Set<ReminderRule>>>;
+  /** Record that a scheduled tick finished this rule today. */
+  markSwept: (rule: ReminderRule, date: string) => Promise<void>;
   now: () => number;
   log: (msg: string) => void;
 };
@@ -311,6 +323,16 @@ async function computeRule(deps: ReminderDeps, memo: Memo, rule: ReminderRule, d
       };
     }
 
+    // Every rule keeps the school calendar: on a staff holiday (or Sunday)
+    // nobody is reminded of marks or approvals either. Punch has its own
+    // per-stream check; register and homework go by each class's calendar.
+    if (rule === "marks" || rule === "approvals") {
+      const off = staffOff(masters, date, ay, weekday);
+      if ((masters.staff ?? []).every((s) => s.status !== "active" || off(s))) {
+        return { rule, state: "off", reason: `staff day off — ${off({ stream: "teaching" }) || off({ stream: "non_teaching" }) || "no active staff"}` };
+      }
+    }
+
     if (rule === "marks") {
       const setup = await need(once(memo, "examSetup", deps.examSetup), "the exams setup");
       const exams = { version: 1 as const, ...setup, sheets: [] };
@@ -321,7 +343,8 @@ async function computeRule(deps: ReminderDeps, memo: Memo, rule: ReminderRule, d
         need(once(memo, "timetable", deps.timetable), "the timetable"),
         ...terms.map((t) => need(deps.examSheets(ay, t.termId), `the ${t.label} mark sheets`)),
       ]);
-      const sis: SisState = { version: 1, households: [], students: studentsAll, curriculumRequests: [], tags: [], classUpgrades: [] };
+      // The same children every other rule counts: active, this year, never the Play review demo family.
+      const sis: SisState = { version: 1, households: [], students: activeStudents(studentsAll, ay), curriculumRequests: [], tags: [], classUpgrades: [] };
       const gaps = computeMarksGaps({
         ay,
         masters,
@@ -343,15 +366,18 @@ async function computeRule(deps: ReminderDeps, memo: Memo, rule: ReminderRule, d
       need(once(memo, "staffRequests", deps.staffRequests), "staff requests"),
       need(once(memo, "students", deps.students), "the student register"),
     ]);
-    const things = waitingThings({ masters, ay, leave, approverRules, studentLeave, complaints, requests, students: activeStudents(studentsAll, ay) });
+    const things = waitingThings({ date, masters, ay, leave, approverRules, studentLeave, complaints, requests, students: activeStudents(studentsAll, ay) });
     return {
       rule,
       state: "ok",
       items: approvalsPending({
         things,
+        // resolveAudience already keeps only active staff — plus the owner logins
+        // with no roster row, addressed by email, exactly as the original
+        // notifications reach them.
         resolve: (rules, exclude) =>
           resolveAudience(rules, day.ctx, exclude.map((id) => ({ type: "staff" as const, id })))
-            .filter((r) => r.type === "staff" && activeIds.has(r.id))
+            .filter((r) => r.type === "staff")
             .map((r) => r.id),
       }),
     };
@@ -366,6 +392,8 @@ async function computeRule(deps: ReminderDeps, memo: Memo, rule: ReminderRule, d
  * (lib/notify/events.ts): the people who must act.
  */
 export function waitingThings(input: {
+  /** Today (India): leave that ended over STALE_LEAVE_DAYS ago is no longer reminded. */
+  date: string;
   masters: MastersState;
   ay: string;
   leave: LeaveRequest[];
@@ -381,16 +409,19 @@ export function waitingThings(input: {
   const ctOf = classTeachersFn(masters, ay);
   const studentById = new Map(input.students.map((s) => [s.id, s]));
 
+  const staleBefore = addDaysIso(input.date, -STALE_LEAVE_DAYS);
   for (const l of input.leave) {
     if (l.status !== "pending" && l.status !== "pending_l2") continue;
+    if ((l.toDate || l.fromDate || "") < staleBefore) continue;
     const s = staffById.get(l.staffId);
     const chain = resolveApprovers(input.approverRules, { id: l.staffId, departmentId: s?.departmentId ?? null, status: s?.status });
     const named = l.status === "pending_l2" ? chain.level2 : chain.level1;
-    out.push({ kind: "staff_leave", refId: l.id, audience: [{ staffLeaveApprovers: true }, { staff: named }], exclude: [l.staffId] });
+    out.push({ kind: "staff_leave", refId: l.id, audience: [{ staffLeaveApprovers: true }, { staff: named }], exclude: [l.staffId], since: l.fromDate });
   }
 
   for (const r of input.studentLeave) {
     if (r.status !== "pending" || (r.academicYearCode && ay && r.academicYearCode !== ay)) continue;
+    if ((r.toDate || r.fromDate || "") < staleBefore) continue;
     const st = studentById.get(r.studentId);
     if (!st) continue;
     const teachers = ctOf(st.classId, st.sectionId);
@@ -399,7 +430,7 @@ export function waitingThings(input: {
     const audience: AudienceRule[] = leadership
       ? [{ staff: teachers }, { permission: "student_leave", action: "approve", schoolWide: true }]
       : [{ staff: teachers }];
-    out.push({ kind: "student_leave", refId: r.id, audience });
+    out.push({ kind: "student_leave", refId: r.id, audience, since: r.fromDate });
   }
 
   for (const st of input.students) {
@@ -468,6 +499,11 @@ export async function pendingWorkFor(
   date: string,
 ): Promise<{ items: PendingItem[]; unknown: ReminderRule[] }> {
   const { results } = await computePendingWork(deps, { date });
+  return pendingItemsOf(results, staffId);
+}
+
+/** The card's view of a school-wide computation. */
+export function pendingItemsOf(results: readonly RuleResult[], staffId: string): { items: PendingItem[]; unknown: ReminderRule[] } {
   const items: PendingItem[] = [];
   const unknown: ReminderRule[] = [];
   for (const r of results) {
@@ -477,6 +513,36 @@ export async function pendingWorkFor(
     if (mine) items.push(mine);
   }
   return { items, unknown };
+}
+
+/**
+ * A short per-process cache of the school-wide computation for the staff
+ * app card: every home open would otherwise read the register, the timetable,
+ * leave and exams for the whole school. The caller keys it on the India date
+ * AND the erp_versions snapshot, so a write anywhere moves the key; the TTL
+ * bounds what the versions do not see. A result with any rule "unknown" is
+ * never kept — a failed read is retried, never served as "nothing pending".
+ * Concurrent callers for one key share one computation.
+ */
+export function createPendingCache(ttlMs: number) {
+  type Value = { results: RuleResult[] };
+  let held: { key: string; at: number; value: Value } | null = null;
+  const inFlight = new Map<string, Promise<Value>>();
+  return {
+    async get(key: string, nowMs: number, compute: () => Promise<Value>): Promise<Value> {
+      if (held && held.key === key && nowMs - held.at < ttlMs) return held.value;
+      const running = inFlight.get(key);
+      if (running) return running;
+      const p = compute().finally(() => inFlight.delete(key));
+      inFlight.set(key, p);
+      const value = await p;
+      if (value.results.every((r) => r.state !== "unknown")) held = { key, at: nowMs, value };
+      return value;
+    },
+    clear() {
+      held = null;
+    },
+  };
 }
 
 export type TickRuleOutcome = {
@@ -506,26 +572,28 @@ export async function runReminderTick(
     return { ok: false, date, rules: [], note: "settings unreadable" };
   }
   const settings = s.value;
-  const rules = opts.rules ?? dueRules(settings, nowMs);
-  if (rules.length === 0) return { ok: true, date, rules: [], note: settings.enabled ? "no rule is due now" : "reminders are off" };
+  const due = opts.rules ?? dueRules(settings, nowMs);
+  if (due.length === 0) return { ok: true, date, rules: [], note: settings.enabled ? "no rule is due now" : "reminders are off" };
+
+  // A scheduled tick skips a rule an earlier tick finished today: everyone
+  // pending then was reminded, and the dedupe key would refuse a second one
+  // anyway — so none of its reads are worth doing. A rule asked for by hand
+  // (?rule=) always runs. A rule that could not be read was not marked, so
+  // the next tick in its window retries it.
+  const done = opts.rules ? null : await deps.swept(date).catch(() => null);
+  const doneSet = done && done.ok ? done.value : new Set<ReminderRule>();
+  const rules = due.filter((r) => !doneSet.has(r));
+  const outcomes: TickRuleOutcome[] = due
+    .filter((r) => doneSet.has(r))
+    .map((rule) => ({ ...blankOutcome(rule), state: "off" as const, reason: "already sent today" }));
+  if (rules.length === 0) return { ok: true, date, rules: outcomes };
 
   const memo: Memo = new Map();
   const { results } = await computePendingWork(deps, { date, rules, settings, memo });
-  const outcomes: TickRuleOutcome[] = [];
   let anyFailure = false;
 
   for (const r of results) {
-    const o: TickRuleOutcome = {
-      rule: r.rule,
-      state: r.state,
-      pending: 0,
-      reminded: 0,
-      duplicate: 0,
-      pushed: 0,
-      held: { muted: 0, quiet: 0 },
-      whatsapp: { sent: 0, failed: 0, skipped: 0 },
-      errors: [],
-    };
+    const o: TickRuleOutcome = { ...blankOutcome(r.rule), state: r.state };
     outcomes.push(o);
     if (r.state !== "ok") {
       o.reason = r.reason;
@@ -537,7 +605,11 @@ export async function runReminderTick(
     }
     const items = r.rule === "marks" ? marksToRemind(r.items, date) : r.items;
     o.pending = items.length;
-    if (opts.dryRun || items.length === 0) continue;
+    if (opts.dryRun) continue;
+    if (items.length === 0) {
+      if (!opts.rules) await deps.markSwept(r.rule, date).catch(() => undefined);
+      continue;
+    }
 
     const fresh: PendingItem[] = [];
     for (const item of items) {
@@ -559,8 +631,25 @@ export async function runReminderTick(
       o.whatsapp = wa;
       if (wa.failed) anyFailure = true;
     }
+    // Finished: every pending person was stored (new or already) — later
+    // scheduled ticks in the window skip this rule.
+    if (!opts.rules && o.errors.length === 0) await deps.markSwept(r.rule, date).catch(() => undefined);
   }
   return { ok: !anyFailure, date, rules: outcomes };
+}
+
+function blankOutcome(rule: ReminderRule): TickRuleOutcome {
+  return {
+    rule,
+    state: "ok",
+    pending: 0,
+    reminded: 0,
+    duplicate: 0,
+    pushed: 0,
+    held: { muted: 0, quiet: 0 },
+    whatsapp: { sent: 0, failed: 0, skipped: 0 },
+    errors: [],
+  };
 }
 
 async function whatsappFallback(
@@ -584,6 +673,12 @@ async function whatsappFallback(
   }
   const prefs = await deps.prefs(items.map((i) => i.staffId));
   const topic = NOTIFY_KINDS[REMINDER_KIND[rule]].topic;
+  // The template's state, once per tick for every rule.
+  const sender = await once(memo, "whatsappSender", () => deps.whatsappSender().catch((e: unknown) => ({ ok: false as const, reason: (e as Error)?.message ?? String(e) })));
+  if (!sender.ok && !memo.has("whatsappSender:logged")) {
+    memo.set("whatsappSender:logged", Promise.resolve(true));
+    deps.log(`[staff-reminders] WhatsApp fallback skipped — ${sender.reason}`);
+  }
   for (const item of items) {
     const s = staffById.get(item.staffId);
     if (!s || !needsWhatsAppFallback(devices.value.get(item.staffId) ?? [], nowMs, settings.appInactiveDays)) continue;
@@ -599,7 +694,11 @@ async function whatsappFallback(
       out.skipped += 1;
       continue;
     }
-    const r = await deps.whatsapp({
+    if (!sender.ok) {
+      out.skipped += 1;
+      continue;
+    }
+    const r = await sender.send({
       staffId: s.id,
       name: s.fullName || s.id,
       mobile,

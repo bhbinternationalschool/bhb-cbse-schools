@@ -8,7 +8,7 @@
  */
 import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
-import { normalizeReminderSettings } from "@/lib/staffReminders";
+import { normalizeReminderSettings, settingsBaseMatches } from "@/lib/staffReminders";
 import { readReminderSettings, writeReminderSettings } from "@/lib/staffReminders.server";
 
 export const runtime = "nodejs";
@@ -35,7 +35,7 @@ export async function PUT(req: Request) {
   const base = typeof body.baseUpdatedAt === "string" ? body.baseUpdatedAt : "";
   const got = await readReminderSettings();
   if (!got.ok) return NextResponse.json({ ok: false, error: "Could not read the reminder settings — nothing was saved." }, { status: 503 });
-  if (got.value.updatedAt !== base) {
+  if (!settingsBaseMatches(got.value.updatedAt, base)) {
     return NextResponse.json({ ok: false, error: "Someone else changed the reminder settings meanwhile — reload and try again. Nothing was saved." }, { status: 409 });
   }
   const by = auth.ctx.session.fullName || auth.ctx.session.email || "staff";

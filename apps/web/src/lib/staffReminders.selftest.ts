@@ -36,7 +36,9 @@ import {
   whatsappLine,
   type ReminderSettings,
 } from "@/lib/staffReminders";
-import { computePendingWork, readUnanswered, runReminderTick, type Read, type ReminderDeps } from "@/lib/staffRemindersRun";
+import * as rules from "@/lib/staffReminders";
+import * as run from "@/lib/staffRemindersRun";
+import { computePendingWork, pendingWorkFor, readUnanswered, runReminderTick, type Read, type ReminderDeps } from "@/lib/staffRemindersRun";
 
 console.log("staffReminders.selftest.ts");
 
@@ -168,7 +170,7 @@ const STUDENTS: SisStudent[] = [
   student("st2", C5, S5A),
   student("st3", C5, S5B),
   student("st4", C6, S6A, { docs: { birthCert: { status: "pending" } } as unknown as SisStudent["docs"] }),
-  student("demo", C6, S6A, { admissionNo: "PLAYREVIEW-1" } as Partial<SisStudent>),
+  student("demo", C6, S6A, { admissionNo: "BHB-DEMO-1" } as Partial<SisStudent>),
 ];
 
 const LEAVE: LeaveRequest[] = [
@@ -214,10 +216,16 @@ type World = {
   prefs: Map<string, NotifyPrefs>;
   wa: { staffId: string; line: string }[];
   notifyCalls: number;
+  /** "rule|date" a tick finished. */
+  swept: Set<string>;
+  /** How often the WhatsApp template state was read. */
+  senderReads: number;
+  /** How often today's staff register was read (the heavy-read probe). */
+  markReads: number;
 };
 
 function world(): World {
-  return { keys: new Set(), pushes: [], rows: [], prefs: new Map(), wa: [], notifyCalls: 0 };
+  return { keys: new Set(), pushes: [], rows: [], prefs: new Map(), wa: [], notifyCalls: 0, swept: new Set(), senderReads: 0, markReads: 0 };
 }
 
 function notifyDepsFor(w: World, nowMs: number): NotifyDeps {
@@ -251,7 +259,7 @@ function deps(w: World, nowMs: number, o: Overrides = {}): ReminderDeps {
   const base: ReminderDeps = {
     settings: async () => ok(o.settingsValue ?? DEFAULT_REMINDER_SETTINGS),
     school: async () => ok({ masters, rbac, superAdminEmails: [] }),
-    staffMarks: async () =>
+    staffMarks: async () => (w.markReads++, 0) ||
       ok(
         new Map([
           [HARI, { status: "P", inTime: "08:01" }],
@@ -280,9 +288,19 @@ function deps(w: World, nowMs: number, o: Overrides = {}): ReminderDeps {
       w.notifyCalls += 1;
       return notifyWith(notifyDepsFor(w, nowMs), ev);
     },
-    whatsapp: async (p) => {
-      w.wa.push({ staffId: p.staffId, line: p.line.en });
-      return { ok: true };
+    whatsappSender: async () => {
+      w.senderReads += 1;
+      return {
+        ok: true,
+        send: async (p) => {
+          w.wa.push({ staffId: p.staffId, line: p.line.en });
+          return { ok: true };
+        },
+      };
+    },
+    swept: async (date) => ok(new Set([...w.swept].filter((k) => k.endsWith(`|${date}`)).map((k) => k.split("|")[0] as never))),
+    markSwept: async (rule, date) => {
+      w.swept.add(`${rule}|${date}`);
     },
     now: () => nowMs,
     log: () => undefined,
@@ -426,10 +444,10 @@ async function main() {
     const [half] = await run([sheet([{ studentId: "st1", marksObtained: 41 }])]);
     assert.equal(half!.state, "ok");
     const mine = half!.state === "ok" ? half!.items : [];
-    const for5A = mine.filter((i) => i.lines.some((l) => l.en === "Half-yearly: Class 5 · A · Maths")).map((i) => i.staffId);
+    const for5A = mine.filter((i) => i.lines.some((l) => l.en === "Half-yearly (due 31 Oct): Class 5 · A · Maths")).map((i) => i.staffId);
     assert.deepEqual(for5A, [BINA, JAYA], "5-A Maths falls to its Maths teachers (published timetable) — not the class teacher");
     assert.ok(!mine.some((i) => i.staffId === ASHA), "the class teacher is not reminded while subject teachers exist");
-    assert.ok(mine.find((i) => i.staffId === ESHA)?.lines.some((l) => l.en === "Half-yearly: Class 5 · B · Maths"), "5-B has no sheet at all → pending");
+    assert.ok(mine.find((i) => i.staffId === ESHA)?.lines.some((l) => l.en === "Half-yearly (due 31 Oct): Class 5 · B · Maths"), "5-B has no sheet at all → pending");
     assert.equal(mine.find((i) => i.staffId === BINA)!.dueOn, "2026-10-31");
     const [full] = await run([sheet([{ studentId: "st1", marksObtained: 41 }, { studentId: "st2", marksObtained: 37 }])]);
     assert.ok(full!.state === "ok" && !full!.items.some((i) => i.lines.some((l) => l.en.includes("Class 5 · A"))), "every child marked → not pending");
@@ -447,7 +465,7 @@ async function main() {
     });
     const items = r!.state === "ok" ? r!.items : [];
     const of = (id: string) => items.find((i) => i.staffId === id);
-    assert.ok(of(PRIN)?.lines.some((l) => l.en === "1 staff leave request"), "the principal decides staff leave");
+    assert.ok(of(PRIN)?.lines.some((l) => l.en.startsWith("1 staff leave request · since 2 Nov")), "the principal decides staff leave");
     assert.ok(!of(HARI)?.kinds?.staff_leave, "never the applicant");
     assert.ok(of(CHETAN)?.lines.some((l) => l.en === "1 document to verify"), "6-A's class teacher verifies 6-A's document");
     assert.deepEqual(of(JAYA)?.lines.map((l) => l.en), ["1 complaint"], "an assigned complaint → its assignee only");
@@ -470,7 +488,11 @@ async function main() {
     const t2 = await runReminderTick(deps(w, at("08:30")), {});
     const p2 = t2.rules.find((x) => x.rule === "punch")!;
     assert.equal(p2.reminded, 0, "second tick the same day: nothing new stored");
-    assert.equal(p2.duplicate, punch.reminded, "…every one a duplicate");
+    assert.equal(p2.reason, "already sent today", "…the rule is already done today");
+    // Re-run by hand (?rule=punch): it computes again, and the dedupe key refuses every one.
+    const t2b = await runReminderTick(deps(w, at("08:31")), { rules: ["punch"] });
+    assert.equal(t2b.rules[0]!.reminded, 0, "forced re-run: nothing new stored");
+    assert.equal(t2b.rules[0]!.duplicate, punch.reminded, "…every one a duplicate");
     assert.equal(w.pushes.length, pushesAfterFirst, "…no push");
     assert.equal(w.wa.length, waAfterFirst, "…no WhatsApp");
 
@@ -597,11 +619,151 @@ async function main() {
     // Marks past their deadline are escalated whether or not a reminder went today.
     const marks = unansweredReminders({
       date: DATE,
-      results: [{ rule: "marks", state: "ok", items: [{ rule: "marks", staffId: BINA, count: 1, lines: [{ en: "x", hi: "x" }], dueOn: "2026-10-27", overdue: true }] }],
+      results: [{ rule: "marks", state: "ok", items: [{ rule: "marks", staffId: BINA, count: 1, lines: [{ en: "x", hi: "x", dueOn: "2026-10-27", overdue: true, termLabel: "HY" }], dueOn: "2026-10-27", overdue: true }] }],
       reminded: new Map([["marks", new Set<string>()]]),
       nameOf: (id) => id,
     });
-    assert.deepEqual(marks.rows[0]?.what, ["marks overdue (1)"]);
+    assert.deepEqual(marks.rows[0]?.what, ["marks overdue: HY due 27 Oct (1)"]);
+  }
+
+
+  // ── 11. Review fixes (29 Oct) ────────────────────────────────────────────
+  {
+    // #1 One overdue exam must not silence a teacher's in-window exam.
+    const g = (termId: string, termLabel: string, dueOn: string) => ({
+      termId, termLabel, dueOn, classId: C5, sectionId: S5A, sectionLabel: "Class 5 · A", subjectName: "Maths", teacherIds: [BINA],
+    });
+    const items = marksPending({ date: DATE, leadDays: 3, gaps: [g("ut1", "UT1", "2026-10-20"), g("ut2", "UT2", "2026-10-31")] });
+    const send = marksToRemind(items, DATE);
+    assert.equal(send.length, 1, "#1: UT2 (due 31 Oct) is still reminded although UT1 is overdue");
+    assert.deepEqual(send[0]!.lines.map((l) => l.en), ["UT2 (due 31 Oct): Class 5 · A · Maths"], "#1: only the in-window exam, with its own date");
+    assert.equal(send[0]!.dueOn, "2026-10-31");
+    assert.ok(items[0]!.lines.some((l) => l.en.startsWith("UT1 (due 20 Oct)")), "#1: the card keeps the overdue line with its date");
+    const b = unansweredReminders({
+      date: DATE,
+      results: [{ rule: "marks", state: "ok", items }],
+      reminded: new Map([["marks", new Set<string>()]]),
+      nameOf: (id) => id,
+    });
+    assert.deepEqual(b.rows[0]?.what, ["marks overdue: UT1 due 20 Oct (1)"], "#1: the brief names the overdue exam and its date");
+  }
+  {
+    // #2 The Play review demo child never makes marks pending.
+    const term = {
+      id: "t1", code: "HY", label: "Half-yearly", academicYearCode: AY, maxMarks: 100, sortOrder: 1, isActive: true,
+      startsOn: "", endsOn: "", note: "", countsTowardHy: true, countsTowardFinal: true, weightInHy: 20, weightInFinal: 20,
+      requiredOnMarksheet: true, requiresSeparateMarksheet: true,
+    };
+    const setup = {
+      terms: [term],
+      subjects: [{ id: "es_math", code: "MATH", name: "Maths", classIds: [C5], maxMarks: 100, sortOrder: 1, isActive: true }],
+      dateSheet: [], policy: normalizeExamPolicy({ marksDueByTerm: { t1: "2026-10-31" } }), promotions: [], rooms: [], seating: [],
+    };
+    const sheet = {
+      id: "ms1", academicYearCode: AY, examTermId: "t1", classId: C5, sectionId: S5A,
+      marks: ["st1", "st2"].map((studentId) => ({ studentId, marksObtained: 40, subjectId: "es_math", component: "", grade: "" })),
+      absences: [], coScholastic: [], overallRemarks: [], itemScores: [], lockedAt: null, enteredBy: "", updatedAt: "",
+    };
+    const withDemo = [...STUDENTS, student("demo5", C5, S5A, { admissionNo: "BHB-DEMO-5" } as Partial<SisStudent>)];
+    const [r] = await pending(world(), at("16:00"), ["marks"], {
+      students: async () => ok(withDemo),
+      examSetup: async () => ok(setup as never),
+      examSheets: async () => ok([sheet] as never),
+    });
+    assert.ok(r!.state === "ok" && !r!.items.some((i) => i.lines.some((l) => l.en.includes("Class 5 · A"))), "#2: every real child of 5-A marked → not pending (demo child ignored)");
+  }
+  {
+    // #3 PostgREST answers "+00:00", the save answered "Z": the same instant.
+    assert.equal(rules.settingsBaseMatches?.("2026-10-29T01:02:03.456+00:00", "2026-10-29T01:02:03.456Z"), true, "#3: same instant, different spelling → no 409");
+    assert.equal(rules.settingsBaseMatches?.("2026-10-29T01:02:03.456+00:00", "2026-10-29T01:02:04.000Z"), false, "#3: a newer save is a conflict");
+    assert.equal(rules.settingsBaseMatches?.("", ""), true, "#3: never saved on both sides");
+    assert.equal(rules.settingsBaseMatches?.("2026-10-29T01:02:03.456+00:00", ""), false, "#3: saved meanwhile");
+  }
+  {
+    // #4 The director's login has no roster row: still reminded of approvals.
+    const DIRECTOR = "director@bhbinternational.school";
+    const o: Overrides = { school: async () => ok({ masters, rbac, superAdminEmails: [DIRECTOR] }) };
+    const [r] = await pending(world(), at("17:30"), ["approvals"], o);
+    const items = r!.state === "ok" ? r!.items : [];
+    assert.ok(items.find((i) => i.staffId === DIRECTOR)?.lines.some((l) => l.en.startsWith("1 staff leave request")), "#4: off-roster owner gets the approvals reminder");
+    const card = await pendingWorkFor(deps(world(), at("17:30"), o), DIRECTOR, DATE);
+    assert.ok(card.items.some((i) => i.rule === "approvals"), "#4: …and sees it on the card");
+  }
+  {
+    // #5 The card answers from a short cache keyed by date + versions; unknown is never kept.
+    assert.equal(typeof run.createPendingCache, "function", "#5: a pending-work cache exists");
+    const cache = run.createPendingCache(60_000);
+    let calls = 0;
+    const good = async () => (calls++, { results: [{ rule: "punch" as const, state: "ok" as const, items: [] }] });
+    await cache.get("2026-10-29|v1", 1000, good);
+    await cache.get("2026-10-29|v1", 2000, good);
+    assert.equal(calls, 1, "#5: same date + versions within a minute → computed once");
+    await cache.get("2026-10-29|v2", 3000, good);
+    assert.equal(calls, 2, "#5: a data version moved → computed again");
+    await cache.get("2026-10-29|v2", 70_000, good);
+    assert.equal(calls, 3, "#5: older than the TTL → computed again");
+    let bad = 0;
+    const unknownRun = async () => (bad++, { results: [{ rule: "punch" as const, state: "unknown" as const, reason: "x" }] });
+    await cache.get("k", 1, unknownRun);
+    await cache.get("k", 2, unknownRun);
+    assert.equal(bad, 2, "#5: an unknown answer is never cached");
+  }
+  {
+    // #6 A rule a tick already finished today skips its heavy reads on the next tick.
+    const w = world();
+    await runReminderTick(deps(w, at("08:15")), {});
+    const reads = w.markReads;
+    assert.ok(reads > 0);
+    const t2 = await runReminderTick(deps(w, at("08:30")), {});
+    assert.equal(w.markReads, reads, "#6: second tick in the window does no staff-register read");
+    assert.equal(t2.rules.find((x) => x.rule === "punch")?.state, "off", "#6: …and reports the rule as done for today");
+    const w2 = world();
+    await runReminderTick(deps(w2, at("08:15"), { staffMarks: async () => bad("timeout") }), {});
+    await runReminderTick(deps(w2, at("08:30")), {});
+    assert.ok(w2.notifyCalls > 0, "#6: a tick that could not read is retried by the next one");
+  }
+  {
+    // #7 An unapproved template is a skip (not a failure), read once per tick.
+    const w = world();
+    const t = await runReminderTick(
+      deps(w, at("09:30"), {
+        whatsappSender: async () => {
+          w.senderReads += 1;
+          return { ok: false, reason: "not approved" };
+        },
+      } as Overrides),
+      {},
+    );
+    assert.equal(t.ok, true, "#7: tick is green while the template waits for Meta");
+    assert.ok(t.rules.every((r) => r.whatsapp.failed === 0), "#7: no WhatsApp counted as failed");
+    assert.ok(t.rules.some((r) => r.whatsapp.skipped > 0), "#7: counted as skipped");
+    assert.equal(w.senderReads, 1, "#7: template state read once for the tick (two rules ran)");
+  }
+  {
+    // #8 Leave long past is not reminded for ever; the age is said. Outdoor duty is today's only.
+    const old = { id: "lvOld", staffId: JAYA, status: "pending", fromDate: "2026-09-01", toDate: "2026-09-02", typeCode: "CL" } as LeaveRequest;
+    const recent = { id: "lvNew", staffId: BINA, status: "pending", fromDate: "2026-10-26", toDate: "2026-10-27", typeCode: "CL" } as LeaveRequest;
+    const [r] = await pending(world(), at("17:30"), ["approvals"], { staffLeave: async () => ok([old, recent]) });
+    const prin = r!.state === "ok" ? r!.items.find((i) => i.staffId === PRIN) : undefined;
+    assert.equal(prin?.kinds?.staff_leave, 1, "#8: leave that ended weeks ago is not reminded");
+    assert.ok(prin?.lines.some((l) => /since 26 Oct/.test(l.en)), "#8: the reminder says how old the waiting leave is");
+    assert.equal(typeof rules.outdoorDutyOnDay, "function", "#8: outdoor duty counted by day");
+    const day = rules.outdoorDutyOnDay([
+      { staffId: FARAH, status: "active", startedAt: "2026-10-29T03:00:00Z" },
+      { staffId: GOPAL, status: "active", startedAt: "2026-10-20T03:00:00Z" },
+      { staffId: HARI, status: "ended", startedAt: "2026-10-28T19:00:00Z" },
+    ], DATE);
+    assert.deepEqual([...day].sort(), [FARAH, HARI].sort(), "#8: a session left 'active' since 20 Oct does not exempt anyone today; one started 00:30 IST today does");
+  }
+  {
+    // #9 A declared holiday silences marks and approvals too.
+    const hol = {
+      ...masters,
+      holidays: [{ id: "h1", academicYearCode: AY, title: "Diwali", startsOn: DATE, endsOn: DATE, kind: "festival", scope: "school", groupCode: "", classIds: [], appliesTo: "everyone", mode: "one_off", weekday: null, dayType: "full", paidForStaff: true, exceptionDates: [], workingOverride: false, isPublished: true, publishedAt: null, publishedBy: "", note: "" }],
+    } as unknown as MastersState;
+    const o: Overrides = { school: async () => ok({ masters: hol, rbac, superAdminEmails: [] }) };
+    const res = await pending(world(), at("17:30"), ["marks", "approvals"], o);
+    assert.deepEqual(res.map((x) => x.state), ["off", "off"], "#9: holiday → marks and approvals off");
   }
 
   // ── 10. Kinds, links, text ───────────────────────────────────────────────

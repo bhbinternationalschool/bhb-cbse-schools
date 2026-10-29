@@ -26,6 +26,7 @@ import {
 } from "@/lib/exams";
 import { sectionReadiness, type ReadinessColumn } from "@/lib/examReadiness";
 import type { MastersState } from "@/lib/masters";
+import { isReviewDemoStudent } from "@/lib/reviewDemoRecords";
 import type { SisState } from "@/lib/sis";
 import { teachingSectionsFor } from "@/lib/staffTeachingScope";
 import type { TimetableGrid } from "@/lib/timetable";
@@ -104,7 +105,9 @@ export function computeMarksGaps(input: {
         .filter((x) => x.classId === cls.id && x.isActive !== false)
         .sort((a, b) => a.name.localeCompare(b.name));
       for (const sec of sections) {
-        const roster = rosterForSection(sis.students, sec.id, { classId: cls.id, academicYearCode: ay });
+        const roster = rosterForSection(sis.students, sec.id, { classId: cls.id, academicYearCode: ay }).filter(
+          (st) => !isReviewDemoStudent(st),
+        );
         if (roster.length === 0) continue;
         const subjects = subjectsForMarkEntry(cls.id, roster, state, deps);
         if (subjects.length === 0) continue;
