@@ -141,3 +141,78 @@ test("with no notices, the comms desk answering late does not move the screen ei
   }
   expect(errors, "no page errors").toEqual([]);
 });
+
+/**
+ * Masters → Subjects: the teachers' subject-requests card (components/masters/
+ * SubjectRequestsCard) sits above the subjects panel and is drawn only when a
+ * request exists. Its read answered after the step tabs were up and pushed
+ * them down ~96 px — after subject-request-approval writes requests, the
+ * same lost taps as the notices strip. Here the read is slowed and answers
+ * with a waiting request: the tabs must be where they first showed, and a tap
+ * pressed while the card arrives must still land.
+ */
+const REQUEST = {
+  id: "e2e_shift_request",
+  staffId: "e2e_staff",
+  staffName: "E2E Teacher",
+  classId: "e2e_class",
+  className: "V",
+  action: "add",
+  subjectId: "",
+  subjectName: "E2E Shift Subject",
+  reason: "E2E — a late request card.",
+  status: "pending",
+  decidedBy: "",
+  decidedAt: "",
+  decisionNote: "",
+  createdAt: NOW,
+};
+
+async function openWithSlowRequests(browser: Browser): Promise<{ page: Page; errors: string[] }> {
+  const context = await browser.newContext({ baseURL: APP_URL, viewport: { width: 1440, height: 900 }, serviceWorkers: "block" });
+  await signIn(context, "office");
+  const page = await context.newPage();
+  const errors = collectPageErrors(page);
+  await page.route("**/api/masters/subject-requests**", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await new Promise((r) => setTimeout(r, 2_000));
+    return route.fulfill({ json: { ok: true, pending: [REQUEST], recent: [] } });
+  });
+  await page.goto("/masters?tab=subjects");
+  return { page, errors };
+}
+
+const requestsCard = (p: Page) => p.getByRole("region", { name: "Teachers' subject requests" });
+
+test("the subject-requests card landing late does not move the step tabs (Masters → Subjects)", async ({ browser }) => {
+  const { page, errors } = await openWithSlowRequests(browser);
+  try {
+    const tab = page.getByRole("tab", { name: "3 · Subjects by class" });
+    await expect(tab).toBeVisible({ timeout: 30_000 });
+    const before = await tab.boundingBox();
+    await expect(requestsCard(page).getByText("E2E Shift Subject").first()).toBeVisible({ timeout: 20_000 });
+    const after = await tab.boundingBox();
+    expect(after?.y, `the step tab moved from y=${before?.y} to y=${after?.y} when the requests card arrived`).toBe(before?.y);
+    await page.screenshot({ path: test.info().outputPath("requests-landed.png") });
+  } finally {
+    await page.context().close();
+  }
+  expect(errors, "no page errors").toEqual([]);
+});
+
+test("a tap pressed while the subject-requests card arrives still lands (Masters → Subjects by class)", async ({ browser }) => {
+  const { page, errors } = await openWithSlowRequests(browser);
+  try {
+    const tab = page.getByRole("tab", { name: "3 · Subjects by class" });
+    await expect(tab).toBeVisible({ timeout: 30_000 });
+    const box = (await tab.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await expect(requestsCard(page).getByText("E2E Shift Subject").first()).toBeVisible({ timeout: 20_000 });
+    await page.mouse.up();
+    await expect(tab, "the tap selected the step").toHaveAttribute("aria-selected", "true");
+  } finally {
+    await page.context().close();
+  }
+  expect(errors, "no page errors").toEqual([]);
+});
