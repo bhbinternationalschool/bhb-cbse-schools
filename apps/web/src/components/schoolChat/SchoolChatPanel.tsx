@@ -176,6 +176,7 @@ function Thread({ id, studentId, compact, onBack, onSent }: { id: string; studen
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [composing, setComposing] = useState(false);
   // Opening a conversation marks it read on the server: the list's badge follows.
   useEffect(() => {
     if (q.data) void onSent();
@@ -196,6 +197,13 @@ function Thread({ id, studentId, compact, onBack, onSent }: { id: string; studen
     }
     setText("");
     if (r.data.held && r.data.notice) setNotice({ kind: "ok", text: r.data.notice });
+    void q.refetch();
+    void onSent();
+  }
+  async function withdraw(postId: string, title: string) {
+    if (!window.confirm(`Withdraw the homework "${title}"? It leaves this chat and the Homework module (families stop seeing it).`)) return;
+    const r = await chatPost("/api/v1/school-chat/work", { op: "withdraw", postId });
+    setNotice(r.ok ? { kind: "ok", text: "Homework withdrawn." } : { kind: "error", text: r.error });
     void q.refetch();
     void onSent();
   }
@@ -238,7 +246,20 @@ function Thread({ id, studentId, compact, onBack, onSent }: { id: string; studen
                 data-status={m.status}
               >
                 {!m.mine ? <p className="text-xs font-semibold text-[var(--brand-accent)]">{m.senderLabel}</p> : null}
-                <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                {m.card ? (
+                  <WorkCardView
+                    card={m.card}
+                    mine={m.mine}
+                    onWithdraw={m.card.kind === "homework" && v.conversation.compose ? () => void withdraw(m.card!.refId, m.card!.title) : undefined}
+                  />
+                ) : m.senderKind === "staff" && m.body.startsWith("Notice: ") ? (
+                  <div data-testid="school-chat-notice-card">
+                    <p className="text-[10px] font-bold uppercase tracking-wide opacity-80">Notice</p>
+                    <p className="whitespace-pre-wrap break-words font-semibold">{m.body.slice(8)}</p>
+                  </div>
+                ) : (
+                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                )}
                 {m.notice ? <p className="mt-1 text-xs">{m.notice}</p> : null}
                 {v.conversation.moderator && m.senderSubject ? (
                   <p className="mt-1 flex gap-2 text-[10px]">
@@ -261,7 +282,27 @@ function Thread({ id, studentId, compact, onBack, onSent }: { id: string; studen
           {notice.text}
         </p>
       ) : null}
-      {v && v.conversation.canSend ? (
+      {v && v.conversation.compose && composing ? (
+        <WorkComposer
+          conversationId={id}
+          compose={v.conversation.compose}
+          onClose={() => setComposing(false)}
+          onPosted={(text) => {
+            setComposing(false);
+            setNotice({ kind: "ok", text });
+            void q.refetch();
+            void onSent();
+          }}
+        />
+      ) : null}
+      {v && v.conversation.compose && !composing ? (
+        <div className="flex justify-end border-t border-[var(--border)] px-3 pt-2">
+          <button type="button" className={btn} onClick={() => setComposing(true)} data-testid="school-chat-post-work">
+            + Homework / classwork / notice
+          </button>
+        </div>
+      ) : null}
+      {v && v.conversation.canSend && !composing ? (
         <div className="flex gap-2 border-t border-[var(--border)] p-3">
           <textarea
             aria-label="Message"
@@ -440,6 +481,179 @@ function GroupMaker({ compact, onClose, onMade }: { compact: boolean; onClose: (
       <div className="border-t border-[var(--border)] p-3">
         <button type="button" className={`${btnPrimary} w-full`} disabled={busy || !title.trim() || picked.length === 0} onClick={() => void make()}>
           {busy ? "Making the group…" : "Make group"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** A homework / classwork card: the Homework module's own record. */
+function WorkCardView({ card: c, mine, onWithdraw }: { card: NonNullable<MessagesView["messages"][number]["card"]>; mine: boolean; onWithdraw?: () => void }) {
+  return (
+    <div data-testid="school-chat-work-card" data-kind={c.kind} className="space-y-1">
+      <p className={`text-[10px] font-bold uppercase tracking-wide ${mine ? "text-white/80" : "text-[var(--brand-accent)]"}`}>
+        {c.kind === "homework" ? "Homework" : "Classwork"}
+        {c.subject ? ` · ${c.subject}` : ""}
+      </p>
+      <p className="font-semibold">{c.title}</p>
+      {c.body && c.body !== c.title ? <p className="whitespace-pre-wrap break-words">{c.body}</p> : null}
+      {c.bodyHi ? <p className="whitespace-pre-wrap break-words opacity-90">{c.bodyHi}</p> : null}
+      {c.dueAt ? <p className="text-xs font-semibold">Due {c.dueAt}</p> : null}
+      {c.attachments.length ? (
+        <ul className="space-y-0.5 text-xs">
+          {c.attachments.map((a) => (
+            <li key={a.id}>
+              <a href={a.url} target="_blank" rel="noreferrer" className="underline">
+                {a.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <p className={`text-[10px] ${mine ? "text-white/70" : "text-[var(--muted)]"}`}>
+        Also in Homework{c.kind === "classwork" ? " (class diary)" : ""} · {c.date}
+        {onWithdraw ? (
+          <>
+            {" · "}
+            <button type="button" className="underline" onClick={onWithdraw}>
+              Withdraw
+            </button>
+          </>
+        ) : null}
+      </p>
+    </div>
+  );
+}
+
+const ATTACH_ACCEPT = "image/jpeg,image/png,image/webp,application/pdf";
+
+/** Post homework (into the Homework module), classwork (the class diary) or a notice. */
+function WorkComposer({
+  conversationId,
+  compose,
+  onClose,
+  onPosted,
+}: {
+  conversationId: string;
+  compose: { subjects: { id: string; name: string }[]; fixedSubject: string };
+  onClose: () => void;
+  onPosted: (text: string) => void;
+}) {
+  const [kind, setKind] = useState<"homework" | "classwork" | "notice">("homework");
+  const [subjectId, setSubjectId] = useState(compose.fixedSubject || compose.subjects[0]?.id || "");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [dueAt, setDueAt] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const field = "w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--ink)]";
+
+  async function upload(classAndSection: { classId: string; sectionId: string }): Promise<{ id: string; label: string; url: string }[] | null> {
+    const out: { id: string; label: string; url: string }[] = [];
+    for (const f of files) {
+      const form = new FormData();
+      form.set("file", f);
+      form.set("classId", classAndSection.classId);
+      form.set("sectionId", classAndSection.sectionId);
+      form.set("label", f.name.slice(0, 80));
+      const res = await fetch("/api/v1/staff/homework/attachment", { method: "POST", body: form, credentials: "same-origin" }).catch(() => null);
+      const j = (await res?.json().catch(() => null)) as { ok?: boolean; data?: { attachment?: { id: string; label: string; url: string } }; error?: { message?: string } } | null;
+      if (!res?.ok || !j?.ok || !j.data?.attachment) {
+        setError(`${f.name}: ${j?.error?.message || "could not be uploaded"} — nothing was posted.`);
+        return null;
+      }
+      out.push(j.data.attachment);
+    }
+    return out;
+  }
+
+  async function post() {
+    setError("");
+    setBusy(true);
+    try {
+      let attachments: { id: string; label: string; url: string }[] = [];
+      if (kind === "homework" && files.length) {
+        const parts = conversationId.split(":");
+        const up = await upload({ classId: parts[2] || "", sectionId: parts[3] || "" });
+        if (!up) return;
+        attachments = up;
+      }
+      const r = await chatPost<{ kind: string; wa?: { families: number; sent: number } }>("/api/v1/school-chat/work", {
+        conversationId,
+        kind,
+        subjectId,
+        title,
+        body,
+        ...(kind === "homework" ? { dueAt, attachments } : {}),
+      });
+      if (!r.ok) {
+        setError(r.error);
+        return;
+      }
+      onPosted(
+        kind === "homework"
+          ? `Homework posted — it is in the Homework module too${r.data.wa ? `; WhatsApp to ${r.data.wa.sent} of ${r.data.wa.families} families` : ""}.`
+          : kind === "classwork"
+            ? "Classwork posted — it is in the class diary too."
+            : "Notice posted.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 border-t border-[var(--border)] p-3 text-sm" data-testid="school-chat-work-composer">
+      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="What to post">
+        {(["homework", "classwork", "notice"] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            role="radio"
+            aria-checked={kind === k}
+            onClick={() => setKind(k)}
+            className={`rounded-full px-3 py-1 text-xs font-semibold ${kind === k ? "bg-[var(--brand-deep)] text-white" : "border border-[var(--border)] text-[var(--ink)]"}`}
+          >
+            {k === "homework" ? "Homework" : k === "classwork" ? "Classwork" : "Notice"}
+          </button>
+        ))}
+      </div>
+      {kind !== "notice" ? (
+        <select aria-label="Subject" className={field} value={subjectId} disabled={!!compose.fixedSubject} onChange={(e) => setSubjectId(e.target.value)}>
+          {kind === "classwork" ? <option value="">No subject</option> : null}
+          {compose.subjects.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      <input aria-label="Title" className={field} maxLength={140} placeholder={kind === "homework" ? "e.g. Ex 5.2, Q1–5" : kind === "classwork" ? "What was done in class" : "Notice title"} value={title} onChange={(e) => setTitle(e.target.value)} />
+      <textarea aria-label="Details" className={`${field} min-h-[60px]`} maxLength={1800} placeholder="Details (optional)" value={body} onChange={(e) => setBody(e.target.value)} />
+      {kind === "homework" ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1 text-xs text-[var(--muted)]">
+            Due
+            <input aria-label="Due date" type="date" className={`${field} w-auto`} value={dueAt} onChange={(e) => setDueAt(e.target.value)} />
+          </label>
+          <label className="text-xs text-[var(--muted)]">
+            <span className="mr-1">Photo / PDF</span>
+            <input aria-label="Attachments" type="file" accept={ATTACH_ACCEPT} multiple onChange={(e) => setFiles([...(e.target.files ?? [])].slice(0, 5))} />
+          </label>
+        </div>
+      ) : null}
+      {error ? (
+        <p className="text-xs text-[var(--danger)]" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="flex justify-end gap-2">
+        <button type="button" className={btn} onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className={btnPrimary} disabled={busy || !title.trim() || (kind === "homework" && !subjectId)} onClick={() => void post()}>
+          {busy ? "Posting…" : "Post"}
         </button>
       </div>
     </div>

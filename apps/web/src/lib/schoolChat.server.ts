@@ -61,6 +61,7 @@ import {
 } from "@/lib/schoolChat";
 import { admitThenModerate, heldNotice, type Classifier, type ModerationOutcome } from "@/lib/schoolChatModeration";
 import { notifySchoolChat } from "@/lib/schoolChatNotify.server";
+import { cardText, readWorkForSections, workComposerFor, workForGroup, type WorkCard, type WorkItem } from "@/lib/schoolChatWork.server";
 
 type Sb = NonNullable<Awaited<ReturnType<typeof getServerTenantContext>>>["sb"];
 type Tenant = { sb: Sb; tenantId: string };
@@ -555,6 +556,19 @@ export async function listConversations(
       const mine = actor.kind === "staff" ? m.sender_kind === "staff" && m.sender_id === actor.staffId : m.household_id === actor.householdId;
       if (!mine && m.created_at > (readAt.get(m.conversation_id) || "")) unread.set(m.conversation_id, (unread.get(m.conversation_id) || 0) + 1);
     }
+    // Homework / classwork cards count as messages of their groups (the
+    // Homework module's rows, one read for every listed section).
+    if (groups.length) {
+      const items = await readWorkForSections(ctx.masters, roster.ay, [...new Set(groups.map((g) => g.sectionId))]);
+      for (const g of groups) {
+        for (const w of workForGroup(items, g)) {
+          const prev = last.get(g.id);
+          if (!prev || w.createdAt > prev.at) last.set(g.id, { body: cardText(w.card), at: w.createdAt });
+          const mine = actor.kind === "staff" && w.card.teacherStaffId === actor.staffId;
+          if (!mine && w.createdAt > (readAt.get(g.id) || "")) unread.set(g.id, (unread.get(g.id) || 0) + 1);
+        }
+      }
+    }
   }
   const conversations = items
     .filter((i) => blockVerdict(blocks, subjectsOf(actor, i.kind === "dm_parent"), i.id).canRead)
@@ -596,6 +610,12 @@ export type ChatMessageOut = {
   notice?: string;
   /** Moderators only: whose message it is, for mute / block. */
   senderSubject?: ChatSubject;
+  /**
+   * A homework / classwork card: the Homework module's own record, read
+   * now (lib/schoolChatWork.server). `body` holds the same as text, for an
+   * app that does not draw cards.
+   */
+  card?: WorkCard;
 };
 
 function isMine(actor: ChatActor, m: Pick<MsgRow, "sender_kind" | "sender_id" | "household_id">): boolean {
@@ -606,9 +626,12 @@ export async function readMessages(
   ctx: ApiAuthContext,
   actor: ChatActor,
   conversationId: string,
-): Promise<{ conversation: ConversationAccess & { canSend: boolean; muted: boolean; moderator: boolean }; messages: ChatMessageOut[] }> {
+): Promise<{
+  conversation: ConversationAccess & { canSend: boolean; muted: boolean; moderator: boolean; compose: { subjects: { id: string; name: string }[]; fixedSubject: string } | null };
+  messages: ChatMessageOut[];
+}> {
   const t = await chatTenant();
-  const { access } = await accessConversation(ctx, t, actor, conversationId);
+  const { access, roster } = await accessConversation(ctx, t, actor, conversationId);
   const subjects = subjectsOf(actor, access.speakAs === "parent");
   const verdict = blockVerdict(await activeBlocksFor(t, subjects), subjects, access.id);
   if (!verdict.canRead) throw new ApiError("forbidden", "The school has paused your chat. Please speak to the class teacher.", 403);
@@ -624,6 +647,10 @@ export async function readMessages(
   const rows = ((data ?? []) as MsgRow[]).reverse();
   const seeAll = actor.kind === "staff" && actor.moderator;
   const messages: ChatMessageOut[] = [];
+  // Homework and classwork of a class / subject group: the Homework
+  // module's rows, as cards (one record — never copied into the chat).
+  const g = access.group;
+  const work: WorkItem[] = g ? workForGroup(await readWorkForSections(ctx.masters, roster.ay, [g.sectionId]), g) : [];
   for (const m of rows) {
     const mine = isMine(actor, m);
     if (m.status !== "visible" && !mine && !seeAll) continue;
@@ -639,6 +666,23 @@ export async function readMessages(
       ...(m.status === "held" ? { notice: mine ? heldNotice(m.moderation?.categories ?? [], m.sender_kind) : "Held for review — only you (a moderator) and the sender see it." } : {}),
     });
   }
+  if (work.length) {
+    const cards: ChatMessageOut[] = work.map((w) => ({
+      id: `${w.card.kind === "homework" ? "hw" : "cw"}:${w.card.refId}`,
+      senderLabel: staffLabel(w.card.teacherName),
+      senderKind: "staff",
+      body: cardText(w.card),
+      createdAt: w.createdAt,
+      mine: actor.kind === "staff" && !!w.card.teacherStaffId && w.card.teacherStaffId === actor.staffId,
+      status: "visible",
+      card: w.card,
+    }));
+    messages.push(...cards);
+    messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+  // Who may post homework / classwork here (the Homework module's rule).
+  const compose =
+    g && actor.kind === "staff" && !access.oversight ? await workComposerFor(ctx, g.classId, g.sectionId) : null;
   if (!access.oversight) {
     const { error: rErr } = await t.sb.from("school_chat_members").upsert(
       {
@@ -652,7 +696,17 @@ export async function readMessages(
     );
     if (rErr) console.warn("[school-chat] read marker not saved:", rErr.message);
   }
-  return { conversation: { ...access, canSend: verdict.canSend && !access.oversight && !access.readOnly, muted: !verdict.canSend, moderator: seeAll }, messages };
+  return {
+    conversation: {
+      ...access,
+      canSend: verdict.canSend && !access.oversight && !access.readOnly,
+      muted: !verdict.canSend,
+      moderator: seeAll,
+      // null = this person cannot post homework / classwork here.
+      compose: compose && g ? { subjects: g.kind === "subject" ? compose.subjects.filter((x) => x.id === g.subjectId) : compose.subjects, fixedSubject: g.kind === "subject" ? g.subjectId : "" } : null,
+    },
+    messages,
+  };
 }
 
 // ── Sending ──────────────────────────────────────────────────────────────
