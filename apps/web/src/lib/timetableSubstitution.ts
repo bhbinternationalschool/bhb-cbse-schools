@@ -9,8 +9,12 @@
 
 import type { MastersState } from "@/lib/masters";
 import type { StaffRecord } from "@/lib/foundationMasters";
-import { findStaffRegister, loadStaffAttendance } from "@/lib/staffAttendance";
-import { loadStaffHr } from "@/lib/staffHr";
+import {
+  findStaffRegister,
+  loadStaffAttendance,
+  type StaffAttendanceRegister,
+} from "@/lib/staffAttendance";
+import { loadStaffHr, type LeaveRequest } from "@/lib/staffHr";
 import { examBlocksForClassDate, isoDateWeekday } from "@/lib/examTimetable";
 import { overlaps } from "@/lib/timetableRules";
 import {
@@ -75,24 +79,30 @@ function teachesSubject(
 }
 
 /**
- * Teachers absent on a date: staff attendance marks A / LE / HD for that
- * day, plus approved leave requests covering the date.
+ * Teachers absent on a date, computed from an already-loaded register and
+ * leave list — PURE, no storage access.
+ *
+ * Kept separate from `absentTeachersForDate` (the loader-backed wrapper
+ * below) so callers that already hold the data — notably the Substitution
+ * panel, which must hydrate the staff-attendance and HR desk slices on the
+ * timetable screen before this can see anything — can feed it in directly,
+ * and so it is unit-testable without a browser. A / LE / HD marks win over
+ * an approved-leave row for the same person (attendance is the day's truth);
+ * `L` (Late) is present, not absent, and is ignored.
  */
-export function absentTeachersForDate(
-  masters: MastersState,
-  academicYearCode: string,
-  date: string,
-): AbsentTeacher[] {
+export function absentTeachersFromData(input: {
+  staff: StaffRecord[];
+  academicYearCode: string;
+  date: string;
+  register: StaffAttendanceRegister | null;
+  leaveRequests: LeaveRequest[];
+}): AbsentTeacher[] {
+  const { staff, academicYearCode, date, register, leaveRequests } = input;
   const out = new Map<string, AbsentTeacher>();
   const activeIds = new Set(
-    (masters.staff ?? []).filter((s) => s.status === "active").map((s) => s.id),
+    (staff ?? []).filter((s) => s.status === "active").map((s) => s.id),
   );
 
-  const register = findStaffRegister(
-    loadStaffAttendance(),
-    date,
-    academicYearCode,
-  );
   for (const mark of register?.marks ?? []) {
     if (!activeIds.has(mark.staffId)) continue;
     if (mark.status === "A") {
@@ -116,7 +126,7 @@ export function absentTeachersForDate(
     }
   }
 
-  for (const req of loadStaffHr().leaveRequests) {
+  for (const req of leaveRequests ?? []) {
     if (req.status !== "approved") continue;
     if (req.academicYearCode !== academicYearCode) continue;
     if (!req.fromDate || !req.toDate) continue;
@@ -131,6 +141,33 @@ export function absentTeachersForDate(
   }
 
   return [...out.values()];
+}
+
+/**
+ * Teachers absent on a date: staff attendance marks A / LE / HD for that
+ * day, plus approved leave requests covering the date.
+ *
+ * Loader-backed wrapper around {@link absentTeachersFromData}. On the client
+ * this reads localStorage, so the caller must have hydrated the
+ * staff-attendance and HR slices first (see SubstitutionPanel); on the
+ * server the loaders are empty unless a server hydrate ran.
+ */
+export function absentTeachersForDate(
+  masters: MastersState,
+  academicYearCode: string,
+  date: string,
+): AbsentTeacher[] {
+  return absentTeachersFromData({
+    staff: masters.staff ?? [],
+    academicYearCode,
+    date,
+    register: findStaffRegister(
+      loadStaffAttendance(),
+      date,
+      academicYearCode,
+    ),
+    leaveRequests: loadStaffHr().leaveRequests,
+  });
 }
 
 function sessionGrids(
