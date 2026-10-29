@@ -71,7 +71,7 @@ jobs:
       - name: Test — school chat membership, blocks and the message check
         working-directory: apps/web
         run: npm run test:school-chat
-      - name: Test — school chat work posts (one record, one WhatsApp)
+      - name: Test — school chat work cards
         working-directory: apps/web
         run: npm run test:school-chat-work
 
