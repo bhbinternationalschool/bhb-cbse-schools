@@ -39,6 +39,8 @@ import { useExpenseKpi } from "@/components/dashboard/expenseKpi";
 import { hasPermission } from "@/lib/rbac";
 import { useAccessData } from "@/components/shell/useAccessData";
 import { useMasters } from "@/lib/data/client/hooks";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { QueryError } from "@/components/data/QueryError";
 
 export function SchoolHomeDashboard() {
   const session = useDemoSession();
@@ -58,6 +60,10 @@ export function SchoolHomeDashboard() {
   // gate decide with (data-layer 2.1f), and waits for them — never a guess
   // from a roster or roles that have not loaded.
   const access = useAccessData();
+  // The school's book as data (data-layer 2.3b): the home tiles and the
+  // at-risk count are built from it, never from the tab's page copy.
+  const screen = useScreenMasters();
+  const homeMasters = screen.masters;
   // Expenses tile — only for those who may see the school's money position
   // (the report behind it needs accounts_position on the server too).
   const expenseKpi = useExpenseKpi(
@@ -120,10 +126,12 @@ export function SchoolHomeDashboard() {
 
   useEffect(() => {
     if (!isSuperAdminSession(session)) return;
+    if (!homeMasters) return;
     let cancelled = false;
     try {
       const defaulters = listLiveDefaulters({
         academicYearCode: session.academicYearCode,
+        masters: homeMasters,
       });
       if (!cancelled) setAtRiskCount(countAtRiskDefaulters(defaulters));
     } catch {
@@ -132,7 +140,7 @@ export function SchoolHomeDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [session, tick]);
+  }, [session, tick, homeMasters]);
 
   if (!forceFull && shouldShowPrincipalCockpit(session)) {
     return <PrincipalCockpit />;
@@ -172,7 +180,14 @@ export function SchoolHomeDashboard() {
     );
   }
 
-  const model = buildSchoolDashboard(session.academicYearCode);
+  if (!homeMasters) {
+    if (screen.error) {
+      return <QueryError what="the school's classes, subjects and staff" error={screen.error} retry={screen.retry} />;
+    }
+    return <p className="text-base text-[var(--muted)]">Loading school dashboard…</p>;
+  }
+
+  const model = buildSchoolDashboard(session.academicYearCode, homeMasters);
 
   // Never a desk figure as a stand-in: while the position is loading or if it
   // cannot be read, the tile keeps its placeholder rather than a wrong number.

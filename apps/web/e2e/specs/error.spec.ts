@@ -248,3 +248,57 @@ for (const c of ACCESS_503) {
     }
   });
 }
+
+/**
+ * Data-layer 2.3b: a save check is decided on the roles and roster the
+ * module gate uses (views/rbac + views/staff-list), not the page copies.
+ * The certificates clerk's Students grant is a school-made role assigned to
+ * her — it exists only in the stored rbac. Here the old rbac page-copy
+ * hydrate (desk-slice/rbac) fails, as it does when it is slow or refused,
+ * while the views answer and the old roster copy lands (she is a peon on
+ * it, so that copy alone makes her "support"): the clerk opens Students → Birthdays (the gate
+ * reads the views) and saves the card settings (lib/birthdayCards
+ * saveBirthdayState: assertModulePermission students·edit). The save must go
+ * out and she must not be told "You do not have permission".
+ * On origin/main before 2.3b-1 the check read loadRbac() — the built-in
+ * roles, without her role — and the roster copy: "support", which holds no
+ * Students edit — and refused her with "You do not have permission
+ * for this action" (no write left the page). The write itself is answered
+ * here by the test (503) so the shared stack is not changed.
+ */
+test(`certClerk /students Birthdays: the rbac page copy fails but views/rbac answered — the save goes out, never "You do not have permission"`, async ({ browser }, testInfo) => {
+  const context = await browser.newContext({ baseURL: APP_URL, viewport: { width: 1440, height: 900 } });
+  await signIn(context, "certClerk");
+  const page = await context.newPage();
+  try {
+    let copyHits = 0;
+    await page.route("**/api/school-data/desk-slice/rbac**", (route) => {
+      if (route.request().method() !== "GET") return route.continue();
+      copyHits += 1;
+      return route.fulfill({ status: 503, contentType: "application/json", body: FAILED_READ });
+    });
+    const writes: string[] = [];
+    await page.route("**/api/school-data/module-state/birthday_settings**", (route) => {
+      if (route.request().method() === "GET") return route.fallback();
+      writes.push(route.request().method());
+      return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ ok: false, error: "e2e: not written" }) });
+    });
+    // The old roster page copy lands (she is a peon on it); only the rbac
+    // page copy is missing — the state a save check met on old code.
+    const rosterCopy = page.waitForResponse((r) => r.url().includes("/api/school-data/staff-roster") && r.request().method() === "GET", { timeout: 30_000 });
+    await page.goto("/students?tab=birthdays");
+    expect((await rosterCopy).ok(), "the roster page copy answered").toBe(true);
+    const principal = page.getByPlaceholder("Blank = signed by the office alone").first();
+    await expect(principal).toBeEnabled({ timeout: 30_000 });
+    expect(copyHits, "the page asked for the rbac page copy (and it failed)").toBeGreaterThan(0);
+    await principal.fill("e2e Principal");
+    await page.getByRole("button", { name: "Save birthday settings" }).click();
+    await test.step("the save goes out; no permission refusal", async () => {
+      await expect.poll(() => writes.length, { timeout: 15_000, message: "the birthday settings write left the page" }).toBeGreaterThan(0);
+      await expect(page.getByText(/You do not have permission/)).toHaveCount(0);
+    });
+    await metric(testInfo, "error", { page: "/students?tab=birthdays", who: "certClerk", read: "desk-slice/rbac (page copy) 503", writes: writes.length });
+  } finally {
+    await context.close();
+  }
+});

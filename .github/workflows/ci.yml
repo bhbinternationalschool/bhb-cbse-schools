@@ -733,6 +733,7 @@ jobs:
           npm run test:versions-route
           npm run test:query-kernel
           npm run test:access-copy
+          npm run test:rbac-guard-access
           npm run test:view-load-metric
           npm run test:reference-views
           npm run test:masters-bridge

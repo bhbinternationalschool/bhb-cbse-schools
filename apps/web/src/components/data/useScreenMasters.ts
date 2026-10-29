@@ -35,7 +35,7 @@ export type ScreenMasters = {
  */
 export function useScreenMasters(opts: { enabled?: boolean } = {}): ScreenMasters {
   const q = useMasters(opts);
-  const access = useAccessData();
+  const access = useAccessData({ enabled: opts.enabled });
   const accessMasters = access.ready ? access.masters : null;
   // The staff side comes from the access copy (useStaffList, 2.3a); the
   // students projection (PAGE_OWNED_MASTERS_KEYS: built in this tab from the
