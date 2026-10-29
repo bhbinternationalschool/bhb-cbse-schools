@@ -1591,6 +1591,49 @@ class StaffApprovals {
   final int total;
 }
 
+// ---------------------------------------------------------- my pending work
+
+/// One reminder rule's pending work for the signed-in member of staff
+/// (GET /api/v1/staff/pending-work, web lib/staffReminders.ts).
+class PendingWorkItem {
+  PendingWorkItem.fromJson(Map<String, dynamic> j)
+    : rule = _s(j, "rule"),
+      label = _s(j, "label"),
+      title = _s(j, "title"),
+      body = _s(j, "body"),
+      lines = ((j["lines"] as List?) ?? const []).whereType<String>().toList(),
+      count = _i(j, "count"),
+      link = _s(j, "link"),
+      dueOn = _s(j, "dueOn"),
+      overdue = _b(j, "overdue");
+
+  /// punch | register | homework | marks | approvals
+  final String rule;
+  final String label;
+  final String title;
+  final String body;
+  final List<String> lines;
+  final int count;
+
+  /// In-app route, e.g. "/attendance" — the home's deep-link switch opens it.
+  final String link;
+  final String dueOn;
+  final bool overdue;
+}
+
+class StaffPendingWork {
+  StaffPendingWork.fromJson(Map<String, dynamic> j)
+    : date = _s(j, "date"),
+      items = _list(j, "items").map(PendingWorkItem.fromJson).toList(),
+      unknown = _list(j, "unknown").map((u) => _s(u, "label")).toList();
+
+  final String date;
+  final List<PendingWorkItem> items;
+
+  /// Parts that could not be checked — shown as such, never as "nothing due".
+  final List<String> unknown;
+}
+
 // ---------------------------------------------------------------------- calls
 
 extension StaffApi on ApiClient {
@@ -1875,6 +1918,9 @@ extension StaffApi on ApiClient {
 
   Future<Cached<StaffApprovals>?> cachedApprovals() =>
       peekCached("/api/v1/staff/approvals", StaffApprovals.fromJson);
+
+  Future<StaffPendingWork> fetchPendingWork() async =>
+      StaffPendingWork.fromJson(await _getData("/api/v1/staff/pending-work"));
 
   Future<StaffRoster> fetchStaffRoster() async =>
       StaffRoster.fromJson(await _getData("/api/v1/staff/roster"));

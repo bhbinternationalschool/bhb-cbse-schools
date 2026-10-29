@@ -40,7 +40,6 @@ const deviceKeys: [string, RegExp][] = [
 // (review of #637 — surveyor B working as surveyor A; A's mute silencing B).
 const personKeys: [string, RegExp][] = [
   ["components/field/SurveyAgentApp.tsx", /const LOCAL_MEMBER_KEY = "([^"]+)"/],
-  ["lib/chatAlerts.ts", /const PREF_KEY = "([^"]+)"/],
 ];
 for (const [file, re] of personKeys) {
   const m = src(file).match(re);

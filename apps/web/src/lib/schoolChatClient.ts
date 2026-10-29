@@ -20,10 +20,21 @@ export type ConversationsView = {
   me: { kind: "staff"; staffId: string } | { kind: "family"; studentId: string; section: string };
 };
 export type MessagesView = {
-  conversation: ConversationAccess & { canSend: boolean; muted: boolean; moderator: boolean };
+  conversation: ConversationAccess & {
+    canSend: boolean;
+    muted: boolean;
+    moderator: boolean;
+    /** Homework / classwork / notice composer: null = this person cannot post work here. */
+    compose: { subjects: { id: string; name: string }[]; fixedSubject: string } | null;
+  };
   messages: ChatMessageOut[];
 };
-export type ContactsView = { staff: { id: string; name: string; role: string }[]; families: { studentId: string; label: string }[] };
+export type ContactsView = {
+  staff: { id: string; name: string; role: string }[];
+  families: { studentId: string; label: string }[];
+  /** Sections the caller may add to a new group (staff). */
+  sections: { classId: string; sectionId: string; label: string }[];
+};
 export type QueueView = { items: QueueItem[] };
 export type BlocksView = { blocks: (ChatBlock & { liftedAt: string | null; liftReason: string })[] };
 export type BehaviourView = {

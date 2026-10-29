@@ -35,6 +35,7 @@ const ROLE_CHARTERS = {
   academic_incharge: systemFor("academic-incharge"),
   marketing_manager: systemFor("marketing-manager"),
   transport_manager: systemFor("transport-manager"),
+  social_manager: systemFor("social-manager"),
   chair: systemFor("chair"),
 };
 
@@ -1315,7 +1316,7 @@ const it = $input.first().json;
 const m = it.parsed || {};
 const decisions = Array.isArray(m.decisions) ? m.decisions : [];
 const minutes = it.parse_error ? ('Minutes could not be structured (' + it.parse_error + ').\\n' + String(it.text || '').slice(0, 3000)) : String(m.minutes || '').trim();
-const roles = ['receptionist', 'academic_incharge', 'marketing_manager', 'transport_manager', 'director'];
+const roles = ['receptionist', 'academic_incharge', 'marketing_manager', 'transport_manager', 'social_manager', 'director'];
 const task_rows = decisions.map((d) => ({ tenant_id: $env.OFFICE_TENANT_ID, from_role: 'chair', to_role: roles.includes(d.to_role) ? d.to_role : 'director',
   title: String(d.title || 'Decision').slice(0, 80), detail: String(d.detail || '').slice(0, 600), status: 'open', source: 'huddle', approval_state: 'none',
   due_on: d.due_on || null, payload: { kind: 'huddle_decision', meeting_date: it.today } }));
@@ -1387,18 +1388,23 @@ const updates = res.ok && Array.isArray(res.result) ? res.result : [];
 if (!updates.length) return [];
 const st = $getWorkflowStaticData('global');
 st.tg_offset = Math.max(...updates.map((u) => Number(u.update_id || 0))) + 1;
+// Director/principal come from env (tgRoleOf); anyone the director added with
+// /adduser is a 'reader' from the office_bot_users table. roleOf prefers env.
+const users = (() => { try { return $('Fetch: bot users').all().map((i) => i.json).filter((u) => u && u.chat_id); } catch (e) { return []; } })();
+const userRole = (id) => { const u = users.find((x) => String(x.chat_id) === String(id)); return u ? (u.role || 'reader') : ''; };
+const roleOf = (id) => tgRoleOf(id) || userRole(id);
 // (?![a-z]) instead of \\b: JS word boundaries are ASCII-only, so Devanagari words never matched.
 // End-anchored: a BARE approve/reject word (optionally a draft number) is a
 // decision; anything longer is a free-form instruction for the assistant.
 const APPROVE = /^\\s*\\/?(approve|approved|ok|okay|yes|haan|ha|हाँ|हां|ठीक)\\s*#?\\s*(\\d+)?\\s*$/i;
 const REJECT = /^\\s*\\/?(reject|rejected|cancel|nahi|nahin|नहीं|रद्द)\\s*#?\\s*(\\d+)?\\s*$/i;
-const COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan', marketing: 'marketing', transport: 'transport' };
+const COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan', marketing: 'marketing', transport: 'transport', social: 'social', users: 'users' };
 const out = [];
 for (const u of updates) {
   const cq = u.callback_query;
   if (cq) {
     const chat_id = String((cq.message && cq.message.chat && cq.message.chat.id) || (cq.from && cq.from.id) || '');
-    const role = tgRoleOf(chat_id);
+    const role = roleOf(chat_id);
     const data = String(cq.data || '');
     const base = { chat_id, role, callback_id: cq.id, message_id: cq.message ? cq.message.message_id : null, message_text: cq.message ? String(cq.message.text || '') : '' };
     if (!role) continue;
@@ -1410,21 +1416,67 @@ for (const u of updates) {
     if ((ta || data === 'doneall') && role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
     if (data === 'doneall') { out.push({ json: { kind: 'taskaction', action: 'doneall', task_id: null, ...base } }); continue; }
     if (data === 'tasks') { out.push({ json: { kind: 'command', cmd: 'tasks', ...base } }); continue; }
+    // Numbered-menu + delegation callbacks (parallel to the draft approve path).
+    const sel = /^tsel:(\\d+)$/.exec(data); if (sel) { if (role === 'director') out.push({ json: { kind: 'command', cmd: 'tpick', task_id: Number(sel[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const tcl = /^tclose:(\\d+)$/.exec(data); if (tcl) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'close', task_id: Number(tcl[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const tsz = /^tsnz:(\\d+)$/.exec(data); if (tsz) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'snooze', task_id: Number(tsz[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const tas = /^tasg:(\\d+)$/.exec(data); if (tas) { if (role === 'director') out.push({ json: { kind: 'command', cmd: 'tassign', task_id: Number(tas[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const ast = /^aset:(\\d+):(.+)$/.exec(data); if (ast) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'assign_set', task_id: Number(ast[1]), assignee: String(ast[2]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const dlg = /^(dok|dno|dchg):(\\d+)$/.exec(data); if (dlg) { if (role) out.push({ json: { kind: 'taskaction', action: dlg[1], task_id: Number(dlg[2]), ...base } }); continue; }
     continue;
   }
   const msg = u.message;
   if (!msg || !msg.text) continue;
   const chat_id = String(msg.chat && msg.chat.id || '');
-  const role = tgRoleOf(chat_id);
+  const role = roleOf(chat_id);
   const text = String(msg.text || '').trim();
   const base = { chat_id, role, callback_id: null, message_id: null, message_text: '' };
+  // A reply to an approval message is a comment (optionally a decision). The
+  // replied message carries the task id as "#<id>"; the action hub looks the
+  // task up and applies it only where safe (assigned tasks / social / proposals).
+  const rep = msg.reply_to_message;
+  if (rep && role) {
+    const ridm = /#(\\d{1,10})(?![0-9])/.exec(String(rep.text || rep.caption || ''));
+    if (ridm) {
+      const low = text.toLowerCase();
+      let dec = 'comment';
+      if (/(approve|approved|^ok\\b|^okay\\b|^yes\\b|haan|^ha\\b|ठीक|हाँ|हां)/.test(low)) dec = 'dok';
+      else if (/(reject|rejected|^no\\b|nahi|nahin|नहीं)/.test(low)) dec = 'dno';
+      else if (/(change|changes|modify|revise|send back|सुधार|बदल)/.test(low)) dec = 'dchg';
+      out.push({ json: { kind: 'taskaction', action: dec, task_id: Number(ridm[1]), comment: text.slice(0, 500), ...base } });
+      continue;
+    }
+  }
+  // Director-only user management (needs arguments, so handled before the
+  // plain-command match). /adduser <chatid> <name>, /removeuser <chatid>.
+  const au = /^\\/adduser\\s+(\\S+)(?:\\s+([\\s\\S]+))?$/i.exec(text);
+  if (au) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'adduser', add_chat: au[1].replace(/[^0-9-]/g, ''), add_name: String(au[2] || '').trim().slice(0, 60), ...base } }); else if (role) out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+  const ru = /^\\/removeuser\\s+(\\S+)/i.exec(text);
+  if (ru) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'removeuser', add_chat: ru[1].replace(/[^0-9-]/g, ''), ...base } }); else if (role) out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
   const cmd = /^\\/([a-z]+)(?:@\\w+)?\\b/i.exec(text);
   if (cmd && COMMANDS[cmd[1].toLowerCase()]) {
     const name = COMMANDS[cmd[1].toLowerCase()];
-    if (role || name === 'start') out.push({ json: { kind: 'command', cmd: name, ...base } });
+    if (name === 'start') { out.push({ json: { kind: 'command', cmd: 'start', ...base } }); continue; }
+    if (!role) continue;
+    if (name === 'users' && role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
+    const READER_OK = ['tasks', 'huddle', 'plan', 'marketing', 'transport', 'social'];
+    if (role === 'reader' && !READER_OK.includes(name)) continue;
+    out.push({ json: { kind: 'command', cmd: name, ...base } });
     continue;
   }
   if (!role) continue;
+  // Numbered-menu typing (director): a bare number selects that task; "close N"
+  // / "snooze N" act on it; "assign N" opens the assignee menu. N is the display
+  // number from the last /tasks list (same created_at order everywhere).
+  const num = /^(\\d{1,3})$/.exec(text);
+  if (num && role === 'director') { out.push({ json: { kind: 'command', cmd: 'tpick', num: Number(num[1]), ...base } }); continue; }
+  const act = /^(close|snooze|assign)\\s+#?(\\d{1,3})$/i.exec(text);
+  if (act && role === 'director') {
+    const a1 = act[1].toLowerCase();
+    if (a1 === 'assign') out.push({ json: { kind: 'command', cmd: 'tassign', num: Number(act[2]), ...base } });
+    else out.push({ json: { kind: 'taskaction', action: a1, num: Number(act[2]), ...base } });
+    continue;
+  }
   const ta = /^\\/(done|close|snooze)\\s+#?(\\d+|all)\\b/i.exec(text);
   if (ta) {
     if (role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
@@ -1448,7 +1500,13 @@ for (const u of updates) {
 return out;
 `,
   );
-  wf.chain(tick, buildPoll, poll, parse);
+  const getUsers = sbGet(
+    wf,
+    "Fetch: bot users",
+    "office_bot_users",
+    `tenant_id=eq.${TENANT}&is_active=eq.true&select=chat_id,role,name&order=created_at.asc&limit=100`,
+  );
+  wf.chain(tick, getUsers, buildPoll, poll, parse);
   const kind = switchOn(wf, "Switch: update kind", "kind", ["decision", "command", "taskaction", "assistant"]);
   wf.link(parse, kind);
 
@@ -1683,7 +1741,14 @@ return out;
     `tenant_id=eq.${TENANT}&status=neq.archived&select=month,channel,cap_amount,allocated,spent,currency&order=month.desc&limit=100`,
     { row: 1 },
   );
-  wf.chain(openTasks, huddle, plan, mktgNote, mktgBudget, transNote, transBudget);
+  const socialNote = sbGet(
+    wf,
+    "Fetch: latest social",
+    "office_notes",
+    `tenant_id=eq.${TENANT}&role=eq.social_manager&select=body,facts,created_at&order=created_at.desc&limit=1`,
+    { row: 1 },
+  );
+  wf.chain(openTasks, huddle, plan, mktgNote, mktgBudget, transNote, transBudget, socialNote);
   const commandReplies = code(
     wf,
     "Build: command replies",
@@ -1696,9 +1761,14 @@ const mktg = rows('Fetch: latest marketing')[0] || null;
 const budgetRows = rows('Fetch: marketing budget');
 const trans = rows('Fetch: latest transport')[0] || null;
 const transBudgetRows = rows('Fetch: transport budget');
+const social = rows('Fetch: latest social')[0] || null;
+const users = rows('Fetch: bot users').filter((u) => u.chat_id);
 const asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'command');
 const today = isoDate(istNow());
 const line = (t) => '#' + t.id + ' [' + t.to_role + '] ' + t.title + (t.due_on ? ' (due ' + t.due_on + ')' : '') + (t.approval_state === 'pending' ? ' — waiting for you' : '');
+// Resolve a task from a tap (task_id) or a typed display number (num); the
+// number is the task's 1-based position in the created_at-ordered open list.
+const pickTask = (a) => { if (a.task_id) { const i = tasks.findIndex((t) => Number(t.id) === Number(a.task_id)); return i >= 0 ? { t: tasks[i], n: i + 1 } : null; } if (a.num) { const t = tasks[a.num - 1]; return t ? { t, n: a.num } : null; } return null; };
 const out = [];
 const send = (chat_id, text, keyboard) => {
   const chunks = tgChunks(text);
@@ -1712,10 +1782,12 @@ for (const a of asks) {
   if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });
   if (a.cmd === 'start') {
     const who = a.role ? 'You are the ' + a.role + '.' : 'This chat is not registered yet. Give the office this chat id: <code>' + tgEscape(a.chat_id) + '</code>';
-    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n/drafts — replies waiting for your decision\\n/tasks — open tasks (tap to close or defer)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan\\n/marketing — cost per lead, spend vs budget, this week\\'s survey beats\\n/transport — fleet safety, fuel, spend vs budget' : ''));
+    const common = '/tasks — open tasks (pick a number to close, snooze or assign)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan\\n/marketing — cost per lead, spend vs budget\\n/transport — fleet safety, fuel, spend vs budget\\n/social — today\\'s gallery posts for approval';
+    const dir = '\\n/drafts — replies waiting for your decision\\n/users — people you added · /adduser &lt;id&gt; &lt;name&gt; · /removeuser &lt;id&gt;';
+    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n' + common + (a.role === 'director' ? dir : '') : ''));
     continue;
   }
-  if (a.cmd === 'not_director') { send(a.chat_id, 'Only the director decides drafts.'); continue; }
+  if (a.cmd === 'not_director') { send(a.chat_id, 'Only the director can do that.'); continue; }
   if (a.cmd === 'drafts') {
     const drafts = tasks.filter((t) => t.approval_state === 'pending' && t.source === 'receptionist');
     if (!drafts.length) { send(a.chat_id, 'No draft is waiting for a decision.'); continue; }
@@ -1725,14 +1797,47 @@ for (const a of asks) {
     continue;
   }
   if (a.cmd === 'tasks') {
-    if (!tasks.length) { send(a.chat_id, 'No open tasks.'); continue; }
-    const body = '<b>Open tasks (' + tasks.length + ')</b>\\n' + tasks.map((t) => tgEscape(line(t))).join('\\n');
+    if (!tasks.length) { send(a.chat_id, 'No open tasks. 🎉'); continue; }
+    const shortOf = (t) => String(t.title || t.detail || 'task').replace(/\\s+/g, ' ').trim().slice(0, 48);
+    const numbered = tasks.map((t, i) => (i + 1) + '. ' + tgEscape(String(t.title || t.detail || 'task').replace(/\\s+/g, ' ').trim().slice(0, 80))
+      + (t.to_role && t.to_role !== 'director' ? ' (' + tgEscape(t.to_role) + ')' : '')
+      + (t.payload && t.payload.assigned_name ? ' → ' + tgEscape(t.payload.assigned_name) + (t.approval_state === 'pending' ? ' (awaiting)' : '') : '')).join('\\n');
+    // Director: one labelled button per task (the title IS on the button, not a
+    // bare number), tap → its action menu. Plus the typed number / "close N".
     let keyboard = null;
     if (a.role === 'director') {
-      keyboard = tasks.slice(0, 8).map((t) => [{ text: '✅ Done ' + t.id, callback_data: 'done:' + t.id }, { text: '💤 Snooze ' + t.id, callback_data: 'snooze:' + t.id }]);
-      keyboard.push([{ text: '✅ Clear all ' + tasks.length, callback_data: 'doneall' }]);
+      keyboard = tasks.slice(0, 10).map((t, i) => [{ text: (i + 1) + '. ' + shortOf(t), callback_data: 'tsel:' + t.id }]);
     }
-    send(a.chat_id, body + (tasks.length > 8 ? '\\n\\n(Buttons for the first 8 - for the rest reply /done <id> or /snooze <id>.)' : ''), keyboard);
+    const hint = a.role === 'director' ? '\\n\\nTap a task to Close / Snooze / Assign — or reply with its number (e.g. "2"), or "close 2".' : '';
+    send(a.chat_id, '<b>Open tasks (' + tasks.length + ')</b>\\n' + numbered + hint, keyboard);
+    continue;
+  }
+  if (a.cmd === 'tpick') {
+    const pick = pickTask(a);
+    if (!pick) { send(a.chat_id, 'That task is no longer open. Send /tasks for the current list.'); continue; }
+    const t = pick.t, n = pick.n;
+    const keyboard = [
+      [{ text: '✅ Close', callback_data: 'tclose:' + t.id }, { text: '💤 Snooze', callback_data: 'tsnz:' + t.id }],
+      [{ text: '👤 Assign for approval', callback_data: 'tasg:' + t.id }],
+      [{ text: '↩ Back to tasks', callback_data: 'tasks' }],
+    ];
+    send(a.chat_id, '▸ <b>Task ' + n + '</b> — ' + tgEscape(String(t.title || '')) + (t.detail ? '\\n' + tgEscape(String(t.detail).slice(0, 300)) : '')
+      + '\\n\\nClose it, snooze to tomorrow, or assign it to someone for approval.\\n(Or type "close ' + n + '" / "snooze ' + n + '" / "assign ' + n + '".)', keyboard);
+    continue;
+  }
+  if (a.cmd === 'tassign') {
+    const pick = pickTask(a);
+    if (!pick) { send(a.chat_id, 'That task is no longer open. Send /tasks for the current list.'); continue; }
+    if (!users.length) { send(a.chat_id, 'No people added yet. Add one with <code>/adduser &lt;chat id&gt; &lt;name&gt;</code> — they open the bot and tap Start to get their chat id.'); continue; }
+    const t = pick.t, n = pick.n;
+    const kb = users.slice(0, 12).map((u, i) => [{ text: (i + 1) + '. ' + (u.name || String(u.chat_id)), callback_data: 'aset:' + t.id + ':' + u.chat_id }]);
+    kb.push([{ text: '↩ Back', callback_data: 'tsel:' + t.id }]);
+    send(a.chat_id, 'Assign <b>Task ' + n + '</b> — ' + tgEscape(String(t.title || '')) + '\\n\\nWho should approve it?', kb);
+    continue;
+  }
+  if (a.cmd === 'users') {
+    if (!users.length) { send(a.chat_id, 'No people added yet.\\n\\nAdd one: <code>/adduser &lt;chat id&gt; &lt;name&gt;</code>\\nThey open the bot and tap Start to get their chat id.'); continue; }
+    send(a.chat_id, '<b>People (' + users.length + ')</b>\\n' + users.map((u, i) => (i + 1) + '. ' + tgEscape(u.name || '(no name)') + ' — <code>' + tgEscape(String(u.chat_id)) + '</code>' + (u.role && u.role !== 'reader' ? ' [' + tgEscape(u.role) + ']' : '')).join('\\n') + '\\n\\nAdd: <code>/adduser &lt;chat id&gt; &lt;name&gt;</code>\\nRemove: <code>/removeuser &lt;chat id&gt;</code>');
     continue;
   }
   if (a.cmd === 'huddle') {
@@ -1821,6 +1926,17 @@ for (const a of asks) {
     send(a.chat_id, lines.join('\\n'));
     continue;
   }
+  if (a.cmd === 'social') {
+    const f = (social && social.facts) || {};
+    const lines = ['<b>Social — today</b>'];
+    const drafts = Array.isArray(f.drafts) ? f.drafts : [];
+    if (drafts.length) { lines.push('\\n<b>Drafts for approval</b>'); for (const d of drafts.slice(0, 6)) lines.push(tgEscape('• ' + (d.title || d.content_id || '') + (Array.isArray(d.platforms) && d.platforms.length ? ' → ' + d.platforms.join(', ') : ''))); }
+    if (Array.isArray(f.connected) && f.connected.length) lines.push(tgEscape('Connected: ' + f.connected.join(', ') + '.'));
+    if (Array.isArray(f.not_connected) && f.not_connected.length) lines.push(tgEscape('Not connected (drafts queue): ' + f.not_connected.join(', ') + '.'));
+    if (!drafts.length) { if (social) lines.push('\\n' + tgEscape(String(social.body || '').slice(0, 2500))); else lines.push('\\nNo social note yet — the Social Media Manager runs every morning at 7.'); }
+    send(a.chat_id, lines.join('\\n'));
+    continue;
+  }
 }
 return out;
 `,
@@ -1842,31 +1958,137 @@ const TENANT = String($env.OFFICE_TENANT_ID || '');
 const H = { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json', Prefer: 'return=representation' };
 const now = new Date().toISOString();
 const tomorrow = isoDate(new Date(istNow().getTime() + 86400000));
-const sb = async (method, pathq, body) => {
-  const res = await this.helpers.httpRequest({ method, url: SB + '/rest/v1/' + pathq, headers: H, body: body ? JSON.stringify(body) : undefined });
+const sb = async (method, pathq, body, prefer) => {
+  const h = prefer ? { ...H, Prefer: prefer } : H;
+  const res = await this.helpers.httpRequest({ method, url: SB + '/rest/v1/' + pathq, headers: h, body: body ? JSON.stringify(body) : undefined });
   if (typeof res === 'string') { try { return JSON.parse(res); } catch (e) { return []; } }
   return res;
 };
-const open = await sb('GET', 'office_tasks?tenant_id=eq.' + TENANT + '&status=in.(open,doing)&select=id,to_role,title,due_on,payload&order=created_at.asc&limit=200');
+const open = await sb('GET', 'office_tasks?tenant_id=eq.' + TENANT + '&status=in.(open,doing)&select=id,to_role,title,detail,source,due_on,payload,approval_state&order=created_at.asc&limit=200');
 const openArr = Array.isArray(open) ? open : [];
 const openIds = new Set(openArr.map((t) => Number(t.id)));
+// resolve a task by explicit id (tap) or typed display number (1-based)
+const resolve = (a) => { if (a.task_id && openIds.has(Number(a.task_id))) return openArr.find((t) => Number(t.id) === Number(a.task_id)); if (a.num && openArr[a.num - 1]) return openArr[a.num - 1]; return null; };
+const usersList = await sb('GET', 'office_bot_users?tenant_id=eq.' + TENANT + '&is_active=eq.true&select=chat_id,name,role');
+const usersArr = Array.isArray(usersList) ? usersList : [];
+const nameOf = (chat) => { const u = usersArr.find((x) => String(x.chat_id) === String(chat)); return u && u.name ? u.name : String(chat); };
 const out = [];
 const seen = new Set();
+const ack = (chat, text) => out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: chat, text: text, parse_mode: 'HTML', disable_web_page_preview: true } } });
 for (const a of asks) {
   if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });
+
+  // ── add / remove a bot user (director only; parse already gated) ──
+  if (a.action === 'adduser') {
+    const chat = String(a.add_chat || '').trim();
+    if (!chat) { ack(a.chat_id, 'Give a numeric chat id: /adduser &lt;chat id&gt; &lt;name&gt;'); continue; }
+    try { await sb('POST', 'office_bot_users?on_conflict=tenant_id,chat_id', { tenant_id: TENANT, chat_id: chat, role: 'reader', name: String(a.add_name || ''), added_by: String(a.chat_id || 'director'), is_active: true, updated_at: now }, 'resolution=merge-duplicates,return=representation');
+      ack(a.chat_id, '✅ Added <b>' + tgEscape(a.add_name || chat) + '</b> (<code>' + tgEscape(chat) + '</code>). They get the morning notes, the read commands, and can be assigned tasks to approve.'); }
+    catch (e) { ack(a.chat_id, 'Could not add that user: ' + tgEscape(String((e && e.message) || e).slice(0, 200))); }
+    continue;
+  }
+  if (a.action === 'removeuser') {
+    const chat = String(a.add_chat || '').trim();
+    try { await sb('PATCH', 'office_bot_users?tenant_id=eq.' + TENANT + '&chat_id=eq.' + encodeURIComponent(chat), { is_active: false, updated_at: now }); ack(a.chat_id, '✅ Removed <code>' + tgEscape(chat) + '</code>.'); }
+    catch (e) { ack(a.chat_id, 'Could not remove that user.'); }
+    continue;
+  }
+
+  // ── assign a task to someone for approval (director) ──
+  if (a.action === 'assign_set') {
+    const t = resolve(a);
+    if (!t) { ack(a.chat_id, 'That task is no longer open. Send /tasks for the current list.'); continue; }
+    const chat = String(a.assignee || ''); const nm = nameOf(chat);
+    try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { approval_state: 'pending', updated_at: now, payload: { ...(t.payload || {}), assigned_to: chat, assigned_name: nm, assigned_by: String(a.chat_id), assigned_at: now } }); }
+    catch (e) { ack(a.chat_id, 'Could not assign that task.'); continue; }
+    ack(a.chat_id, '📨 Assigned to <b>' + tgEscape(nm) + '</b> for approval: ' + tgEscape(String(t.title || '')));
+    out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: chat, parse_mode: 'HTML', disable_web_page_preview: true,
+      text: '📨 <b>For your approval</b> #' + t.id + '\\n' + tgEscape(String(t.title || '')) + (t.detail ? '\\n' + tgEscape(String(t.detail).slice(0, 400)) : '') + '\\n\\n<i>Reply to this message to add a comment.</i>',
+      reply_markup: { inline_keyboard: [[{ text: '✅ Approve', callback_data: 'dok:' + t.id }, { text: '❌ Reject', callback_data: 'dno:' + t.id }], [{ text: '✍️ Send back for changes', callback_data: 'dchg:' + t.id }]] } } } });
+    continue;
+  }
+
+  // ── assignee (or director) approves / rejects / sends back, with a comment ──
+  if (a.action === 'dok' || a.action === 'dno' || a.action === 'dchg' || a.action === 'comment') {
+    const t = resolve(a);
+    if (!t) { ack(a.chat_id, 'That task is no longer open.'); continue; }
+    const src = String(t.source || '');
+    // Gmail / assistant drafts are sent by the Approve-button path; never close
+    // one from a typed reply — guide the user to the buttons instead.
+    if ((a.action === 'dok' || a.action === 'dno') && (src === 'receptionist' || src === 'assistant')) {
+      ack(a.chat_id, 'For that draft, use the ✅ Approve / ❌ Reject buttons on its message.'); continue;
+    }
+    const assigned = String((t.payload || {}).assigned_to || '');
+    const isDirector = tgRoleOf(a.chat_id) === 'director';
+    if (!isDirector && String(a.chat_id) !== assigned) { ack(a.chat_id, 'That task is not assigned to you.'); continue; }
+    const cmt = String(a.comment || '').trim();
+    const who = nameOf(a.chat_id);
+    const quote = cmt ? '\\n“' + tgEscape(cmt) + '”' : '';
+    if (a.action === 'comment') {
+      try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { updated_at: now, payload: { ...(t.payload || {}), last_comment: cmt, last_comment_by: who, last_comment_at: now } }); } catch (e) {}
+      ack(a.chat_id, '💬 Comment noted on #' + t.id + '.');
+      if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, '💬 ' + tgEscape(who) + ' on #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);
+      continue;
+    }
+    if (a.action === 'dchg') {
+      try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { approval_state: 'changes', status: 'open', updated_at: now, payload: { ...(t.payload || {}), change_note: cmt, change_by: who, change_at: now } }); } catch (e) { ack(a.chat_id, 'Could not send it back.'); continue; }
+      ack(a.chat_id, '✍️ Sent back for changes: ' + tgEscape(String(t.title || '')) + quote);
+      const assigner = String((t.payload || {}).assigned_by || '');
+      if (assigner && assigner !== String(a.chat_id)) ack(assigner, '✍️ ' + tgEscape(who) + ' sent back #' + t.id + ' for changes — ' + tgEscape(String(t.title || '')) + quote);
+      else if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, '✍️ ' + tgEscape(who) + ' sent back #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);
+      continue;
+    }
+    // Social posts: approving actually publishes via the ERP cross-post route.
+    if (a.action === 'dok' && src === 'social') {
+      const pl = t.payload || {};
+      const plats = (Array.isArray(pl.platforms) ? pl.platforms : []).filter((x) => x === 'facebook' || x === 'instagram' || x === 'telegram');
+      const secret = String($env.SOCIAL_CROSS_POST_SECRET || '');
+      const base = String($env.ERP_BASE_URL || '').replace(/\\/$/, '');
+      let postMsg;
+      if (!secret || !base) postMsg = 'posting not configured yet (needs SOCIAL_CROSS_POST_SECRET)';
+      else if (!plats.length) postMsg = 'no channels were set on this draft';
+      else {
+        try {
+          const res = await this.helpers.httpRequest({ method: 'POST', url: base + '/api/integrations/social/cross-post',
+            headers: { 'x-social-cross-post-secret': secret, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: pl.kind || 'gallery', contentId: String(pl.content_id || ''), title: String(pl.post_title || t.title || 'Post'), body: String(pl.caption || ''), platforms: plats }) });
+          const r = typeof res === 'string' ? (JSON.parse(res || '{}') || {}) : (res || {});
+          const rr = Array.isArray(r.results) ? r.results : [];
+          const okp = rr.filter((x) => x && x.ok && !x.skipped).map((x) => x.platform);
+          const sk = rr.filter((x) => x && x.skipped).map((x) => x.platform);
+          const fl = rr.filter((x) => x && !x.ok && !x.skipped).map((x) => x.platform);
+          postMsg = [okp.length ? 'posted to ' + okp.join(', ') : '', sk.length ? 'queued (not connected): ' + sk.join(', ') : '', fl.length ? 'failed: ' + fl.join(', ') : ''].filter(Boolean).join('; ') || 'cross-post returned no result';
+        } catch (e) { postMsg = 'post failed: ' + String((e && e.message) || e).slice(0, 160); }
+      }
+      try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { approval_state: 'approved', status: 'done', decided_by: who, decided_at: now, updated_at: now, payload: { ...pl, approved_by: String(a.chat_id), approved_at: now, post_result: postMsg } }); } catch (e) {}
+      ack(a.chat_id, '✅ Approved: ' + tgEscape(String(t.title || '')) + '\\n' + tgEscape(postMsg));
+      continue;
+    }
+    const approve = a.action === 'dok';
+    const patch = approve
+      ? { approval_state: 'approved', status: 'done', decided_by: who, decided_at: now, updated_at: now, payload: { ...(t.payload || {}), approved_by: String(a.chat_id), approved_at: now, decision_comment: cmt } }
+      : { approval_state: 'rejected', status: 'open', updated_at: now, payload: { ...(t.payload || {}), rejected_by: String(a.chat_id), rejected_at: now, decision_comment: cmt } };
+    try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, patch); } catch (e) { ack(a.chat_id, 'Could not record that.'); continue; }
+    ack(a.chat_id, (approve ? '✅ You approved: ' : '🚫 You rejected: ') + tgEscape(String(t.title || '')) + quote);
+    if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, (approve ? '✅ ' : '🚫 ') + tgEscape(who) + (approve ? ' approved' : ' rejected') + ' #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);
+    continue;
+  }
+
+  // ── close / snooze / clear-all (director) ──
   let ids = [];
   if (a.action === 'doneall') ids = openArr.map((t) => Number(t.id));
-  else if (a.task_id && openIds.has(Number(a.task_id))) ids = [Number(a.task_id)];
-  if (!ids.length) { out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: a.chat_id, text: a.task_id ? 'No open task #' + a.task_id + '.' : 'No open tasks to clear.' } } }); continue; }
-  let done = 0;
+  else { const t = resolve(a); if (t) ids = [Number(t.id)]; }
+  if (!ids.length) { ack(a.chat_id, a.num ? ('No task ' + a.num + ' — send /tasks for the list.') : (a.task_id ? 'No open task #' + a.task_id + '.' : 'No open tasks.')); continue; }
+  let done = 0; let dispNum = null;
   for (const id of ids) {
     if (seen.has(id)) continue; seen.add(id);
-    const cur = openArr.find((t) => Number(t.id) === id) || {};
+    const idx = openArr.findIndex((t) => Number(t.id) === id); if (dispNum == null) dispNum = idx + 1;
+    const cur = openArr[idx] || {};
     const patch = a.action === 'snooze' ? { due_on: tomorrow, updated_at: now, payload: { ...(cur.payload || {}), snoozed_until: tomorrow, snoozed_by: 'director' } } : { status: 'done', decided_by: 'director', decided_at: now, updated_at: now };
     try { await sb('PATCH', 'office_tasks?id=eq.' + id + '&tenant_id=eq.' + TENANT, patch); done += 1; } catch (e) {}
   }
-  const label = a.action === 'doneall' ? ('Cleared ' + done + ' open task' + (done === 1 ? '' : 's') + '.') : (a.action === 'snooze' ? ('Task #' + ids[0] + ' snoozed to ' + tomorrow + '.') : ('Task #' + ids[0] + ' closed.'));
-  out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: a.chat_id, text: '✅ ' + label } } });
+  const label = a.action === 'doneall' ? ('Cleared ' + done + ' open task' + (done === 1 ? '' : 's') + '.') : (a.action === 'snooze' ? ('Task ' + dispNum + ' snoozed to ' + tomorrow + '.') : ('Task ' + dispNum + ' closed.'));
+  ack(a.chat_id, '✅ ' + label);
 }
 return out;
 })();
@@ -2761,6 +2983,220 @@ return r.length ? [{ json: { rows: r } }] : [];
   return wf;
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   7. Social Media Manager
+   ═══════════════════════════════════════════════════════════════
+   Daily 07:00 IST. Reads the school gallery (school_comms_desk_photos /
+   _albums — only review_status 'ok', not storage-evicted), what has already
+   been cross-posted (school_comms_cross_posts), what it has already proposed
+   (office_tasks source 'social'), and which channels are connected
+   (social_integrations_state: a Meta token + FB page id, an Instagram business
+   id, a Telegram channel). Sonnet picks up to three strong, unposted items and
+   drafts a caption + tagline per item in the family's language, and names the
+   channels for each. Nothing posts: the daily note and each draft go to the
+   director; a draft is a plain open office_tasks row (source 'social') with the
+   gallery content id + caption + target channels. Approving a draft to actually
+   post (through the cross-post route) lands with the approval update. Children's
+   photos: only review-approved media, captions never name a child. */
+function buildSocialManager() {
+  const wf = new Workflow(
+    "Office — Social Media Manager",
+    "Daily 07:00 IST: scans the school gallery for new review-approved photos/videos not yet posted, checks which channels are connected (Meta/Instagram/Telegram), and has Sonnet draft a caption + tagline per pick in the family's language. Nothing posts — the daily note and each draft (gallery content id + caption + channels) go to the director for approval; captions never name a child.",
+  );
+  const W = "social-manager";
+
+  const trigger = cron(wf, "Every day 07:00 IST", "0 7 * * *");
+  const ctx = code(
+    wf,
+    "Context",
+    `${JS_DATES}
+const now = istNow();
+const today = isoDate(now);
+return [{ json: { today, ay: academicYearCode(now), since30: isoDate(new Date(now.getTime() - 30 * 86400000)), run_at: new Date().toISOString() } }];
+`,
+  );
+  wf.chain(trigger, ctx);
+
+  const getPhotos = sbGet(
+    wf,
+    "Fetch: gallery media",
+    "school_comms_desk_photos",
+    `tenant_id=eq.${TENANT}&review_status=eq.ok&storage_evicted_at=is.null&select=id,album_id,url,caption,uploaded_at,media_kind&order=uploaded_at.desc&limit=100`,
+  );
+  const getAlbums = sbGet(
+    wf,
+    "Fetch: gallery albums",
+    "school_comms_desk_albums",
+    `tenant_id=eq.${TENANT}&status=eq.published&select=id,title,class_label,published_at&order=published_at.desc&limit=60`,
+  );
+  const getPosted = sbGet(
+    wf,
+    "Fetch: cross posts",
+    "school_comms_cross_posts",
+    `select=content_id,platform,status,posted_at&order=posted_at.desc&limit=300`,
+  );
+  const getProposed = sbGet(
+    wf,
+    "Fetch: social proposed",
+    "office_tasks",
+    `tenant_id=eq.${TENANT}&source=eq.social&select=payload,status,created_at&order=created_at.desc&limit=100`,
+  );
+  const getState = sbGet(
+    wf,
+    "Fetch: social integrations",
+    "social_integrations_state",
+    `tenant_id=eq.${TENANT}&select=state&limit=1`,
+  );
+  const getTasks = sbGet(
+    wf,
+    "Fetch: my open tasks",
+    "office_tasks",
+    `tenant_id=eq.${TENANT}&to_role=eq.social_manager&status=in.(open,doing)&select=id,title,detail,due_on,from_role,created_at&order=due_on.asc.nullslast&limit=50`,
+  );
+  wf.chain(ctx, getPhotos, getAlbums, getPosted, getProposed, getState, getTasks);
+
+  const assemble = code(
+    wf,
+    "Assemble",
+    `${JS_REQUEST}
+const SYSTEM = ${JSON.stringify(ROLE_CHARTERS.social_manager)};
+const ctx = $('Context').first().json;
+const rows = (name) => { try { return $(name).all().map((i) => i.json).filter((r) => r && Object.keys(r).length); } catch (e) { return []; } };
+const photos = rows('Fetch: gallery media');
+const albums = rows('Fetch: gallery albums');
+const posted = rows('Fetch: cross posts');
+const proposed = rows('Fetch: social proposed');
+const tasks = rows('Fetch: my open tasks');
+const state = (rows('Fetch: social integrations')[0] || {}).state || {};
+
+// Which channels can actually receive a post right now.
+const hasMetaToken = String(state.metaAccessToken || '').length > 20;
+const connected = {
+  facebook: hasMetaToken && String(state.facebookPageId || '').length > 0,
+  instagram: hasMetaToken && String(state.instagramBusinessId || '').length > 0,
+  telegram: String(state.telegramChannelId || '').length > 0,
+};
+const notConnected = Object.keys(connected).filter((k) => !connected[k]);
+
+// Candidate media: review-approved, not already posted, not already proposed.
+const postedIds = new Set(posted.map((p) => String(p.content_id)));
+const proposedIds = new Set(proposed.map((t) => String((t.payload || {}).content_id || '')).filter(Boolean));
+const albumTitle = {};
+for (const al of albums) albumTitle[al.id] = al.title || '';
+const candidates = photos
+  .filter((p) => !postedIds.has(String(p.id)) && !proposedIds.has(String(p.id)))
+  .slice(0, 30)
+  .map((p) => ({ content_id: p.id, album: albumTitle[p.album_id] || '', media_kind: p.media_kind || 'photo', caption: String(p.caption || '').slice(0, 200), uploaded_at: p.uploaded_at }));
+
+const data = {
+  date: ctx.today, academic_year: ctx.ay,
+  connected_channels: Object.keys(connected).filter((k) => connected[k]),
+  not_connected: notConnected,
+  gallery_candidates: candidates,
+  albums: albums.slice(0, 20).map((a) => ({ id: a.id, title: a.title, class: a.class_label })),
+  nothing_new: candidates.length === 0,
+  my_open_tasks: tasks.map((t) => ({ id: t.id, title: t.title, from: t.from_role })),
+};
+const user = 'Draft today\\'s social posts from the gallery candidates below. Pick up to three strong, unposted items; for each write a caption (2-4 lines) and a short tagline in the family\\'s language, and name the channels to post to from connected_channels. Captions must never name a child or give a class/contact detail. If there is nothing new (nothing_new true), pick nothing and say so. Return only the JSON object described in your charter under "Output format".\\n\\n' + JSON.stringify(data);
+return [{ json: { ctx, connected, not_connected: notConnected, candidate_count: candidates.length,
+  request: claudeRequest({ model: ${JSON.stringify(MODELS.write)}, system: SYSTEM, user, maxTokens: 2500, effort: 'medium' }) } }];
+`,
+  );
+  wf.chain(getTasks, assemble);
+
+  const parse = claudeCall(wf, { key: "social", workflow: W, role: "social_manager", carryFrom: assemble, each: false });
+
+  const outputs = code(
+    wf,
+    "Build: outputs",
+    `
+const it = $input.first().json;
+const p = it.parsed || {};
+const summary = it.parse_error ? ('Social note could not be structured: ' + it.parse_error + '\\n' + String(it.text || '').slice(0, 800)) : String(p.summary || '').trim();
+const picks = Array.isArray(p.picks) ? p.picks : [];
+const drafts = Array.isArray(p.drafts) ? p.drafts : [];
+const PLAT = ['facebook', 'instagram', 'telegram'];
+const head = '📸 Social — ' + it.ctx.today;
+const connectedList = Object.keys(it.connected || {}).filter((k) => it.connected[k]);
+const draftLines = drafts.slice(0, 5).map((d, i) => (i + 1) + '. ' + String(d.title || d.content_id || '').slice(0, 60)
+  + (Array.isArray(d.platforms) && d.platforms.length ? ' → ' + d.platforms.filter((x) => PLAT.includes(x)).join(', ') : '')
+  + '\\n' + String(d.caption || '').slice(0, 200) + (d.tagline ? '\\n— ' + String(d.tagline).slice(0, 80) : ''));
+const notConn = Array.isArray(it.not_connected) ? it.not_connected : [];
+
+const wa_text = [head, summary,
+  it.candidate_count === 0 ? 'No new review-approved photos since the last post.' : (drafts.length ? drafts.length + ' draft(s) for your approval:' : 'No drafts today.'),
+  draftLines.length ? draftLines.join('\\n\\n') : '',
+  connectedList.length ? 'Connected: ' + connectedList.join(', ') + '.' : '',
+  notConn.length ? 'Not connected yet (drafts queue): ' + notConn.join(', ') + '.' : ''].filter(Boolean).join('\\n\\n');
+
+const note_row = { tenant_id: $env.OFFICE_TENANT_ID, role: 'social_manager', note_date: it.ctx.today,
+  body: wa_text.slice(0, 4000),
+  facts: { picks: picks.slice(0, 6), drafts: drafts.slice(0, 6).map((d) => ({ content_id: d.content_id, title: d.title, platforms: d.platforms, tagline: d.tagline })),
+    connected: connectedList, not_connected: notConn, candidate_count: it.candidate_count, parse_error: it.parse_error || '' } };
+
+// Each draft → ONE open office_tasks row (source 'social') carrying the gallery
+// content id, caption and channels. Approving it to post (via the cross-post
+// route) is wired in the approval update; for now it is a reviewable draft.
+const task_rows = [];
+for (const d of drafts.slice(0, 5)) {
+  if (!d.content_id) continue;
+  const plats = (Array.isArray(d.platforms) ? d.platforms : []).filter((x) => PLAT.includes(x));
+  task_rows.push({ tenant_id: $env.OFFICE_TENANT_ID, from_role: 'social_manager', to_role: 'director',
+    title: String(d.title || 'Social post').slice(0, 80),
+    detail: (String(d.caption || '').slice(0, 400) + (d.tagline ? '\\n\\n— ' + String(d.tagline).slice(0, 100) : '') + '\\n\\nChannels: ' + (plats.join(', ') || 'none set')).slice(0, 600),
+    status: 'open', source: 'social', approval_state: 'pending',
+    payload: { kind: 'gallery', content_id: String(d.content_id), post_title: String(d.title || '').slice(0, 120), caption: String(d.caption || '').slice(0, 1200), tagline: String(d.tagline || '').slice(0, 160), platforms: plats, image_url: String(d.image_url || ''), day: it.ctx.today } });
+}
+
+return [{ json: { note_row, task_rows, text: wa_text, to: ['director'], tasks_button: true } }];
+`,
+  );
+  wf.link(parse, outputs);
+  wf.link(outputs, sbInsert(wf, "Insert: social note", "office_notes", "note_row"));
+
+  const tasksFilter = code(
+    wf,
+    "Social tasks to insert",
+    `
+const r = $input.first().json.task_rows || [];
+return r.length ? [{ json: { rows: r } }] : [];
+`,
+    { row: 2 },
+  );
+  wf.link(outputs, tasksFilter);
+  const insertTasks = sbInsert(wf, "Insert: social tasks", "office_tasks", "rows", { row: 2, alwaysOutputData: true });
+  wf.link(tasksFilter, insertTasks);
+  // Each inserted draft → one approval message to the director with
+  // Approve & post / Reject / Send back (dok/dno/dchg); the bot's action hub
+  // posts via the cross-post route on approve.
+  const socialApprovals = code(
+    wf,
+    "Build: social approvals",
+    `${JS_TG}
+const rows = $input.all().map((i) => i.json).filter((r) => r && r.id);
+const dir = String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim();
+if (!dir) return [];
+const out = [];
+for (const t of rows) {
+  const p = t.payload || {};
+  const plats = Array.isArray(p.platforms) ? p.platforms : [];
+  const text = '📸 <b>Post for approval</b> #' + t.id + '\\n' + tgEscape(String(p.caption || t.title || '')) + (p.tagline ? '\\n— ' + tgEscape(String(p.tagline)) : '') + '\\n\\nChannels: ' + (plats.join(', ') || 'none set') + '\\n<i>Reply to add a comment.</i>';
+  out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: dir, text, parse_mode: 'HTML', disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: [[{ text: '✅ Approve & post', callback_data: 'dok:' + t.id }, { text: '❌ Reject', callback_data: 'dno:' + t.id }], [{ text: '✍️ Send back', callback_data: 'dchg:' + t.id }]] } } } });
+}
+return out;
+`,
+    { row: 2 },
+  );
+  wf.link(insertTasks, socialApprovals);
+  wf.chain(socialApprovals, tgCall(wf, "Social: send approvals", { row: 2 }));
+
+  // The daily note + a 📋 Open tasks button to the director.
+  internalChain(wf, "Social", outputs);
+
+  return wf;
+}
+
 /* ─── write ─────────────────────────────────────────────────── */
 
 const builds = {
@@ -2769,6 +3205,7 @@ const builds = {
   "morning-huddle.json": buildMorningHuddle,
   "marketing-manager.json": buildMarketingManager,
   "transport-manager.json": buildTransportManager,
+  "social-manager.json": buildSocialManager,
   "telegram-office-bot.json": buildTelegramBot,
 };
 

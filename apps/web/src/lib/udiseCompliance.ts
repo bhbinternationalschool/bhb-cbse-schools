@@ -19,7 +19,8 @@ import {
   type SisState,
   type SisStudent,
 } from "@/lib/sis";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { type MastersState } from "@/lib/masters";
+import { requireMasters } from "@/lib/data/requireData";
 import { assertModulePermission } from "@/lib/rbacGuard";
 import { TENANT } from "@/lib/types";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
@@ -272,13 +273,13 @@ export type UdisePortalSearchRow = {
  * `scope` picks which students to prepare for lookup.
  */
 export function listUdisePortalSearchRows(
-  sis?: SisState,
-  masters?: MastersState,
+  sis: SisState | undefined,
+  masters: MastersState,
   academicYearCode?: string,
   scope: "not_on_portal" | "all" = "not_on_portal",
 ): UdisePortalSearchRow[] {
   const state = sis ?? loadSis();
-  const m = masters ?? loadMasters();
+  const m = requireMasters(masters, "listUdisePortalSearchRows");
   const rows: UdisePortalSearchRow[] = [];
   for (const student of activeStudentsForUdise(state.students, academicYearCode)) {
     const onPortal = isRegisteredOnUdise(student);
@@ -342,12 +343,12 @@ export type UdiseUnregisteredRow = {
  * Separate from the compliance gaps worklist.
  */
 export function listUdiseUnregisteredStudents(
-  sis?: SisState,
-  masters?: MastersState,
+  sis: SisState | undefined,
+  masters: MastersState,
   academicYearCode?: string,
 ): UdiseUnregisteredRow[] {
   const state = sis ?? loadSis();
-  const m = masters ?? loadMasters();
+  const m = requireMasters(masters, "listUdiseUnregisteredStudents");
   const rows: UdiseUnregisteredRow[] = [];
 
   for (const student of activeStudentsForUdise(state.students, academicYearCode)) {
@@ -405,13 +406,13 @@ export type UdiseRegisteredRow = {
 
 /** Active SIS students already registered on UDISE+ (have a Student PEN). */
 export function listUdiseRegisteredStudents(
-  sis?: SisState,
-  masters?: MastersState,
+  sis: SisState | undefined,
+  masters: MastersState,
   academicYearCode?: string,
   settings?: UdiseComplianceSettings,
 ): UdiseRegisteredRow[] {
   const state = sis ?? loadSis();
-  const m = masters ?? loadMasters();
+  const m = requireMasters(masters, "listUdiseRegisteredStudents");
   const cfg = settings ?? loadUdiseComplianceSettings();
   const rows: UdiseRegisteredRow[] = [];
 
@@ -688,13 +689,13 @@ export function aadhaarEnrolmentGuidelines(areaHint: string): string {
 }
 
 export function listUdiseComplianceRows(
-  sis?: SisState,
-  masters?: MastersState,
+  sis: SisState | undefined,
+  masters: MastersState,
   settings?: UdiseComplianceSettings,
   academicYearCode?: string,
 ): UdiseComplianceRow[] {
   const state = sis ?? loadSis();
-  const m = masters ?? loadMasters();
+  const m = requireMasters(masters, "listUdiseComplianceRows");
   const cfg = settings ?? loadUdiseComplianceSettings();
   const rows: UdiseComplianceRow[] = [];
 

@@ -34,6 +34,7 @@ import { getServerTenantContext } from "@/lib/serverTenant";
 import { rowToStudent } from "@/lib/sisNormalized.server";
 import { normalizeStudent, type SisStudent } from "@/lib/sis";
 import { staffRoleCodeFor } from "@/lib/staffSessionRole";
+import { resolveSessionStaff } from "@/lib/staffResolve";
 import {
   allGroups,
   blockVerdict,
@@ -48,6 +49,7 @@ import {
   sectionLabel,
   staffDmId,
   staffForChild,
+  staffMadeGroupId,
   staffGroups,
   staffLabel,
   studentLabel,
@@ -59,6 +61,7 @@ import {
 } from "@/lib/schoolChat";
 import { admitThenModerate, heldNotice, type Classifier, type ModerationOutcome } from "@/lib/schoolChatModeration";
 import { notifySchoolChat } from "@/lib/schoolChatNotify.server";
+import { cardText, readWorkForSections, workComposerFor, workForGroup, type WorkCard, type WorkItem } from "@/lib/schoolChatWork.server";
 
 type Sb = NonNullable<Awaited<ReturnType<typeof getServerTenantContext>>>["sb"];
 type Tenant = { sb: Sb; tenantId: string };
@@ -110,6 +113,24 @@ export function isChatModerator(ctx: ApiAuthContext): boolean {
   }
 }
 
+/**
+ * The staff id a staff login chats as: the session's own; else the roster
+ * row its email / login / name matches (resolveSessionStaff, as the old
+ * header chat did); else — for a moderator only (the owner / principal
+ * signing in with an account that has no staff row, as the director's does)
+ * — a stable id made from the login ("sess_<email>"), the same id the old
+ * header chat gave such a login. Anyone else without a staff row: null.
+ */
+export function staffChatId(ctx: ApiAuthContext): string {
+  const s = ctx.session;
+  if (s.staffId) return s.staffId;
+  const row = resolveSessionStaff({ email: s.email, fullName: s.fullName }, ctx.masters);
+  if (row?.id) return row.id;
+  if (!isChatModerator(ctx)) return "";
+  const seed = (s.email || s.fullName || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60);
+  return seed ? `sess_${seed}` : "";
+}
+
 function familyYear(masters: MastersState, fallback: string): string {
   try {
     return currentAcademicYearCode(masters) || fallback;
@@ -124,8 +145,8 @@ function familyYear(masters: MastersState, fallback: string): string {
  */
 export async function chatActor(ctx: ApiAuthContext, studentId: string | null): Promise<ChatActor> {
   if (ctx.session.persona === "staff") {
-    const staffId = ctx.session.staffId || "";
-    if (!staffId) throw new ApiError("forbidden", "Sign in with your staff login to use school chat.", 403);
+    const staffId = staffChatId(ctx);
+    if (!staffId) throw new ApiError("forbidden", "Your login is not linked to a staff record — ask the office to add your email to your Staff profile, then sign in again.", 403);
     return { kind: "staff", staffId, name: ctx.session.fullName, moderator: isChatModerator(ctx), ay: staffWorkingYear(ctx) };
   }
   if (ctx.session.persona === "parent") {
@@ -181,6 +202,20 @@ export async function loadChatRoster(ctx: ApiAuthContext, ay: string): Promise<C
 }
 
 const staffName = (roster: ChatRoster, id: string) => roster.staff.find((s) => s.id === id)?.fullName || "Staff";
+
+/**
+ * A staff↔staff chat's title for one of its two: the other's name — or, for
+ * a login with no staff row (an owner's "sess_…" id, see staffChatId), the
+ * names stored on the row when it was opened, less the caller's own.
+ */
+function otherStaffTitle(roster: ChatRoster, row: Pick<ConvRow, "staff_ids" | "title">, me: string): string {
+  const other = row.staff_ids.find((id) => id !== me) || "";
+  const hit = roster.staff.find((s) => s.id === other);
+  if (hit) return hit.fullName;
+  const mine = roster.staff.find((s) => s.id === me)?.fullName;
+  const parts = row.title.split(" · ").filter((p) => p && p !== mine);
+  return parts[0] || "Staff";
+}
 
 /** Active children on this year's roll in one section (SQL, scoped to it). */
 async function sectionStudents(t: Tenant, ay: string, classId: string, sectionId: string): Promise<SisStudent[]> {
@@ -250,7 +285,12 @@ type ConvRow = {
   student_id: string;
   title: string;
   last_message_at: string | null;
+  academic_year_code?: string;
+  class_id?: string;
+  section_id?: string;
 };
+
+const CONV_COLS = "id, kind, staff_ids, household_id, student_id, title, last_message_at, academic_year_code, class_id, section_id";
 
 export type ConversationAccess = {
   id: string;
@@ -260,6 +300,10 @@ export type ConversationAccess = {
   staffIds: string[];
   /** The group, for class / subject. */
   group: GroupRef | null;
+  /** A staff-made group's section (its families read it), else null. */
+  section: { classId: string; sectionId: string } | null;
+  /** true = may read, never post (a family in a staff-made group). */
+  readOnly: boolean;
   /** dm_parent: the family + child. */
   householdId: string;
   studentId: string;
@@ -295,7 +339,7 @@ async function ensureGroupRow(t: Tenant, g: GroupRef, ay: string, createdBy: str
 async function readConvRow(t: Tenant, id: string): Promise<ConvRow | null> {
   const { data, error } = await t.sb
     .from("school_chat_conversations")
-    .select("id, kind, staff_ids, household_id, student_id, title, last_message_at")
+    .select(CONV_COLS)
     .eq("tenant_id", t.tenantId)
     .eq("id", id)
     .maybeSingle();
@@ -339,21 +383,41 @@ export async function accessConversation(
     await ensureGroupRow(t, group, roster.ay, actorKey(actor));
     return {
       roster,
-      access: { id: group.id, kind: group.kind, title: group.title, staffIds: group.staffIds, group, householdId: "", studentId: "", oversight, speakAs },
+      access: { id: group.id, kind: group.kind, title: group.title, staffIds: group.staffIds, group, section: null, readOnly: false, householdId: "", studentId: "", oversight, speakAs },
     };
   }
 
   const row = await readConvRow(t, conversationId);
   if (!row) throw new ApiError("not_found", "No such conversation", 404);
+  if (row.kind !== parsed.kind) throw new ApiError("not_found", "No such conversation", 404);
+  if (parsed.kind === "group") {
+    // A staff-made group: its staff are stored (staff_ids); a section's
+    // families are worked out from the roll — the child must be in that
+    // section on this year's roll now. Families read; they never post here.
+    const section = row.class_id && row.section_id ? { classId: row.class_id, sectionId: row.section_id } : null;
+    let oversight = false;
+    let speakAs: ConversationAccess["speakAs"] = "staff";
+    if (actor.kind === "family") {
+      if (!section || actor.student.classId !== section.classId || actor.student.sectionId !== section.sectionId) refuse();
+      if ((row.academic_year_code || "") !== actor.ay) refuse();
+      speakAs = "student";
+    } else if (!row.staff_ids.includes(actor.staffId)) {
+      if (!actor.moderator) refuse();
+      oversight = true;
+    }
+    return {
+      roster,
+      access: { id: row.id, kind: "group", title: row.title, staffIds: row.staff_ids, group: null, section, readOnly: actor.kind === "family", householdId: "", studentId: "", oversight, speakAs },
+    };
+  }
   if (parsed.kind === "dm_staff") {
     if (actor.kind !== "staff") refuse();
     const a = actor as Extract<ChatActor, { kind: "staff" }>;
     const member = row.staff_ids.includes(a.staffId);
     if (!member && !a.moderator) refuse();
-    const other = row.staff_ids.find((id) => id !== a.staffId) || row.staff_ids[0]!;
     return {
       roster,
-      access: { id: row.id, kind: "dm_staff", title: member ? staffName(roster, other) : row.title, staffIds: row.staff_ids, group: null, householdId: "", studentId: "", oversight: !member, speakAs: "staff" },
+      access: { id: row.id, kind: "dm_staff", title: member ? otherStaffTitle(roster, row, a.staffId) : row.title, staffIds: row.staff_ids, group: null, section: null, readOnly: false, householdId: "", studentId: "", oversight: !member, speakAs: "staff" },
     };
   }
   // dm_parent
@@ -372,6 +436,8 @@ export async function accessConversation(
       title: actor.kind === "family" ? staffName(roster, row.staff_ids[0]!) : row.title,
       staffIds: row.staff_ids,
       group: null,
+      section: null,
+      readOnly: false,
       householdId: row.household_id,
       studentId: row.student_id,
       oversight,
@@ -419,27 +485,47 @@ export async function listConversations(
     }
   }
 
-  // Direct chats.
+  // Direct chats, and the staff-made groups the caller is in (staff: by
+  // staff_ids; a family: its child's section this year).
   let dmq = t.sb
     .from("school_chat_conversations")
-    .select("id, kind, staff_ids, household_id, student_id, title, last_message_at")
+    .select(CONV_COLS)
     .eq("tenant_id", t.tenantId)
-    .in("kind", ["dm_staff", "dm_parent"])
+    .order("last_message_at", { ascending: false, nullsFirst: false })
     .limit(300);
-  dmq = actor.kind === "family" ? dmq.eq("household_id", actor.householdId).eq("student_id", actor.student.id) : dmq.contains("staff_ids", [actor.staffId]);
-  const { data: dms, error: dmErr } = await dmq;
+  dmq =
+    actor.kind === "family"
+      ? dmq.in("kind", ["dm_parent"]).eq("household_id", actor.householdId).eq("student_id", actor.student.id)
+      : dmq.in("kind", ["dm_staff", "dm_parent", "group"]).contains("staff_ids", [actor.staffId]);
+  const familyGroups =
+    actor.kind === "family"
+      ? t.sb
+          .from("school_chat_conversations")
+          .select(CONV_COLS)
+          .eq("tenant_id", t.tenantId)
+          .eq("kind", "group")
+          .eq("academic_year_code", actor.ay)
+          .eq("class_id", actor.student.classId)
+          .eq("section_id", actor.student.sectionId)
+          .limit(100)
+      : null;
+  const [{ data: dmRows, error: dmErr }, fg] = await Promise.all([dmq, familyGroups ?? Promise.resolve(null)]);
   if (dmErr) dbFail("direct chats", dmErr);
+  if (fg?.error) dbFail("groups", fg.error);
+  const dms = [...((dmRows ?? []) as ConvRow[]), ...((fg?.data ?? []) as ConvRow[])];
 
   const items: { id: string; kind: ParsedConversation["kind"]; title: string; oversight: boolean }[] = [
     ...groups.map((g) => ({ id: g.id, kind: g.kind, title: g.title, oversight: oversightIds.has(g.id) })),
-    ...((dms ?? []) as ConvRow[]).map((r) => ({
+    ...dms.map((r) => ({
       id: r.id,
       kind: r.kind as ParsedConversation["kind"],
       title:
-        actor.kind === "family"
+        r.kind === "group"
+          ? r.title
+          : actor.kind === "family"
           ? staffName(roster, r.staff_ids[0]!)
           : r.kind === "dm_staff"
-            ? staffName(roster, r.staff_ids.find((id) => id !== actor.staffId) || "")
+            ? otherStaffTitle(roster, r, actor.staffId)
             : r.title,
       oversight: false,
     })),
@@ -469,6 +555,19 @@ export async function listConversations(
       if (!last.has(m.conversation_id)) last.set(m.conversation_id, { body: m.body, at: m.created_at });
       const mine = actor.kind === "staff" ? m.sender_kind === "staff" && m.sender_id === actor.staffId : m.household_id === actor.householdId;
       if (!mine && m.created_at > (readAt.get(m.conversation_id) || "")) unread.set(m.conversation_id, (unread.get(m.conversation_id) || 0) + 1);
+    }
+    // Homework / classwork cards count as messages of their groups (the
+    // Homework module's rows, one read for every listed section).
+    if (groups.length) {
+      const items = await readWorkForSections(ctx.masters, roster.ay, [...new Set(groups.map((g) => g.sectionId))]);
+      for (const g of groups) {
+        for (const w of workForGroup(items, g)) {
+          const prev = last.get(g.id);
+          if (!prev || w.createdAt > prev.at) last.set(g.id, { body: cardText(w.card), at: w.createdAt });
+          const mine = actor.kind === "staff" && w.card.teacherStaffId === actor.staffId;
+          if (!mine && w.createdAt > (readAt.get(g.id) || "")) unread.set(g.id, (unread.get(g.id) || 0) + 1);
+        }
+      }
     }
   }
   const conversations = items
@@ -511,6 +610,12 @@ export type ChatMessageOut = {
   notice?: string;
   /** Moderators only: whose message it is, for mute / block. */
   senderSubject?: ChatSubject;
+  /**
+   * A homework / classwork card: the Homework module's own record, read
+   * now (lib/schoolChatWork.server). `body` holds the same as text, for an
+   * app that does not draw cards.
+   */
+  card?: WorkCard;
 };
 
 function isMine(actor: ChatActor, m: Pick<MsgRow, "sender_kind" | "sender_id" | "household_id">): boolean {
@@ -521,9 +626,12 @@ export async function readMessages(
   ctx: ApiAuthContext,
   actor: ChatActor,
   conversationId: string,
-): Promise<{ conversation: ConversationAccess & { canSend: boolean; muted: boolean; moderator: boolean }; messages: ChatMessageOut[] }> {
+): Promise<{
+  conversation: ConversationAccess & { canSend: boolean; muted: boolean; moderator: boolean; compose: { subjects: { id: string; name: string }[]; fixedSubject: string } | null };
+  messages: ChatMessageOut[];
+}> {
   const t = await chatTenant();
-  const { access } = await accessConversation(ctx, t, actor, conversationId);
+  const { access, roster } = await accessConversation(ctx, t, actor, conversationId);
   const subjects = subjectsOf(actor, access.speakAs === "parent");
   const verdict = blockVerdict(await activeBlocksFor(t, subjects), subjects, access.id);
   if (!verdict.canRead) throw new ApiError("forbidden", "The school has paused your chat. Please speak to the class teacher.", 403);
@@ -539,6 +647,10 @@ export async function readMessages(
   const rows = ((data ?? []) as MsgRow[]).reverse();
   const seeAll = actor.kind === "staff" && actor.moderator;
   const messages: ChatMessageOut[] = [];
+  // Homework and classwork of a class / subject group: the Homework
+  // module's rows, as cards (one record — never copied into the chat).
+  const g = access.group;
+  const work: WorkItem[] = g ? workForGroup(await readWorkForSections(ctx.masters, roster.ay, [g.sectionId]), g) : [];
   for (const m of rows) {
     const mine = isMine(actor, m);
     if (m.status !== "visible" && !mine && !seeAll) continue;
@@ -554,6 +666,23 @@ export async function readMessages(
       ...(m.status === "held" ? { notice: mine ? heldNotice(m.moderation?.categories ?? [], m.sender_kind) : "Held for review — only you (a moderator) and the sender see it." } : {}),
     });
   }
+  if (work.length) {
+    const cards: ChatMessageOut[] = work.map((w) => ({
+      id: `${w.card.kind === "homework" ? "hw" : "cw"}:${w.card.refId}`,
+      senderLabel: staffLabel(w.card.teacherName),
+      senderKind: "staff",
+      body: cardText(w.card),
+      createdAt: w.createdAt,
+      mine: actor.kind === "staff" && !!w.card.teacherStaffId && w.card.teacherStaffId === actor.staffId,
+      status: "visible",
+      card: w.card,
+    }));
+    messages.push(...cards);
+    messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+  // Who may post homework / classwork here (the Homework module's rule).
+  const compose =
+    g && actor.kind === "staff" && !access.oversight ? await workComposerFor(ctx, g.classId, g.sectionId) : null;
   if (!access.oversight) {
     const { error: rErr } = await t.sb.from("school_chat_members").upsert(
       {
@@ -567,7 +696,17 @@ export async function readMessages(
     );
     if (rErr) console.warn("[school-chat] read marker not saved:", rErr.message);
   }
-  return { conversation: { ...access, canSend: verdict.canSend && !access.oversight, muted: !verdict.canSend, moderator: seeAll }, messages };
+  return {
+    conversation: {
+      ...access,
+      canSend: verdict.canSend && !access.oversight && !access.readOnly,
+      muted: !verdict.canSend,
+      moderator: seeAll,
+      // null = this person cannot post homework / classwork here.
+      compose: compose && g ? { subjects: g.kind === "subject" ? compose.subjects.filter((x) => x.id === g.subjectId) : compose.subjects, fixedSubject: g.kind === "subject" ? g.subjectId : "" } : null,
+    },
+    messages,
+  };
 }
 
 // ── Sending ──────────────────────────────────────────────────────────────
@@ -657,6 +796,7 @@ export async function sendMessage(
   const t = await chatTenant();
   const { access, roster } = await accessConversation(ctx, t, actor, conversationId);
   if (access.oversight) throw new ApiError("forbidden", "You are looking in as a moderator — you are not a member of this conversation.", 403);
+  if (access.readOnly) throw new ApiError("forbidden", "This group is for reading — the staff who made it post here. Message a teacher directly instead.", 403);
   const asParent = access.speakAs === "parent";
   const subjects = subjectsOf(actor, asParent);
   const verdict = blockVerdict(await activeBlocksFor(t, subjects), subjects, access.id);
@@ -739,7 +879,7 @@ export async function sendMessage(
     urgent: outcome.categories.includes("self_harm"),
     flagged: !!outcome.flagged,
     staffIds: access.staffIds.filter((id) => !(actor.kind === "staff" && id === actor.staffId)),
-    group: access.group,
+    group: access.group ?? access.section,
     ay: roster.ay,
     householdIds: access.kind === "dm_parent" && actor.kind === "staff" ? [access.householdId] : [],
     exceptHousehold: actor.kind === "family" ? actor.householdId : "",
@@ -817,7 +957,7 @@ export async function openDirectChat(ctx: ApiAuthContext, actor: ChatActor, targ
       staff_ids: pair,
       household_id: "",
       student_id: "",
-      title: `${staffName(roster, pair[0]!)} · ${staffName(roster, pair[1]!)}`,
+      title: pair.map((id) => (id === actor.staffId ? actor.name || staffName(roster, id) : staffName(roster, id))).join(" · "),
       created_by: actorKey(actor),
     });
     return { id, title: staffName(roster, other) };
@@ -858,11 +998,85 @@ async function upsertDm(
   if (error) dbFail("direct chat", error);
 }
 
+// ── Staff-made groups ────────────────────────────────────────────────────
+
+const GROUP_MAX_STAFF = 200;
+
+/** The sections a member of staff may add to a group: those they teach (staffForChild); a moderator, any. */
+export function groupSectionsFor(roster: ChatRoster, staffId: string, moderator: boolean): { classId: string; sectionId: string; label: string }[] {
+  const order = (classId: string) => roster.classes.find((c) => c.id === classId)?.sortOrder ?? 0;
+  return roster.sections
+    .filter((sec) => sec.isActive !== false && (moderator || staffForChild(roster, sec.classId, sec.id).includes(staffId)))
+    .sort((a, b) => order(a.classId) - order(b.classId) || a.name.localeCompare(b.name))
+    .map((sec) => ({ classId: sec.classId, sectionId: sec.id, label: sectionLabel(roster, sec.classId, sec.id) }));
+}
+
+/**
+ * Make a group (staff only): a name, the staff picked (the maker is always
+ * in it) and, optionally, one class section whose families READ it — the
+ * old header chat's "class announcement". Any active member of staff may be
+ * added (as for a direct chat); a section only by a teacher of it or a
+ * moderator (stricter than the old chat, which let every office role pick
+ * any section).
+ */
+export async function createStaffGroup(
+  ctx: ApiAuthContext,
+  actor: ChatActor,
+  input: { title?: unknown; staffIds?: unknown; section?: unknown },
+): Promise<{ id: string; title: string }> {
+  if (actor.kind !== "staff") throw new ApiError("forbidden", "Only staff can make a group.", 403);
+  const title = String(input.title ?? "").replace(/\s+/g, " ").trim();
+  if (!title) throw new ApiError("bad_request", "Give the group a name.", 400);
+  if (title.length > 120) throw new ApiError("bad_request", "That name is too long (120 characters at most).", 400);
+  const roster = await loadChatRoster(ctx, actor.ay);
+  const picked = Array.isArray(input.staffIds) ? input.staffIds.map((x) => String(x ?? "").trim()).filter(Boolean) : [];
+  const active = new Set(roster.staff.filter((s) => s.status !== "inactive").map((s) => s.id));
+  for (const id of picked) if (!active.has(id)) throw new ApiError("not_found", "One of the staff picked was not found (or has left).", 404);
+  const staffIds = [...new Set([actor.staffId, ...picked])].sort();
+
+  let section: { classId: string; sectionId: string } | null = null;
+  if (input.section != null && input.section !== "") {
+    const sec = input.section as { classId?: unknown; sectionId?: unknown };
+    const classId = String(sec.classId ?? "");
+    const sectionId = String(sec.sectionId ?? "");
+    const ok = groupSectionsFor(roster, actor.staffId, actor.moderator).some((s) => s.classId === classId && s.sectionId === sectionId);
+    if (!ok) throw new ApiError("forbidden", "You can add only a class section you teach.", 403);
+    section = { classId, sectionId };
+  }
+  // Two staff at least (the shape check of migration 20261029120000): a
+  // group always has someone besides its maker to answer in it.
+  if (staffIds.length < 2) throw new ApiError("bad_request", "Add at least one other member of staff.", 400);
+  if (staffIds.length > GROUP_MAX_STAFF) throw new ApiError("bad_request", `A group can have ${GROUP_MAX_STAFF} staff at most.`, 400);
+
+  const t = await chatTenant();
+  const id = staffMadeGroupId(crypto.randomUUID().replace(/-/g, ""));
+  const { error } = await t.sb.from("school_chat_conversations").insert({
+    id,
+    tenant_id: t.tenantId,
+    kind: "group",
+    academic_year_code: actor.ay,
+    class_id: section?.classId ?? "",
+    section_id: section?.sectionId ?? "",
+    staff_ids: staffIds,
+    title,
+    created_by: actorKey(actor),
+  });
+  if (error) {
+    // 23514 = the kind check without 'group': the migration is not applied yet.
+    if (error.code === "23514") {
+      console.error(`[school-chat] group insert refused by a check: ${error.message}`);
+      throw new ApiError("server_error", "School chat is not set up for groups yet — the office has been told.", 503);
+    }
+    dbFail("group", error, true);
+  }
+  return { id, title };
+}
+
 /** Who the caller can start a direct chat with. */
 export async function chatContacts(
   ctx: ApiAuthContext,
   actor: ChatActor,
-): Promise<{ staff: { id: string; name: string; role: string }[]; families: { studentId: string; label: string }[] }> {
+): Promise<{ staff: { id: string; name: string; role: string }[]; families: { studentId: string; label: string }[]; sections: { classId: string; sectionId: string; label: string }[] }> {
   const roster = await loadChatRoster(ctx, actor.ay);
   if (actor.kind === "family") {
     const { classId, sectionId } = actor.student;
@@ -876,6 +1090,7 @@ export async function chatContacts(
     return {
       staff: staffForChild(roster, classId, sectionId).map((id) => ({ id, name: staffName(roster, id), role: role(id) })),
       families: [],
+      sections: [],
     };
   }
   const staff = roster.staff
@@ -891,16 +1106,17 @@ export async function chatContacts(
     const label = sectionLabel(roster, classId, sectionId);
     for (const s of await sectionStudents(t, roster.ay, classId, sectionId)) families.push({ studentId: s.id, label: parentLabel(s.fullName, label) });
   }
-  return { staff, families };
+  return { staff, families, sections: groupSectionsFor(roster, actor.staffId, actor.moderator) };
 }
 
 // ── Moderation ───────────────────────────────────────────────────────────
 
 export function requireModerator(ctx: ApiAuthContext): Extract<ChatActor, { kind: "staff" }> {
-  if (!isChatModerator(ctx) || !ctx.session.staffId) {
+  const staffId = isChatModerator(ctx) ? staffChatId(ctx) : "";
+  if (!staffId) {
     throw new ApiError("forbidden", "Chat moderation needs the School chat moderation function (Masters → Roles).", 403);
   }
-  return { kind: "staff", staffId: ctx.session.staffId, name: ctx.session.fullName, moderator: true, ay: staffWorkingYear(ctx) };
+  return { kind: "staff", staffId, name: ctx.session.fullName, moderator: true, ay: staffWorkingYear(ctx) };
 }
 
 type Counts = { sent: number; held: number; removed: number; warned: number; flagged: number };
@@ -1082,15 +1298,16 @@ async function pushApproved(
   const fromStaff = msg.sender_kind === "staff";
   let title = "";
   let staffIds: string[] = [];
-  let group: GroupRef | null = null;
+  let group: { classId: string; sectionId: string } | null = null;
   let householdIds: string[] = [];
   let ay = "";
   if (parsed.kind === "class" || parsed.kind === "subject") {
     const roster = await loadChatRoster(ctx, parsed.ay);
-    group = groupFor(roster, parsed);
-    if (!group) return; // the group no longer exists on this roster: nobody to push
-    title = group.title;
-    staffIds = group.staffIds;
+    const g = groupFor(roster, parsed);
+    if (!g) return; // the group no longer exists on this roster: nobody to push
+    group = g;
+    title = g.title;
+    staffIds = g.staffIds;
     ay = roster.ay;
   } else {
     const conv = await readConvRow(t, conversationId);
@@ -1098,6 +1315,10 @@ async function pushApproved(
     title = conv.title;
     staffIds = conv.staff_ids;
     householdIds = conv.kind === "dm_parent" && fromStaff ? [conv.household_id] : [];
+    if (conv.kind === "group" && conv.class_id && conv.section_id) {
+      group = { classId: conv.class_id, sectionId: conv.section_id };
+      ay = conv.academic_year_code || "";
+    }
   }
   await notifySchoolChat({
     kind: "message",

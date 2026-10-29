@@ -100,6 +100,7 @@ SELFTESTS=(
   test:masters-merge
   test:accounts
   test:academics-masters-as-data
+  test:certificates-udise-masters-as-data
   test:playbook
   test:erp-chat
   test:wa-templates-automation
@@ -601,6 +602,7 @@ SELFTESTS=(
   test:wa-student-link
   test:leave-command
   test:daily-brief
+  test:staff-reminders
   test:automation-approvals
   test:automation-schedule
   test:server-fallback-saves

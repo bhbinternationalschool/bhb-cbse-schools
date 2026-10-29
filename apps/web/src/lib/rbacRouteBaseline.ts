@@ -24,7 +24,6 @@ export const SESSION_ONLY_ROUTE_BASELINE: readonly string[] = [
   "ai/tutor",
   "ai/wa-template-draft",
   "audit",
-  "chat",
   "erp-ai/request",
   "erp-ai",
   "erp-ai/stuck",
