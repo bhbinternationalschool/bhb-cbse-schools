@@ -12,7 +12,7 @@
           ]
         }
       },
-      "id": "3c1fdbcd-5751-4c8c-a2e0-e470061274b1",
+      "id": "bc3b6086-21cf-4237-8224-a9e75e87d941",
       "name": "Every minute",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
@@ -25,7 +25,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nif (!TG_TOKEN) return [];\n// The offset confirms every earlier update to Telegram; it survives restarts\n// in the workflow's static data (saved after each production execution).\nconst st = $getWorkflowStaticData('global');\nconst offset = Number(st.tg_offset || 0);\nreturn [{ json: { tg_method: 'getUpdates', tg: { offset, timeout: 0, limit: 100, allowed_updates: ['message', 'callback_query'] } } }];\n"
       },
-      "id": "301e7721-c67f-49ed-934a-97980ff1160a",
+      "id": "48a13393-0ba2-4638-ae7f-0a1b6504cde5",
       "name": "Build: getUpdates",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -54,7 +54,7 @@
           "timeout": 30000
         }
       },
-      "id": "399e4cbc-6af0-4018-b1de-bbaba69fede2",
+      "id": "3387ec25-783e-4464-970f-3996c741f42b",
       "name": "Telegram: getUpdates",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -68,7 +68,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nconst res = $input.first().json || {};\nconst updates = res.ok && Array.isArray(res.result) ? res.result : [];\nif (!updates.length) return [];\nconst st = $getWorkflowStaticData('global');\nst.tg_offset = Math.max(...updates.map((u) => Number(u.update_id || 0))) + 1;\n// Director/principal come from env (tgRoleOf); anyone the director added with\n// /adduser is a 'reader' from the office_bot_users table. roleOf prefers env.\nconst users = (() => { try { return $('Fetch: bot users').all().map((i) => i.json).filter((u) => u && u.chat_id); } catch (e) { return []; } })();\nconst userRole = (id) => { const u = users.find((x) => String(x.chat_id) === String(id)); return u ? (u.role || 'reader') : ''; };\nconst roleOf = (id) => tgRoleOf(id) || userRole(id);\n// (?![a-z]) instead of \\b: JS word boundaries are ASCII-only, so Devanagari words never matched.\n// End-anchored: a BARE approve/reject word (optionally a draft number) is a\n// decision; anything longer is a free-form instruction for the assistant.\nconst APPROVE = /^\\s*\\/?(approve|approved|ok|okay|yes|haan|ha|हाँ|हां|ठीक)\\s*#?\\s*(\\d+)?\\s*$/i;\nconst REJECT = /^\\s*\\/?(reject|rejected|cancel|nahi|nahin|नहीं|रद्द)\\s*#?\\s*(\\d+)?\\s*$/i;\nconst COMMANDS = { start: 'start', help: 'start', drafts: 'drafts', tasks: 'tasks', huddle: 'huddle', plan: 'plan', marketing: 'marketing', transport: 'transport', social: 'social', users: 'users' };\nconst out = [];\nfor (const u of updates) {\n  const cq = u.callback_query;\n  if (cq) {\n    const chat_id = String((cq.message && cq.message.chat && cq.message.chat.id) || (cq.from && cq.from.id) || '');\n    const role = roleOf(chat_id);\n    const data = String(cq.data || '');\n    const base = { chat_id, role, callback_id: cq.id, message_id: cq.message ? cq.message.message_id : null, message_text: cq.message ? String(cq.message.text || '') : '' };\n    if (!role) continue;\n    const m = /^(approve|reject):(\\d+)$/.exec(data);\n    if (m && role === 'director') { out.push({ json: { kind: 'decision', decision: m[1], task_id: Number(m[2]), via: 'tap', ...base } }); continue; }\n    if (m) { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    const ta = /^(done|snooze):(\\d+)$/.exec(data);\n    if (ta && role === 'director') { out.push({ json: { kind: 'taskaction', action: ta[1], task_id: Number(ta[2]), ...base } }); continue; }\n    if ((ta || data === 'doneall') && role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    if (data === 'doneall') { out.push({ json: { kind: 'taskaction', action: 'doneall', task_id: null, ...base } }); continue; }\n    if (data === 'tasks') { out.push({ json: { kind: 'command', cmd: 'tasks', ...base } }); continue; }\n    // Numbered-menu + delegation callbacks (parallel to the draft approve path).\n    const sel = /^tsel:(\\d+)$/.exec(data); if (sel) { if (role === 'director') out.push({ json: { kind: 'command', cmd: 'tpick', task_id: Number(sel[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    const tcl = /^tclose:(\\d+)$/.exec(data); if (tcl) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'close', task_id: Number(tcl[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    const tsz = /^tsnz:(\\d+)$/.exec(data); if (tsz) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'snooze', task_id: Number(tsz[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    const tas = /^tasg:(\\d+)$/.exec(data); if (tas) { if (role === 'director') out.push({ json: { kind: 'command', cmd: 'tassign', task_id: Number(tas[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    const ast = /^aset:(\\d+):(.+)$/.exec(data); if (ast) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'assign_set', task_id: Number(ast[1]), assignee: String(ast[2]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    const dlg = /^(dok|dno|dchg):(\\d+)$/.exec(data); if (dlg) { if (role) out.push({ json: { kind: 'taskaction', action: dlg[1], task_id: Number(dlg[2]), ...base } }); continue; }\n    continue;\n  }\n  const msg = u.message;\n  if (!msg || !msg.text) continue;\n  const chat_id = String(msg.chat && msg.chat.id || '');\n  const role = roleOf(chat_id);\n  const text = String(msg.text || '').trim();\n  const base = { chat_id, role, callback_id: null, message_id: null, message_text: '' };\n  // A reply to an approval message is a comment (optionally a decision). The\n  // replied message carries the task id as \"#<id>\"; the action hub looks the\n  // task up and applies it only where safe (assigned tasks / social / proposals).\n  const rep = msg.reply_to_message;\n  if (rep && role) {\n    const ridm = /#(\\d{1,10})(?![0-9])/.exec(String(rep.text || rep.caption || ''));\n    if (ridm) {\n      const low = text.toLowerCase();\n      let dec = 'comment';\n      if (/(approve|approved|^ok\\b|^okay\\b|^yes\\b|haan|^ha\\b|ठीक|हाँ|हां)/.test(low)) dec = 'dok';\n      else if (/(reject|rejected|^no\\b|nahi|nahin|नहीं)/.test(low)) dec = 'dno';\n      else if (/(change|changes|modify|revise|send back|सुधार|बदल)/.test(low)) dec = 'dchg';\n      out.push({ json: { kind: 'taskaction', action: dec, task_id: Number(ridm[1]), comment: text.slice(0, 500), ...base } });\n      continue;\n    }\n  }\n  // Director-only user management (needs arguments, so handled before the\n  // plain-command match). /adduser <chatid> <name>, /removeuser <chatid>.\n  const au = /^\\/adduser\\s+(\\S+)(?:\\s+([\\s\\S]+))?$/i.exec(text);\n  if (au) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'adduser', add_chat: au[1].replace(/[^0-9-]/g, ''), add_name: String(au[2] || '').trim().slice(0, 60), ...base } }); else if (role) out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n  const ru = /^\\/removeuser\\s+(\\S+)/i.exec(text);\n  if (ru) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'removeuser', add_chat: ru[1].replace(/[^0-9-]/g, ''), ...base } }); else if (role) out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n  const cmd = /^\\/([a-z]+)(?:@\\w+)?\\b/i.exec(text);\n  if (cmd && COMMANDS[cmd[1].toLowerCase()]) {\n    const name = COMMANDS[cmd[1].toLowerCase()];\n    if (name === 'start') { out.push({ json: { kind: 'command', cmd: 'start', ...base } }); continue; }\n    if (!role) continue;\n    if (name === 'users' && role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    const READER_OK = ['tasks', 'huddle', 'plan', 'marketing', 'transport', 'social'];\n    if (role === 'reader' && !READER_OK.includes(name)) continue;\n    out.push({ json: { kind: 'command', cmd: name, ...base } });\n    continue;\n  }\n  if (!role) continue;\n  // Numbered-menu typing (director): a bare number selects that task; \"close N\"\n  // / \"snooze N\" act on it; \"assign N\" opens the assignee menu. N is the display\n  // number from the last /tasks list (same created_at order everywhere).\n  const num = /^(\\d{1,3})$/.exec(text);\n  if (num && role === 'director') { out.push({ json: { kind: 'command', cmd: 'tpick', num: Number(num[1]), ...base } }); continue; }\n  const act = /^(close|snooze|assign)\\s+#?(\\d{1,3})$/i.exec(text);\n  if (act && role === 'director') {\n    const a1 = act[1].toLowerCase();\n    if (a1 === 'assign') out.push({ json: { kind: 'command', cmd: 'tassign', num: Number(act[2]), ...base } });\n    else out.push({ json: { kind: 'taskaction', action: a1, num: Number(act[2]), ...base } });\n    continue;\n  }\n  const ta = /^\\/(done|close|snooze)\\s+#?(\\d+|all)\\b/i.exec(text);\n  if (ta) {\n    if (role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n    const act = ta[1].toLowerCase() === 'close' ? 'done' : ta[1].toLowerCase();\n    const arg = ta[2].toLowerCase();\n    if (arg === 'all') { if (act === 'done') out.push({ json: { kind: 'taskaction', action: 'doneall', task_id: null, ...base } }); continue; }\n    out.push({ json: { kind: 'taskaction', action: act, task_id: Number(arg), ...base } });\n    continue;\n  }\n  let decision = null; let m = text.match(APPROVE);\n  if (m) decision = 'approve'; else { m = text.match(REJECT); if (m) decision = 'reject'; }\n  if (!decision) {\n    // Any other message from the director is a free-form instruction for the\n    // office assistant (ERP /api/office/assistant). Non-director chatter is ignored.\n    if (role === 'director') out.push({ json: { kind: 'assistant', text, ...base } });\n    continue;\n  }\n  if (role !== 'director') { out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }\n  out.push({ json: { kind: 'decision', decision, task_id: m[2] ? Number(m[2]) : null, via: 'text', ...base } });\n}\nreturn out;\n"
       },
-      "id": "5229ab27-178e-49af-b7cf-3af5e968cea4",
+      "id": "5d7c0cec-e4f0-4c44-8bdf-704416119aeb",
       "name": "Parse: updates",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -102,7 +102,7 @@
           "timeout": 30000
         }
       },
-      "id": "7e91fd22-1e17-44c7-984d-92f267c589a0",
+      "id": "e7e1054f-14aa-4d58-8d5c-af95e9e96229",
       "name": "Fetch: bot users",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -127,7 +127,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "dce385fd-e953-4f97-88a4-ecbbc9ed3e4f",
+                    "id": "1e1a683a-f930-4cf9-ae03-9ed3005ddaab",
                     "leftValue": "={{ $json.kind }}",
                     "rightValue": "decision",
                     "operator": {
@@ -151,7 +151,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "31196ae9-c994-475c-af11-d914088a4402",
+                    "id": "fadb5275-49cf-46a4-89cc-84c2784d29e7",
                     "leftValue": "={{ $json.kind }}",
                     "rightValue": "command",
                     "operator": {
@@ -175,7 +175,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "0110d829-3a3d-4c57-a2ac-46f78109b6bb",
+                    "id": "fe350712-07d4-47ea-9805-bc7271af9401",
                     "leftValue": "={{ $json.kind }}",
                     "rightValue": "taskaction",
                     "operator": {
@@ -199,7 +199,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "4569e685-29d7-498e-b44e-910a01d4bd27",
+                    "id": "820d31d9-6f01-4693-9d73-662e0bb2ac23",
                     "leftValue": "={{ $json.kind }}",
                     "rightValue": "assistant",
                     "operator": {
@@ -217,7 +217,7 @@
         },
         "options": {}
       },
-      "id": "55342636-f0cd-4ad2-a314-df85137bfd54",
+      "id": "9299ace4-ec03-4bd7-a751-958f382bc7a7",
       "name": "Switch: update kind",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -251,7 +251,7 @@
           "timeout": 30000
         }
       },
-      "id": "7bccabd6-8197-4715-aa72-5629a15e1b8c",
+      "id": "f83aa38b-8223-4dac-83ab-707ef4e1fcb6",
       "name": "Fetch: pending drafts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -266,7 +266,7 @@
       "parameters": {
         "jsCode": "\nconst pending = $input.all().map((i) => i.json).filter((r) => r && r.id);\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'decision');\nconst out = []; const decided = new Set();\nfor (const a of asks) {\n  let task = null;\n  if (a.task_id) task = pending.find((t) => Number(t.id) === Number(a.task_id));\n  else if (pending.length === 1) task = pending[0];\n  let ack = '';\n  if (!task) ack = a.task_id ? 'No draft #' + a.task_id + ' is waiting.' : (pending.length ? 'Which draft? ' + pending.map((t) => '#' + t.id).join(', ') + ' are waiting — tap its button or reply APPROVE <id>.' : 'No draft is waiting.');\n  else if (decided.has(task.id)) ack = 'Draft #' + task.id + ' is already decided.';\n  if (ack) { out.push({ json: { ...a, decision: 'none', task: null, ack } }); continue; }\n  decided.add(task.id);\n  out.push({ json: { ...a, task } });\n}\nreturn out;\n"
       },
-      "id": "1f4b1e40-3df5-41f4-aba7-a56fb7545d79",
+      "id": "49a6432e-13fc-429c-8294-9b7143ec5ced",
       "name": "Match: decisions",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -289,7 +289,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "13186962-13ba-4597-8893-b6a8fef33e19",
+                    "id": "d75ed296-d5cc-4031-ae43-bd1f32a1ff5f",
                     "leftValue": "={{ $json.decision }}",
                     "rightValue": "approve",
                     "operator": {
@@ -313,7 +313,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "32f39e6e-5c40-411a-a5c8-49ceb46202ca",
+                    "id": "a27caa36-e66f-4e78-ad62-1303cd731620",
                     "leftValue": "={{ $json.decision }}",
                     "rightValue": "reject",
                     "operator": {
@@ -337,7 +337,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "71e6e53f-54cf-47a7-8ba9-9fd608a5c567",
+                    "id": "6f8384ab-ad66-4eb5-93ee-e6e609144e27",
                     "leftValue": "={{ $json.decision }}",
                     "rightValue": "none",
                     "operator": {
@@ -355,7 +355,7 @@
         },
         "options": {}
       },
-      "id": "02ae6f66-ea70-44df-929a-26e106e73b8b",
+      "id": "74a35c44-2e53-47d8-a67f-c2e57359ee1f",
       "name": "Switch: decision",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -373,7 +373,7 @@
         "message": "={{ $json.task.payload.body }}",
         "options": {}
       },
-      "id": "bddaf8e5-549f-4405-9f04-1fd0f5ed9528",
+      "id": "64ce3764-84ac-42ca-a185-df5f90777ef8",
       "name": "Gmail: send approved reply",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.1,
@@ -396,7 +396,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "5bc77d32-3cd2-4ddd-8d83-edfd7a823dcd",
+                    "id": "f2a1262a-3fd0-413e-86d1-b2aa99591a84",
                     "leftValue": "={{ $json.task.source }}",
                     "rightValue": "receptionist",
                     "operator": {
@@ -420,7 +420,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "3317f848-fc3c-4d81-9f55-e1d5b9628c32",
+                    "id": "9462c3de-905b-4b8a-b32c-216392488971",
                     "leftValue": "={{ $json.task.source }}",
                     "rightValue": "assistant",
                     "operator": {
@@ -444,7 +444,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "ae9e8176-0f8b-48b7-a636-d61bf1cc8a01",
+                    "id": "6419d449-a3a8-4ad5-98a9-1da47611f0fe",
                     "leftValue": "={{ $json.task.source }}",
                     "rightValue": "marketing",
                     "operator": {
@@ -462,7 +462,7 @@
         },
         "options": {}
       },
-      "id": "51bc0748-a45a-4e0f-90e0-d16acadf9dde",
+      "id": "c8042a54-9198-40aa-b8e4-e1bf13dda881",
       "name": "Switch: approve source",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -476,7 +476,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nconst d = $('Match: decisions').item.json;\nconst sent = $input.item.json;\nconst now = new Date().toISOString();\nreturn { json: { ...d, task_id: d.task.id, patch: { approval_state: 'approved', status: 'done', decided_by: 'director', decided_at: now, updated_at: now,\n  payload: { ...d.task.payload, decision_reply: 'telegram ' + d.via, sent_at: now, gmail_sent_id: sent.id || '' } },\n  ack: '✅ Sent reply #' + d.task.id + ' to ' + (d.task.payload.to_name || d.task.payload.to) + '.' } };\n"
       },
-      "id": "ecbfec27-99cd-40bb-862c-9ba540dab17c",
+      "id": "7c3f5c00-9d15-4583-bca3-ed1c0692934f",
       "name": "Build: approved patch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -513,7 +513,7 @@
           "timeout": 120000
         }
       },
-      "id": "4f726921-8d72-417c-86e7-ccd05aa7ef96",
+      "id": "0aaebe2e-d770-402a-be39-6a750b8e3fbb",
       "name": "ERP: approve send",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -529,7 +529,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nconst d = $('Match: decisions').item.json;\nconst res = $input.item.json || {};\nconst now = new Date().toISOString();\n// The ERP returns { kind:'action_done', text } once the send has run. Only\n// then is the draft closed; if the office was unreachable it stays pending.\nif (res.kind === 'action_done') {\n  return { json: { ...d, task_id: d.task.id, patch: { approval_state: 'approved', status: 'done', decided_by: 'director', decided_at: now, updated_at: now,\n    payload: { ...d.task.payload, decision_reply: 'telegram ' + d.via, sent_at: now, send_result: String(res.text || '') } },\n    ack: '✅ ' + String(res.text || 'Sent.') } };\n}\nreturn { json: { ...d, task_id: d.task.id, patch: { updated_at: now, payload: { ...d.task.payload, last_error: 'send unreachable ' + now } },\n  ack: '⚠️ Could not reach the office to send draft #' + d.task.id + '. It is still waiting — tap Approve again.' } };\n"
       },
-      "id": "c2ad27c4-8419-4407-a898-b06aeb6983db",
+      "id": "ed7b7fcd-8169-4619-9d76-090f7a699966",
       "name": "Build: assistant approved patch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -543,7 +543,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nconst d = $('Match: decisions').item.json;\nconst now = new Date().toISOString();\nconst p = d.task.payload || {};\nconst what = [p.mk_unit, p.mk_channel].filter(Boolean).join(' / ');\nreturn { json: { ...d, task_id: d.task.id, patch: { approval_state: 'approved', status: 'done', decided_by: 'director', decided_at: now, updated_at: now,\n  payload: { ...p, decision_reply: 'telegram ' + d.via, approved_at: now } },\n  ack: '✅ Approved #' + d.task.id + (what ? ' (' + what + ')' : '') + ' — ' + String(d.task.title || '').slice(0, 80) + '. Go ahead; the Marketing Manager records it next run.' } };\n"
       },
-      "id": "aefcaafc-3b4a-47dd-b5b6-08284e784e4d",
+      "id": "49181c7d-ea2c-492c-891d-07797d13fc32",
       "name": "Build: marketing approved patch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -557,7 +557,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nconst d = $input.item.json;\nconst now = new Date().toISOString();\nreturn { json: { ...d, task_id: d.task.id, patch: { approval_state: 'rejected', status: 'cancelled', decided_by: 'director', decided_at: now, updated_at: now,\n  payload: { ...d.task.payload, decision_reply: 'telegram ' + d.via } },\n  ack: '🚫 Draft #' + d.task.id + ' rejected — nothing sent to ' + (d.task.payload.to_name || d.task.payload.to) + '.' } };\n"
       },
-      "id": "67391a01-5c4f-4cba-845c-d316b4bcfa21",
+      "id": "275776f6-fbb8-41f7-b234-513f327ab34a",
       "name": "Build: rejected patch",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -598,7 +598,7 @@
           "timeout": 30000
         }
       },
-      "id": "03323b78-2a71-4516-85c6-c596e02aebbd",
+      "id": "460d7baf-6f39-4897-afa6-56c531213be9",
       "name": "Patch: task decided",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -612,7 +612,7 @@
         "mode": "runOnceForEachItem",
         "jsCode": "\nreturn { json: { ...$input.item.json, patched: false } };\n"
       },
-      "id": "54e29504-277b-4a92-b2a0-3ba024dcf506",
+      "id": "2bd6386f-3e38-4eaa-a526-f73780faa750",
       "name": "Build: no decision",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -625,7 +625,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\n// Answer the tap, edit the draft message so the decision shows under it\n// (the keyboard goes away), or reply to a typed decision.\nconst built = [];\nfor (const name of ['Build: approved patch', 'Build: assistant approved patch', 'Build: marketing approved patch', 'Build: rejected patch', 'Build: no decision']) {\n  try { for (const x of $(name).all()) built.push(x.json); } catch (e) { /* branch did not run */ }\n}\nconst out = [];\nfor (const b of built) {\n  const ack = String(b.ack || '');\n  if (b.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: b.callback_id, text: ack.slice(0, 200) } } });\n  if (b.message_id && b.decision !== 'none') {\n    const text = tgChunks(String(b.message_text || '') + '\\n\\n' + ack).slice(-1)[0];\n    out.push({ json: { tg_method: 'editMessageText', tg: { chat_id: b.chat_id, message_id: b.message_id, text } } });\n  } else {\n    out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: b.chat_id, text: ack } } });\n  }\n}\nreturn out;\n"
       },
-      "id": "dbdcd532-305d-4a87-a473-0fb951ae63c0",
+      "id": "f5b7c2ca-c6b4-4484-a188-8c30d760503a",
       "name": "Build: decision replies",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -654,7 +654,7 @@
           "timeout": 30000
         }
       },
-      "id": "6b20f802-4245-461d-8654-10bc6f82d7e7",
+      "id": "54860d7d-e5de-4430-879b-36d5f10b3d9f",
       "name": "Telegram: reply",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -689,7 +689,7 @@
           "timeout": 30000
         }
       },
-      "id": "9142ec15-ff46-4254-982e-feec8a2e935e",
+      "id": "cb43f488-3af8-4075-8058-5245dcf946bb",
       "name": "Fetch: open tasks",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -725,7 +725,7 @@
           "timeout": 30000
         }
       },
-      "id": "712a320a-aa2f-480f-96db-aa533b463e86",
+      "id": "624239c8-08be-4dc1-8323-8b3984c21d9c",
       "name": "Fetch: latest huddle",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -761,7 +761,7 @@
           "timeout": 30000
         }
       },
-      "id": "cf07d639-25cc-43c3-9ce4-c3553e0d60ad",
+      "id": "183d04b1-ac8a-4b7f-b7dd-2010e26f901c",
       "name": "Fetch: latest plan",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -797,7 +797,7 @@
           "timeout": 30000
         }
       },
-      "id": "5ceb794c-5bac-43a3-b44a-9ec6fd95ab03",
+      "id": "2f4bfc5f-2008-4b5d-af1d-72c59f2df090",
       "name": "Fetch: latest marketing",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -833,7 +833,7 @@
           "timeout": 30000
         }
       },
-      "id": "61668d0d-0e66-4320-afdd-2c3911297d77",
+      "id": "f5061873-a82e-4733-8140-1276053eaa2e",
       "name": "Fetch: marketing budget",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -869,7 +869,7 @@
           "timeout": 30000
         }
       },
-      "id": "434ec3bc-a0f5-4000-885a-fe32f4b0dc2f",
+      "id": "3440a743-6745-4c79-9532-424b16c9b46a",
       "name": "Fetch: latest transport",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -905,7 +905,7 @@
           "timeout": 30000
         }
       },
-      "id": "cbf5d5aa-3c84-4c2e-a936-2a7309bb51aa",
+      "id": "b7adca99-5159-4ae9-b3d9-1434b01c40f8",
       "name": "Fetch: transport budget",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -941,7 +941,7 @@
           "timeout": 30000
         }
       },
-      "id": "3bbcd21f-2cd5-4fd3-906f-31142135ebd6",
+      "id": "2fceb19b-51dd-4ba2-829e-3802a4c2cea9",
       "name": "Fetch: latest social",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -956,7 +956,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nfunction istNow() { return new Date(Date.now() + 5.5 * 3600 * 1000); }\nfunction isoDate(d) { return d.toISOString().slice(0, 10); }\nfunction academicYearCode(d) {\n  const y = d.getUTCMonth() + 1 >= 4 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;\n  return y + '-' + String((y + 1) % 100).padStart(2, '0');\n}\n\nconst rows = (name) => { try { return $(name).all().map((i) => i.json).filter((r) => r && Object.keys(r).length); } catch (e) { return []; } };\nconst tasks = rows('Fetch: open tasks').filter((r) => r.id);\nconst meeting = rows('Fetch: latest huddle')[0] || null;\nconst planNote = rows('Fetch: latest plan')[0] || null;\nconst mktg = rows('Fetch: latest marketing')[0] || null;\nconst budgetRows = rows('Fetch: marketing budget');\nconst trans = rows('Fetch: latest transport')[0] || null;\nconst transBudgetRows = rows('Fetch: transport budget');\nconst social = rows('Fetch: latest social')[0] || null;\nconst users = rows('Fetch: bot users').filter((u) => u.chat_id);\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'command');\nconst today = isoDate(istNow());\nconst line = (t) => '#' + t.id + ' [' + t.to_role + '] ' + t.title + (t.due_on ? ' (due ' + t.due_on + ')' : '') + (t.approval_state === 'pending' ? ' — waiting for you' : '');\n// Resolve a task from a tap (task_id) or a typed display number (num); the\n// number is the task's 1-based position in the created_at-ordered open list.\nconst pickTask = (a) => { if (a.task_id) { const i = tasks.findIndex((t) => Number(t.id) === Number(a.task_id)); return i >= 0 ? { t: tasks[i], n: i + 1 } : null; } if (a.num) { const t = tasks[a.num - 1]; return t ? { t, n: a.num } : null; } return null; };\nconst out = [];\nconst send = (chat_id, text, keyboard) => {\n  const chunks = tgChunks(text);\n  chunks.forEach((c, i) => {\n    const tg = { chat_id, text: c, parse_mode: 'HTML', disable_web_page_preview: true };\n    if (keyboard && i === chunks.length - 1) tg.reply_markup = { inline_keyboard: keyboard };\n    out.push({ json: { tg_method: 'sendMessage', tg } });\n  });\n};\nfor (const a of asks) {\n  if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });\n  if (a.cmd === 'start') {\n    const who = a.role ? 'You are the ' + a.role + '.' : 'This chat is not registered yet. Give the office this chat id: <code>' + tgEscape(a.chat_id) + '</code>';\n    const common = '/tasks — open tasks (pick a number to close, snooze or assign)\\n/huddle — this morning\\'s minutes\\n/plan — today\\'s substitution plan\\n/marketing — cost per lead, spend vs budget\\n/transport — fleet safety, fuel, spend vs budget\\n/social — today\\'s gallery posts for approval';\n    const dir = '\\n/drafts — replies waiting for your decision\\n/users — people you added · /adduser &lt;id&gt; &lt;name&gt; · /removeuser &lt;id&gt;';\n    send(a.chat_id, '<b>BHB office bot</b>\\n' + who + (a.role ? '\\n\\n' + common + (a.role === 'director' ? dir : '') : ''));\n    continue;\n  }\n  if (a.cmd === 'not_director') { send(a.chat_id, 'Only the director can do that.'); continue; }\n  if (a.cmd === 'drafts') {\n    const drafts = tasks.filter((t) => t.approval_state === 'pending' && t.source === 'receptionist');\n    if (!drafts.length) { send(a.chat_id, 'No draft is waiting for a decision.'); continue; }\n    const text = '<b>Drafts waiting (' + drafts.length + ')</b>\\n' + drafts.map((t) => { const p = t.payload || {}; return '#' + t.id + ' ' + tgEscape((p.category || '') + ' → ' + (p.to_name || p.to || '') + ' — ' + (p.subject || t.title)); }).join('\\n');\n    const keyboard = a.role === 'director' ? drafts.slice(0, 10).map((t) => [{ text: '✅ Approve ' + t.id, callback_data: 'approve:' + t.id }, { text: '❌ Reject ' + t.id, callback_data: 'reject:' + t.id }]) : null;\n    send(a.chat_id, text, keyboard);\n    continue;\n  }\n  if (a.cmd === 'tasks') {\n    if (!tasks.length) { send(a.chat_id, 'No open tasks. 🎉'); continue; }\n    const shortOf = (t) => String(t.title || t.detail || 'task').replace(/\\s+/g, ' ').trim().slice(0, 48);\n    const numbered = tasks.map((t, i) => (i + 1) + '. ' + tgEscape(String(t.title || t.detail || 'task').replace(/\\s+/g, ' ').trim().slice(0, 80))\n      + (t.to_role && t.to_role !== 'director' ? ' (' + tgEscape(t.to_role) + ')' : '')\n      + (t.payload && t.payload.assigned_name ? ' → ' + tgEscape(t.payload.assigned_name) + (t.approval_state === 'pending' ? ' (awaiting)' : '') : '')).join('\\n');\n    // Director: one labelled button per task (the title IS on the button, not a\n    // bare number), tap → its action menu. Plus the typed number / \"close N\".\n    let keyboard = null;\n    if (a.role === 'director') {\n      keyboard = tasks.slice(0, 10).map((t, i) => [{ text: (i + 1) + '. ' + shortOf(t), callback_data: 'tsel:' + t.id }]);\n    }\n    const hint = a.role === 'director' ? '\\n\\nTap a task to Close / Snooze / Assign — or reply with its number (e.g. \"2\"), or \"close 2\".' : '';\n    send(a.chat_id, '<b>Open tasks (' + tasks.length + ')</b>\\n' + numbered + hint, keyboard);\n    continue;\n  }\n  if (a.cmd === 'tpick') {\n    const pick = pickTask(a);\n    if (!pick) { send(a.chat_id, 'That task is no longer open. Send /tasks for the current list.'); continue; }\n    const t = pick.t, n = pick.n;\n    const keyboard = [\n      [{ text: '✅ Close', callback_data: 'tclose:' + t.id }, { text: '💤 Snooze', callback_data: 'tsnz:' + t.id }],\n      [{ text: '👤 Assign for approval', callback_data: 'tasg:' + t.id }],\n      [{ text: '↩ Back to tasks', callback_data: 'tasks' }],\n    ];\n    send(a.chat_id, '▸ <b>Task ' + n + '</b> — ' + tgEscape(String(t.title || '')) + (t.detail ? '\\n' + tgEscape(String(t.detail).slice(0, 300)) : '')\n      + '\\n\\nClose it, snooze to tomorrow, or assign it to someone for approval.\\n(Or type \"close ' + n + '\" / \"snooze ' + n + '\" / \"assign ' + n + '\".)', keyboard);\n    continue;\n  }\n  if (a.cmd === 'tassign') {\n    const pick = pickTask(a);\n    if (!pick) { send(a.chat_id, 'That task is no longer open. Send /tasks for the current list.'); continue; }\n    if (!users.length) { send(a.chat_id, 'No people added yet. Add one with <code>/adduser &lt;chat id&gt; &lt;name&gt;</code> — they open the bot and tap Start to get their chat id.'); continue; }\n    const t = pick.t, n = pick.n;\n    const kb = users.slice(0, 12).map((u, i) => [{ text: (i + 1) + '. ' + (u.name || String(u.chat_id)), callback_data: 'aset:' + t.id + ':' + u.chat_id }]);\n    kb.push([{ text: '↩ Back', callback_data: 'tsel:' + t.id }]);\n    send(a.chat_id, 'Assign <b>Task ' + n + '</b> — ' + tgEscape(String(t.title || '')) + '\\n\\nWho should approve it?', kb);\n    continue;\n  }\n  if (a.cmd === 'users') {\n    if (!users.length) { send(a.chat_id, 'No people added yet.\\n\\nAdd one: <code>/adduser &lt;chat id&gt; &lt;name&gt;</code>\\nThey open the bot and tap Start to get their chat id.'); continue; }\n    send(a.chat_id, '<b>People (' + users.length + ')</b>\\n' + users.map((u, i) => (i + 1) + '. ' + tgEscape(u.name || '(no name)') + ' — <code>' + tgEscape(String(u.chat_id)) + '</code>' + (u.role && u.role !== 'reader' ? ' [' + tgEscape(u.role) + ']' : '')).join('\\n') + '\\n\\nAdd: <code>/adduser &lt;chat id&gt; &lt;name&gt;</code>\\nRemove: <code>/removeuser &lt;chat id&gt;</code>');\n    continue;\n  }\n  if (a.cmd === 'huddle') {\n    if (!meeting) { send(a.chat_id, 'No huddle on record yet.'); continue; }\n    const dec = Array.isArray(meeting.decisions) ? meeting.decisions : [];\n    send(a.chat_id, '<b>Huddle ' + tgEscape(meeting.meeting_date) + '</b>\\n' + tgEscape(String(meeting.minutes || '').slice(0, 3000)) + (dec.length ? '\\n\\n<b>Decisions</b>\\n' + dec.map((d) => tgEscape('• ' + (d.to_role || '') + ': ' + (d.title || '') + (d.due_on ? ' by ' + d.due_on : ''))).join('\\n') : ''));\n    continue;\n  }\n  if (a.cmd === 'plan') {\n    if (!planNote) { send(a.chat_id, 'No substitution plan on record yet.'); continue; }\n    const when = String(planNote.created_at || '').slice(0, 10);\n    send(a.chat_id, (when === today ? '<b>Today\\'s plan</b>\\n' : '<b>No plan yet today — last plan ' + tgEscape(when) + '</b>\\n') + tgEscape(String(planNote.body || '').slice(0, 3500)));\n    continue;\n  }\n  if (a.cmd === 'marketing') {\n    const month = today.slice(0, 7);\n    const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');\n    const thisMonth = budgetRows.filter((b) => String(b.month || '').slice(0, 7) === month);\n    const f = (mktg && mktg.facts) || {};\n    const lines = ['<b>Marketing — ' + tgEscape(month) + '</b>'];\n    // Cost per lead (from the latest weekly note's facts; never invented here).\n    const cpl = Array.isArray(f.cost_per_lead) ? f.cost_per_lead : [];\n    if (cpl.length) {\n      lines.push('\\n<b>Cost per lead</b>');\n      for (const c of cpl) lines.push(tgEscape('• ' + (c.unit || '?') + ' / ' + (c.channel || '?') + ': ' + (c.leads != null ? c.leads + ' leads' : '') + (c.cpl != null && c.cpl !== '' ? ', CPL ' + (typeof c.cpl === 'number' ? inr(c.cpl) : c.cpl) : '')));\n    }\n    // Spend vs budget (caps are live from the budget table; spent is from the note).\n    lines.push('\\n<b>Spend vs budget</b>');\n    for (const b of thisMonth) lines.push(tgEscape('• ' + (b.unit || '?') + ' / ' + (b.channel || '?') + ': cap ' + inr(b.cap_amount) + ', allocated ' + inr(b.allocated) + ', spent ' + (b.spent != null ? inr(b.spent) : 'not known')));\n    // Monthly per-portal ask: Google Ads, Facebook, WhatsApp, for school + ITI.\n    const askPortals = [['google_ads', 'Google Ads'], ['meta', 'Facebook'], ['whatsapp', 'WhatsApp']];\n    const askUnits = [['school', 'School'], ['iti', 'ITI']];\n    const have = new Set(thisMonth.map((b) => (b.unit || '') + '/' + (b.channel || '')));\n    const missing = [];\n    for (const [u, uL] of askUnits) for (const [c, cL] of askPortals) if (!have.has(u + '/' + c)) missing.push(uL + ' / ' + cL);\n    if (missing.length) {\n      lines.push(tgEscape('Not set for ' + month + ' yet: ' + missing.join(', ') + '.'));\n      lines.push(tgEscape('Reply with the amounts and I\\'ll set them — e.g. \"Google 5000, Facebook 3000, WhatsApp 2000 for the school\".'));\n    }\n    // Week's beat plan.\n    const beats = Array.isArray(f.beat_plan) ? f.beat_plan : [];\n    if (beats.length) {\n      lines.push('\\n<b>This week\\'s beats</b>');\n      for (const bt of beats.slice(0, 8)) lines.push(tgEscape((bt.rank ? bt.rank + '. ' : '• ') + (bt.beat || (Array.isArray(bt.villages) ? bt.villages.slice(0, 3).join(', ') : '')) + (bt.child_population ? ' — ~' + bt.child_population + ' children' : '') + (bt.past_enquiries != null ? ', ' + bt.past_enquiries + ' past enq' : '')));\n    }\n    if (!cpl.length && !beats.length) {\n      if (mktg) { lines.push('\\n' + tgEscape(String(mktg.body || '').slice(0, 2500))); }\n      else lines.push('\\nNo weekly marketing note on record yet — the Marketing Manager runs Monday morning.');\n    }\n    send(a.chat_id, lines.join('\\n'));\n    continue;\n  }\n  if (a.cmd === 'transport') {\n    const month = today.slice(0, 7);\n    const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');\n    const thisMonth = transBudgetRows.filter((b) => String(b.month || '').slice(0, 7) === month);\n    const f = (trans && trans.facts) || {};\n    const lines = ['<b>Transport — ' + tgEscape(month) + '</b>'];\n    // Fleet safety, from the latest note's facts (never invented here).\n    const fs = Array.isArray(f.fleet_safety) ? f.fleet_safety : [];\n    const silent = fs.filter((b) => b.status && b.status !== 'reporting');\n    if (fs.length) {\n      lines.push('\\n<b>Fleet</b>');\n      lines.push(tgEscape(fs.length + ' bus(es); ' + (fs.length - silent.length) + ' reporting' + (silent.length ? ', ' + silent.length + ' not' : '')));\n      for (const b of silent.slice(0, 8)) lines.push(tgEscape('• ' + (b.bus || '?') + ': ' + (b.status || '') + (b.last_seen ? ' (last ' + b.last_seen + ')' : '')));\n    }\n    if (f.alerts_sos != null || f.alerts_overspeed != null) lines.push(tgEscape('Alerts (24h): ' + (f.alerts_sos || 0) + ' SOS, ' + (f.alerts_overspeed || 0) + ' over-speed'));\n    // Fuel register state.\n    if (f.fuel_last_fill) lines.push(tgEscape('Fuel: last fill ' + f.fuel_last_fill + (f.fuel_days_stale != null && f.fuel_days_stale > 7 ? ' (' + f.fuel_days_stale + ' days ago — register stale)' : '') + (f.fuel_month_spend != null ? ', spent ' + inr(f.fuel_month_spend) + ' this month' : '')));\n    // Spend vs budget (caps live from the transport budget table).\n    lines.push('\\n<b>Spend vs budget</b>');\n    if (thisMonth.length) for (const b of thisMonth) lines.push(tgEscape('• ' + (b.channel || '?') + ': cap ' + inr(b.cap_amount) + ', allocated ' + inr(b.allocated) + ', spent ' + (b.spent != null ? inr(b.spent) : 'not known')));\n    else lines.push(tgEscape('No cap set for ' + month + ' yet.'));\n    // Monthly ask: diesel, maintenance for the fleet.\n    const askChannels = [['diesel', 'Diesel'], ['maintenance', 'Maintenance']];\n    const have = new Set(thisMonth.map((b) => b.channel || ''));\n    const missing = askChannels.filter(([c]) => !have.has(c)).map(([, cL]) => cL);\n    if (missing.length) {\n      lines.push(tgEscape('Not set for ' + month + ' yet: ' + missing.join(', ') + '.'));\n      lines.push(tgEscape('Reply with the amounts and I\\'ll set them — e.g. \"diesel 40000, maintenance 10000 this month\".'));\n    }\n    if (!fs.length && !thisMonth.length) {\n      if (trans) lines.push('\\n' + tgEscape(String(trans.body || '').slice(0, 2500)));\n      else lines.push('\\nNo transport note on record yet — the Transport Manager runs every morning.');\n    }\n    send(a.chat_id, lines.join('\\n'));\n    continue;\n  }\n  if (a.cmd === 'social') {\n    const f = (social && social.facts) || {};\n    const lines = ['<b>Social — today</b>'];\n    const drafts = Array.isArray(f.drafts) ? f.drafts : [];\n    if (drafts.length) { lines.push('\\n<b>Drafts for approval</b>'); for (const d of drafts.slice(0, 6)) lines.push(tgEscape('• ' + (d.title || d.content_id || '') + (Array.isArray(d.platforms) && d.platforms.length ? ' → ' + d.platforms.join(', ') : ''))); }\n    if (Array.isArray(f.connected) && f.connected.length) lines.push(tgEscape('Connected: ' + f.connected.join(', ') + '.'));\n    if (Array.isArray(f.not_connected) && f.not_connected.length) lines.push(tgEscape('Not connected (drafts queue): ' + f.not_connected.join(', ') + '.'));\n    if (!drafts.length) { if (social) lines.push('\\n' + tgEscape(String(social.body || '').slice(0, 2500))); else lines.push('\\nNo social note yet — the Social Media Manager runs every morning at 7.'); }\n    send(a.chat_id, lines.join('\\n'));\n    continue;\n  }\n}\nreturn out;\n"
       },
-      "id": "d33e1f24-fc37-4e54-8b77-9c172d5e5c0c",
+      "id": "2d0a39ca-1299-4bdd-a65e-77b746fe66b9",
       "name": "Build: command replies",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -967,9 +967,9 @@
     },
     {
       "parameters": {
-        "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nfunction istNow() { return new Date(Date.now() + 5.5 * 3600 * 1000); }\nfunction isoDate(d) { return d.toISOString().slice(0, 10); }\nfunction academicYearCode(d) {\n  const y = d.getUTCMonth() + 1 >= 4 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;\n  return y + '-' + String((y + 1) % 100).padStart(2, '0');\n}\n\nreturn (async () => {\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'taskaction');\nconst SB = String($env.SUPABASE_URL || '').replace(/\\/$/, '');\nconst KEY = String($env.SUPABASE_SERVICE_ROLE_KEY || '');\nconst TENANT = String($env.OFFICE_TENANT_ID || '');\nconst H = { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json', Prefer: 'return=representation' };\nconst now = new Date().toISOString();\nconst tomorrow = isoDate(new Date(istNow().getTime() + 86400000));\nconst sb = async (method, pathq, body, prefer) => {\n  const h = prefer ? { ...H, Prefer: prefer } : H;\n  const res = await this.helpers.httpRequest({ method, url: SB + '/rest/v1/' + pathq, headers: h, body: body ? JSON.stringify(body) : undefined });\n  if (typeof res === 'string') { try { return JSON.parse(res); } catch (e) { return []; } }\n  return res;\n};\nconst open = await sb('GET', 'office_tasks?tenant_id=eq.' + TENANT + '&status=in.(open,doing)&select=id,to_role,title,detail,source,due_on,payload,approval_state&order=created_at.asc&limit=200');\nconst openArr = Array.isArray(open) ? open : [];\nconst openIds = new Set(openArr.map((t) => Number(t.id)));\n// resolve a task by explicit id (tap) or typed display number (1-based)\nconst resolve = (a) => { if (a.task_id && openIds.has(Number(a.task_id))) return openArr.find((t) => Number(t.id) === Number(a.task_id)); if (a.num && openArr[a.num - 1]) return openArr[a.num - 1]; return null; };\nconst usersList = await sb('GET', 'office_bot_users?tenant_id=eq.' + TENANT + '&is_active=eq.true&select=chat_id,name,role');\nconst usersArr = Array.isArray(usersList) ? usersList : [];\nconst nameOf = (chat) => { const u = usersArr.find((x) => String(x.chat_id) === String(chat)); return u && u.name ? u.name : String(chat); };\nconst out = [];\nconst seen = new Set();\nconst ack = (chat, text) => out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: chat, text: text, parse_mode: 'HTML', disable_web_page_preview: true } } });\nfor (const a of asks) {\n  if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });\n\n  // ── add / remove a bot user (director only; parse already gated) ──\n  if (a.action === 'adduser') {\n    const chat = String(a.add_chat || '').trim();\n    if (!chat) { ack(a.chat_id, 'Give a numeric chat id: /adduser &lt;chat id&gt; &lt;name&gt;'); continue; }\n    try { await sb('POST', 'office_bot_users?on_conflict=tenant_id,chat_id', { tenant_id: TENANT, chat_id: chat, role: 'reader', name: String(a.add_name || ''), added_by: String(a.chat_id || 'director'), is_active: true, updated_at: now }, 'resolution=merge-duplicates,return=representation');\n      ack(a.chat_id, '✅ Added <b>' + tgEscape(a.add_name || chat) + '</b> (<code>' + tgEscape(chat) + '</code>). They get the morning notes, the read commands, and can be assigned tasks to approve.'); }\n    catch (e) { ack(a.chat_id, 'Could not add that user: ' + tgEscape(String((e && e.message) || e).slice(0, 200))); }\n    continue;\n  }\n  if (a.action === 'removeuser') {\n    const chat = String(a.add_chat || '').trim();\n    try { await sb('PATCH', 'office_bot_users?tenant_id=eq.' + TENANT + '&chat_id=eq.' + encodeURIComponent(chat), { is_active: false, updated_at: now }); ack(a.chat_id, '✅ Removed <code>' + tgEscape(chat) + '</code>.'); }\n    catch (e) { ack(a.chat_id, 'Could not remove that user.'); }\n    continue;\n  }\n\n  // ── assign a task to someone for approval (director) ──\n  if (a.action === 'assign_set') {\n    const t = resolve(a);\n    if (!t) { ack(a.chat_id, 'That task is no longer open. Send /tasks for the current list.'); continue; }\n    const chat = String(a.assignee || ''); const nm = nameOf(chat);\n    try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { approval_state: 'pending', updated_at: now, payload: { ...(t.payload || {}), assigned_to: chat, assigned_name: nm, assigned_by: String(a.chat_id), assigned_at: now } }); }\n    catch (e) { ack(a.chat_id, 'Could not assign that task.'); continue; }\n    ack(a.chat_id, '📨 Assigned to <b>' + tgEscape(nm) + '</b> for approval: ' + tgEscape(String(t.title || '')));\n    out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: chat, parse_mode: 'HTML', disable_web_page_preview: true,\n      text: '📨 <b>For your approval</b> #' + t.id + '\\n' + tgEscape(String(t.title || '')) + (t.detail ? '\\n' + tgEscape(String(t.detail).slice(0, 400)) : '') + '\\n\\n<i>Reply to this message to add a comment.</i>',\n      reply_markup: { inline_keyboard: [[{ text: '✅ Approve', callback_data: 'dok:' + t.id }, { text: '❌ Reject', callback_data: 'dno:' + t.id }], [{ text: '✍️ Send back for changes', callback_data: 'dchg:' + t.id }]] } } } });\n    continue;\n  }\n\n  // ── assignee (or director) approves / rejects / sends back, with a comment ──\n  if (a.action === 'dok' || a.action === 'dno' || a.action === 'dchg' || a.action === 'comment') {\n    const t = resolve(a);\n    if (!t) { ack(a.chat_id, 'That task is no longer open.'); continue; }\n    const src = String(t.source || '');\n    // Gmail / assistant drafts are sent by the Approve-button path; never close\n    // one from a typed reply — guide the user to the buttons instead.\n    if ((a.action === 'dok' || a.action === 'dno') && (src === 'receptionist' || src === 'assistant')) {\n      ack(a.chat_id, 'For that draft, use the ✅ Approve / ❌ Reject buttons on its message.'); continue;\n    }\n    const assigned = String((t.payload || {}).assigned_to || '');\n    const isDirector = tgRoleOf(a.chat_id) === 'director';\n    if (!isDirector && String(a.chat_id) !== assigned) { ack(a.chat_id, 'That task is not assigned to you.'); continue; }\n    const cmt = String(a.comment || '').trim();\n    const who = nameOf(a.chat_id);\n    const quote = cmt ? '\\n“' + tgEscape(cmt) + '”' : '';\n    if (a.action === 'comment') {\n      try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { updated_at: now, payload: { ...(t.payload || {}), last_comment: cmt, last_comment_by: who, last_comment_at: now } }); } catch (e) {}\n      ack(a.chat_id, '💬 Comment noted on #' + t.id + '.');\n      if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, '💬 ' + tgEscape(who) + ' on #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);\n      continue;\n    }\n    if (a.action === 'dchg') {\n      try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { approval_state: 'changes', status: 'open', updated_at: now, payload: { ...(t.payload || {}), change_note: cmt, change_by: who, change_at: now } }); } catch (e) { ack(a.chat_id, 'Could not send it back.'); continue; }\n      ack(a.chat_id, '✍️ Sent back for changes: ' + tgEscape(String(t.title || '')) + quote);\n      const assigner = String((t.payload || {}).assigned_by || '');\n      if (assigner && assigner !== String(a.chat_id)) ack(assigner, '✍️ ' + tgEscape(who) + ' sent back #' + t.id + ' for changes — ' + tgEscape(String(t.title || '')) + quote);\n      else if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, '✍️ ' + tgEscape(who) + ' sent back #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);\n      continue;\n    }\n    const approve = a.action === 'dok';\n    const patch = approve\n      ? { approval_state: 'approved', status: 'done', decided_by: who, decided_at: now, updated_at: now, payload: { ...(t.payload || {}), approved_by: String(a.chat_id), approved_at: now, decision_comment: cmt } }\n      : { approval_state: 'rejected', status: 'open', updated_at: now, payload: { ...(t.payload || {}), rejected_by: String(a.chat_id), rejected_at: now, decision_comment: cmt } };\n    try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, patch); } catch (e) { ack(a.chat_id, 'Could not record that.'); continue; }\n    ack(a.chat_id, (approve ? '✅ You approved: ' : '🚫 You rejected: ') + tgEscape(String(t.title || '')) + quote);\n    if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, (approve ? '✅ ' : '🚫 ') + tgEscape(who) + (approve ? ' approved' : ' rejected') + ' #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);\n    continue;\n  }\n\n  // ── close / snooze / clear-all (director) ──\n  let ids = [];\n  if (a.action === 'doneall') ids = openArr.map((t) => Number(t.id));\n  else { const t = resolve(a); if (t) ids = [Number(t.id)]; }\n  if (!ids.length) { ack(a.chat_id, a.num ? ('No task ' + a.num + ' — send /tasks for the list.') : (a.task_id ? 'No open task #' + a.task_id + '.' : 'No open tasks.')); continue; }\n  let done = 0; let dispNum = null;\n  for (const id of ids) {\n    if (seen.has(id)) continue; seen.add(id);\n    const idx = openArr.findIndex((t) => Number(t.id) === id); if (dispNum == null) dispNum = idx + 1;\n    const cur = openArr[idx] || {};\n    const patch = a.action === 'snooze' ? { due_on: tomorrow, updated_at: now, payload: { ...(cur.payload || {}), snoozed_until: tomorrow, snoozed_by: 'director' } } : { status: 'done', decided_by: 'director', decided_at: now, updated_at: now };\n    try { await sb('PATCH', 'office_tasks?id=eq.' + id + '&tenant_id=eq.' + TENANT, patch); done += 1; } catch (e) {}\n  }\n  const label = a.action === 'doneall' ? ('Cleared ' + done + ' open task' + (done === 1 ? '' : 's') + '.') : (a.action === 'snooze' ? ('Task ' + dispNum + ' snoozed to ' + tomorrow + '.') : ('Task ' + dispNum + ' closed.'));\n  ack(a.chat_id, '✅ ' + label);\n}\nreturn out;\n})();\n"
+        "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\nfunction istNow() { return new Date(Date.now() + 5.5 * 3600 * 1000); }\nfunction isoDate(d) { return d.toISOString().slice(0, 10); }\nfunction academicYearCode(d) {\n  const y = d.getUTCMonth() + 1 >= 4 ? d.getUTCFullYear() : d.getUTCFullYear() - 1;\n  return y + '-' + String((y + 1) % 100).padStart(2, '0');\n}\n\nreturn (async () => {\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'taskaction');\nconst SB = String($env.SUPABASE_URL || '').replace(/\\/$/, '');\nconst KEY = String($env.SUPABASE_SERVICE_ROLE_KEY || '');\nconst TENANT = String($env.OFFICE_TENANT_ID || '');\nconst H = { apikey: KEY, Authorization: 'Bearer ' + KEY, 'Content-Type': 'application/json', Prefer: 'return=representation' };\nconst now = new Date().toISOString();\nconst tomorrow = isoDate(new Date(istNow().getTime() + 86400000));\nconst sb = async (method, pathq, body, prefer) => {\n  const h = prefer ? { ...H, Prefer: prefer } : H;\n  const res = await this.helpers.httpRequest({ method, url: SB + '/rest/v1/' + pathq, headers: h, body: body ? JSON.stringify(body) : undefined });\n  if (typeof res === 'string') { try { return JSON.parse(res); } catch (e) { return []; } }\n  return res;\n};\nconst open = await sb('GET', 'office_tasks?tenant_id=eq.' + TENANT + '&status=in.(open,doing)&select=id,to_role,title,detail,source,due_on,payload,approval_state&order=created_at.asc&limit=200');\nconst openArr = Array.isArray(open) ? open : [];\nconst openIds = new Set(openArr.map((t) => Number(t.id)));\n// resolve a task by explicit id (tap) or typed display number (1-based)\nconst resolve = (a) => { if (a.task_id && openIds.has(Number(a.task_id))) return openArr.find((t) => Number(t.id) === Number(a.task_id)); if (a.num && openArr[a.num - 1]) return openArr[a.num - 1]; return null; };\nconst usersList = await sb('GET', 'office_bot_users?tenant_id=eq.' + TENANT + '&is_active=eq.true&select=chat_id,name,role');\nconst usersArr = Array.isArray(usersList) ? usersList : [];\nconst nameOf = (chat) => { const u = usersArr.find((x) => String(x.chat_id) === String(chat)); return u && u.name ? u.name : String(chat); };\nconst out = [];\nconst seen = new Set();\nconst ack = (chat, text) => out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: chat, text: text, parse_mode: 'HTML', disable_web_page_preview: true } } });\nfor (const a of asks) {\n  if (a.callback_id) out.push({ json: { tg_method: 'answerCallbackQuery', tg: { callback_query_id: a.callback_id } } });\n\n  // ── add / remove a bot user (director only; parse already gated) ──\n  if (a.action === 'adduser') {\n    const chat = String(a.add_chat || '').trim();\n    if (!chat) { ack(a.chat_id, 'Give a numeric chat id: /adduser &lt;chat id&gt; &lt;name&gt;'); continue; }\n    try { await sb('POST', 'office_bot_users?on_conflict=tenant_id,chat_id', { tenant_id: TENANT, chat_id: chat, role: 'reader', name: String(a.add_name || ''), added_by: String(a.chat_id || 'director'), is_active: true, updated_at: now }, 'resolution=merge-duplicates,return=representation');\n      ack(a.chat_id, '✅ Added <b>' + tgEscape(a.add_name || chat) + '</b> (<code>' + tgEscape(chat) + '</code>). They get the morning notes, the read commands, and can be assigned tasks to approve.'); }\n    catch (e) { ack(a.chat_id, 'Could not add that user: ' + tgEscape(String((e && e.message) || e).slice(0, 200))); }\n    continue;\n  }\n  if (a.action === 'removeuser') {\n    const chat = String(a.add_chat || '').trim();\n    try { await sb('PATCH', 'office_bot_users?tenant_id=eq.' + TENANT + '&chat_id=eq.' + encodeURIComponent(chat), { is_active: false, updated_at: now }); ack(a.chat_id, '✅ Removed <code>' + tgEscape(chat) + '</code>.'); }\n    catch (e) { ack(a.chat_id, 'Could not remove that user.'); }\n    continue;\n  }\n\n  // ── assign a task to someone for approval (director) ──\n  if (a.action === 'assign_set') {\n    const t = resolve(a);\n    if (!t) { ack(a.chat_id, 'That task is no longer open. Send /tasks for the current list.'); continue; }\n    const chat = String(a.assignee || ''); const nm = nameOf(chat);\n    try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { approval_state: 'pending', updated_at: now, payload: { ...(t.payload || {}), assigned_to: chat, assigned_name: nm, assigned_by: String(a.chat_id), assigned_at: now } }); }\n    catch (e) { ack(a.chat_id, 'Could not assign that task.'); continue; }\n    ack(a.chat_id, '📨 Assigned to <b>' + tgEscape(nm) + '</b> for approval: ' + tgEscape(String(t.title || '')));\n    out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: chat, parse_mode: 'HTML', disable_web_page_preview: true,\n      text: '📨 <b>For your approval</b> #' + t.id + '\\n' + tgEscape(String(t.title || '')) + (t.detail ? '\\n' + tgEscape(String(t.detail).slice(0, 400)) : '') + '\\n\\n<i>Reply to this message to add a comment.</i>',\n      reply_markup: { inline_keyboard: [[{ text: '✅ Approve', callback_data: 'dok:' + t.id }, { text: '❌ Reject', callback_data: 'dno:' + t.id }], [{ text: '✍️ Send back for changes', callback_data: 'dchg:' + t.id }]] } } } });\n    continue;\n  }\n\n  // ── assignee (or director) approves / rejects / sends back, with a comment ──\n  if (a.action === 'dok' || a.action === 'dno' || a.action === 'dchg' || a.action === 'comment') {\n    const t = resolve(a);\n    if (!t) { ack(a.chat_id, 'That task is no longer open.'); continue; }\n    const src = String(t.source || '');\n    // Gmail / assistant drafts are sent by the Approve-button path; never close\n    // one from a typed reply — guide the user to the buttons instead.\n    if ((a.action === 'dok' || a.action === 'dno') && (src === 'receptionist' || src === 'assistant')) {\n      ack(a.chat_id, 'For that draft, use the ✅ Approve / ❌ Reject buttons on its message.'); continue;\n    }\n    const assigned = String((t.payload || {}).assigned_to || '');\n    const isDirector = tgRoleOf(a.chat_id) === 'director';\n    if (!isDirector && String(a.chat_id) !== assigned) { ack(a.chat_id, 'That task is not assigned to you.'); continue; }\n    const cmt = String(a.comment || '').trim();\n    const who = nameOf(a.chat_id);\n    const quote = cmt ? '\\n“' + tgEscape(cmt) + '”' : '';\n    if (a.action === 'comment') {\n      try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { updated_at: now, payload: { ...(t.payload || {}), last_comment: cmt, last_comment_by: who, last_comment_at: now } }); } catch (e) {}\n      ack(a.chat_id, '💬 Comment noted on #' + t.id + '.');\n      if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, '💬 ' + tgEscape(who) + ' on #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);\n      continue;\n    }\n    if (a.action === 'dchg') {\n      try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { approval_state: 'changes', status: 'open', updated_at: now, payload: { ...(t.payload || {}), change_note: cmt, change_by: who, change_at: now } }); } catch (e) { ack(a.chat_id, 'Could not send it back.'); continue; }\n      ack(a.chat_id, '✍️ Sent back for changes: ' + tgEscape(String(t.title || '')) + quote);\n      const assigner = String((t.payload || {}).assigned_by || '');\n      if (assigner && assigner !== String(a.chat_id)) ack(assigner, '✍️ ' + tgEscape(who) + ' sent back #' + t.id + ' for changes — ' + tgEscape(String(t.title || '')) + quote);\n      else if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, '✍️ ' + tgEscape(who) + ' sent back #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);\n      continue;\n    }\n    // Social posts: approving actually publishes via the ERP cross-post route.\n    if (a.action === 'dok' && src === 'social') {\n      const pl = t.payload || {};\n      const plats = (Array.isArray(pl.platforms) ? pl.platforms : []).filter((x) => x === 'facebook' || x === 'instagram' || x === 'telegram');\n      const secret = String($env.SOCIAL_CROSS_POST_SECRET || '');\n      const base = String($env.ERP_BASE_URL || '').replace(/\\/$/, '');\n      let postMsg;\n      if (!secret || !base) postMsg = 'posting not configured yet (needs SOCIAL_CROSS_POST_SECRET)';\n      else if (!plats.length) postMsg = 'no channels were set on this draft';\n      else {\n        try {\n          const res = await this.helpers.httpRequest({ method: 'POST', url: base + '/api/integrations/social/cross-post',\n            headers: { 'x-social-cross-post-secret': secret, 'Content-Type': 'application/json' },\n            body: JSON.stringify({ kind: pl.kind || 'gallery', contentId: String(pl.content_id || ''), title: String(pl.post_title || t.title || 'Post'), body: String(pl.caption || ''), platforms: plats }) });\n          const r = typeof res === 'string' ? (JSON.parse(res || '{}') || {}) : (res || {});\n          const rr = Array.isArray(r.results) ? r.results : [];\n          const okp = rr.filter((x) => x && x.ok && !x.skipped).map((x) => x.platform);\n          const sk = rr.filter((x) => x && x.skipped).map((x) => x.platform);\n          const fl = rr.filter((x) => x && !x.ok && !x.skipped).map((x) => x.platform);\n          postMsg = [okp.length ? 'posted to ' + okp.join(', ') : '', sk.length ? 'queued (not connected): ' + sk.join(', ') : '', fl.length ? 'failed: ' + fl.join(', ') : ''].filter(Boolean).join('; ') || 'cross-post returned no result';\n        } catch (e) { postMsg = 'post failed: ' + String((e && e.message) || e).slice(0, 160); }\n      }\n      try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { approval_state: 'approved', status: 'done', decided_by: who, decided_at: now, updated_at: now, payload: { ...pl, approved_by: String(a.chat_id), approved_at: now, post_result: postMsg } }); } catch (e) {}\n      ack(a.chat_id, '✅ Approved: ' + tgEscape(String(t.title || '')) + '\\n' + tgEscape(postMsg));\n      continue;\n    }\n    const approve = a.action === 'dok';\n    const patch = approve\n      ? { approval_state: 'approved', status: 'done', decided_by: who, decided_at: now, updated_at: now, payload: { ...(t.payload || {}), approved_by: String(a.chat_id), approved_at: now, decision_comment: cmt } }\n      : { approval_state: 'rejected', status: 'open', updated_at: now, payload: { ...(t.payload || {}), rejected_by: String(a.chat_id), rejected_at: now, decision_comment: cmt } };\n    try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, patch); } catch (e) { ack(a.chat_id, 'Could not record that.'); continue; }\n    ack(a.chat_id, (approve ? '✅ You approved: ' : '🚫 You rejected: ') + tgEscape(String(t.title || '')) + quote);\n    if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, (approve ? '✅ ' : '🚫 ') + tgEscape(who) + (approve ? ' approved' : ' rejected') + ' #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);\n    continue;\n  }\n\n  // ── close / snooze / clear-all (director) ──\n  let ids = [];\n  if (a.action === 'doneall') ids = openArr.map((t) => Number(t.id));\n  else { const t = resolve(a); if (t) ids = [Number(t.id)]; }\n  if (!ids.length) { ack(a.chat_id, a.num ? ('No task ' + a.num + ' — send /tasks for the list.') : (a.task_id ? 'No open task #' + a.task_id + '.' : 'No open tasks.')); continue; }\n  let done = 0; let dispNum = null;\n  for (const id of ids) {\n    if (seen.has(id)) continue; seen.add(id);\n    const idx = openArr.findIndex((t) => Number(t.id) === id); if (dispNum == null) dispNum = idx + 1;\n    const cur = openArr[idx] || {};\n    const patch = a.action === 'snooze' ? { due_on: tomorrow, updated_at: now, payload: { ...(cur.payload || {}), snoozed_until: tomorrow, snoozed_by: 'director' } } : { status: 'done', decided_by: 'director', decided_at: now, updated_at: now };\n    try { await sb('PATCH', 'office_tasks?id=eq.' + id + '&tenant_id=eq.' + TENANT, patch); done += 1; } catch (e) {}\n  }\n  const label = a.action === 'doneall' ? ('Cleared ' + done + ' open task' + (done === 1 ? '' : 's') + '.') : (a.action === 'snooze' ? ('Task ' + dispNum + ' snoozed to ' + tomorrow + '.') : ('Task ' + dispNum + ' closed.'));\n  ack(a.chat_id, '✅ ' + label);\n}\nreturn out;\n})();\n"
       },
-      "id": "7d7d2a7a-22fb-4e46-88b4-b9516b57e01d",
+      "id": "8c8d76bb-a1fa-4a95-95ce-584ec3bfc6ea",
       "name": "Apply: task actions",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -982,7 +982,7 @@
       "parameters": {
         "jsCode": "\nconst asks = $('Parse: updates').all().map((i) => i.json).filter((u) => u.kind === 'assistant');\nreturn asks.map((a) => ({ json: { chat_id: a.chat_id,\n  assist: { text: a.text, chat_id: a.chat_id, locale: /[\\u0900-\\u097F]/.test(a.text || '') ? 'hi' : 'en' } } }));\n"
       },
-      "id": "5cf8c5da-b4de-4df8-a329-a979f5a0dc77",
+      "id": "7d03c96c-72ac-4087-be00-a7a93d9d1303",
       "name": "Build: assistant request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1019,7 +1019,7 @@
           "timeout": 120000
         }
       },
-      "id": "ee6dd5c4-449f-4914-81d4-624f853a3583",
+      "id": "a5bea62e-0066-4bed-844a-6d6fa16c85bb",
       "name": "ERP: assistant",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1034,7 +1034,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\n// One ERP response per asked message (paired by order). Classify each into a\n// text reply, a document to send, or a draft to store + offer for approval.\nconst reqs = $('Build: assistant request').all().map((i) => i.json);\nconst items = $input.all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const r = (items[i] && items[i].json) || {};\n  const chat_id = (reqs[i] && reqs[i].chat_id) || r.chat_id || TG_CHATS.director;\n  const kind = String(r.kind || '');\n  if (!kind) {\n    out.push({ json: { _route: 'text', chat_id, tg_method: 'sendMessage', tg: { chat_id, text: 'The office assistant could not be reached just now. Please try again in a moment.', parse_mode: 'HTML', disable_web_page_preview: true } } });\n    continue;\n  }\n  if (kind === 'file' && (r.fileBase64 || r.fileUrl)) {\n    if (r.fileBase64) {\n      out.push({ json: { _route: 'file', chat_id, caption: String(r.caption || '').slice(0, 1000) },\n        binary: { data: { data: r.fileBase64, mimeType: r.mime || 'application/pdf', fileName: r.filename || 'report.pdf' } } });\n    } else {\n      out.push({ json: { _route: 'text', chat_id, tg_method: 'sendDocument', tg: { chat_id, document: r.fileUrl, caption: String(r.caption || '').slice(0, 1000) } } });\n    }\n    continue;\n  }\n  if (kind === 'draft' && r.draft) {\n    const summary = String(r.summary || (r.draft && r.draft.recipientLabel) || 'Draft');\n    out.push({ json: { _route: 'draft', chat_id, draft: r.draft, summary,\n      row: { tenant_id: $env.OFFICE_TENANT_ID, from_role: 'director', to_role: 'director',\n        title: summary.slice(0, 80), detail: String(r.draft.body || '').slice(0, 600),\n        status: 'open', source: 'assistant', approval_state: 'pending',\n        payload: { assistant_draft: r.draft, summary, kind: 'assistant_draft' } } } });\n    continue;\n  }\n  const text = String(r.text || 'Done.');\n  for (const chunk of tgChunks(tgEscape(text))) {\n    out.push({ json: { _route: 'text', chat_id, tg_method: 'sendMessage', tg: { chat_id, text: chunk, parse_mode: 'HTML', disable_web_page_preview: true } } });\n  }\n}\nreturn out;\n"
       },
-      "id": "773a8246-3ebd-4b28-8806-92903f244256",
+      "id": "27c8ec18-f198-4c99-983c-773be756f94e",
       "name": "Route: assistant reply",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -1057,7 +1057,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "676067ba-30aa-45cd-87d2-d709a049009a",
+                    "id": "3e4f2846-6f48-4fb1-b95c-3069863aeb1e",
                     "leftValue": "={{ $json._route }}",
                     "rightValue": "text",
                     "operator": {
@@ -1081,7 +1081,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "b3277e49-d5d1-4acb-aba9-fdde6282b45c",
+                    "id": "c3275543-b5a3-4c48-9dae-1f44e54399bd",
                     "leftValue": "={{ $json._route }}",
                     "rightValue": "file",
                     "operator": {
@@ -1105,7 +1105,7 @@
                 },
                 "conditions": [
                   {
-                    "id": "ca821983-1cdd-44c8-ac54-6080a5929b8b",
+                    "id": "0afe21ba-7ac8-4296-b98e-85141905e2b5",
                     "leftValue": "={{ $json._route }}",
                     "rightValue": "draft",
                     "operator": {
@@ -1123,7 +1123,7 @@
         },
         "options": {}
       },
-      "id": "384ce0f9-c1af-45e7-855c-816911799872",
+      "id": "95b3fb5c-e131-4bc2-974f-d1263c564e81",
       "name": "Switch: assistant route",
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.2,
@@ -1159,7 +1159,7 @@
           "timeout": 120000
         }
       },
-      "id": "5d5b1a4c-5200-4a5d-a591-5309b7de6494",
+      "id": "787e7670-235e-4540-a41a-a4351abaa377",
       "name": "Telegram: sendDocument",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1201,7 +1201,7 @@
           "timeout": 30000
         }
       },
-      "id": "aebc7f8e-969f-4501-a072-b239612b6109",
+      "id": "601be35a-6022-4824-8b5a-758eeb798aa3",
       "name": "Insert: assistant draft",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
@@ -1215,7 +1215,7 @@
       "parameters": {
         "jsCode": "\nconst TG_TOKEN = String($env.TELEGRAM_BOT_TOKEN || '').trim();\nconst TG_CHATS = { director: String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim(), principal: String($env.TELEGRAM_PRINCIPAL_CHAT_ID || '').trim() };\nfunction tgEscape(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }\n// Telegram takes 4096 characters per message. Cut at a line break, so an\n// HTML tag or entity is never split; a single over-long line is cut hard.\nfunction tgChunks(text, max) {\n  max = max || 4096; const out = []; let rest = String(text || '');\n  while (rest.length > max) {\n    let cut = rest.lastIndexOf('\\n', max); if (cut < max / 2) cut = max;\n    out.push(rest.slice(0, cut)); rest = rest.slice(cut).replace(/^\\n+/, '');\n  }\n  if (rest) out.push(rest);\n  return out;\n}\nfunction tgChatsFor(roles) { return [...new Set((roles || []).map((r) => TG_CHATS[r]).filter(Boolean))]; }\nfunction tgRoleOf(chatId) { const id = String(chatId || ''); return Object.keys(TG_CHATS).find((r) => TG_CHATS[r] && TG_CHATS[r] === id) || ''; }\n\n// The insert returns the created rows (return=representation); pair each with\n// its draft (same order) and send the body with Approve/Reject buttons whose\n// callback_data is approve:<id> / reject:<id> — the decision path acts on it.\nconst rows = $input.all().map((i) => i.json).filter((r) => r && r.id);\nconst asks = $('Route: assistant reply').all().map((i) => i.json).filter((r) => r._route === 'draft');\nconst out = [];\nfor (let i = 0; i < rows.length; i++) {\n  const id = rows[i].id;\n  const a = asks[i] || {};\n  const d = a.draft || {};\n  const chat_id = a.chat_id || TG_CHATS.director;\n  const to = d.recipientLabel ? ('\\n<i>To: ' + tgEscape(d.recipientLabel) + (d.recipient && d.recipient.count ? ' (' + d.recipient.count + ')' : '') + '</i>') : '';\n  const head = '✍️ <b>Draft for approval</b>\\n' + tgEscape(a.summary || d.recipientLabel || '') + to;\n  const text = tgChunks(head + '\\n\\n' + tgEscape(String(d.body || ''))).slice(-1)[0];\n  out.push({ json: { tg_method: 'sendMessage', tg: { chat_id, text, parse_mode: 'HTML', disable_web_page_preview: true,\n    reply_markup: { inline_keyboard: [[{ text: '✅ Approve', callback_data: 'approve:' + id }, { text: '❌ Reject', callback_data: 'reject:' + id }]] } } } });\n}\nreturn out;\n"
       },
-      "id": "5d8ad7e9-8392-4ef6-bddc-b11034276496",
+      "id": "7e8d25aa-649a-4ce8-8e01-0a51e2260ab6",
       "name": "Build: draft approval",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,

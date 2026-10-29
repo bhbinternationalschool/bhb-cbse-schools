@@ -2038,6 +2038,32 @@ for (const a of asks) {
       else if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, '✍️ ' + tgEscape(who) + ' sent back #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);
       continue;
     }
+    // Social posts: approving actually publishes via the ERP cross-post route.
+    if (a.action === 'dok' && src === 'social') {
+      const pl = t.payload || {};
+      const plats = (Array.isArray(pl.platforms) ? pl.platforms : []).filter((x) => x === 'facebook' || x === 'instagram' || x === 'telegram');
+      const secret = String($env.SOCIAL_CROSS_POST_SECRET || '');
+      const base = String($env.ERP_BASE_URL || '').replace(/\\/$/, '');
+      let postMsg;
+      if (!secret || !base) postMsg = 'posting not configured yet (needs SOCIAL_CROSS_POST_SECRET)';
+      else if (!plats.length) postMsg = 'no channels were set on this draft';
+      else {
+        try {
+          const res = await this.helpers.httpRequest({ method: 'POST', url: base + '/api/integrations/social/cross-post',
+            headers: { 'x-social-cross-post-secret': secret, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: pl.kind || 'gallery', contentId: String(pl.content_id || ''), title: String(pl.post_title || t.title || 'Post'), body: String(pl.caption || ''), platforms: plats }) });
+          const r = typeof res === 'string' ? (JSON.parse(res || '{}') || {}) : (res || {});
+          const rr = Array.isArray(r.results) ? r.results : [];
+          const okp = rr.filter((x) => x && x.ok && !x.skipped).map((x) => x.platform);
+          const sk = rr.filter((x) => x && x.skipped).map((x) => x.platform);
+          const fl = rr.filter((x) => x && !x.ok && !x.skipped).map((x) => x.platform);
+          postMsg = [okp.length ? 'posted to ' + okp.join(', ') : '', sk.length ? 'queued (not connected): ' + sk.join(', ') : '', fl.length ? 'failed: ' + fl.join(', ') : ''].filter(Boolean).join('; ') || 'cross-post returned no result';
+        } catch (e) { postMsg = 'post failed: ' + String((e && e.message) || e).slice(0, 160); }
+      }
+      try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { approval_state: 'approved', status: 'done', decided_by: who, decided_at: now, updated_at: now, payload: { ...pl, approved_by: String(a.chat_id), approved_at: now, post_result: postMsg } }); } catch (e) {}
+      ack(a.chat_id, '✅ Approved: ' + tgEscape(String(t.title || '')) + '\\n' + tgEscape(postMsg));
+      continue;
+    }
     const approve = a.action === 'dok';
     const patch = approve
       ? { approval_state: 'approved', status: 'done', decided_by: who, decided_at: now, updated_at: now, payload: { ...(t.payload || {}), approved_by: String(a.chat_id), approved_at: now, decision_comment: cmt } }
@@ -3118,7 +3144,7 @@ for (const d of drafts.slice(0, 5)) {
   task_rows.push({ tenant_id: $env.OFFICE_TENANT_ID, from_role: 'social_manager', to_role: 'director',
     title: String(d.title || 'Social post').slice(0, 80),
     detail: (String(d.caption || '').slice(0, 400) + (d.tagline ? '\\n\\n— ' + String(d.tagline).slice(0, 100) : '') + '\\n\\nChannels: ' + (plats.join(', ') || 'none set')).slice(0, 600),
-    status: 'open', source: 'social', approval_state: 'none',
+    status: 'open', source: 'social', approval_state: 'pending',
     payload: { kind: 'gallery', content_id: String(d.content_id), post_title: String(d.title || '').slice(0, 120), caption: String(d.caption || '').slice(0, 1200), tagline: String(d.tagline || '').slice(0, 160), platforms: plats, image_url: String(d.image_url || ''), day: it.ctx.today } });
 }
 
@@ -3140,6 +3166,30 @@ return r.length ? [{ json: { rows: r } }] : [];
   wf.link(outputs, tasksFilter);
   const insertTasks = sbInsert(wf, "Insert: social tasks", "office_tasks", "rows", { row: 2, alwaysOutputData: true });
   wf.link(tasksFilter, insertTasks);
+  // Each inserted draft → one approval message to the director with
+  // Approve & post / Reject / Send back (dok/dno/dchg); the bot's action hub
+  // posts via the cross-post route on approve.
+  const socialApprovals = code(
+    wf,
+    "Build: social approvals",
+    `${JS_TG}
+const rows = $input.all().map((i) => i.json).filter((r) => r && r.id);
+const dir = String($env.TELEGRAM_DIRECTOR_CHAT_ID || '').trim();
+if (!dir) return [];
+const out = [];
+for (const t of rows) {
+  const p = t.payload || {};
+  const plats = Array.isArray(p.platforms) ? p.platforms : [];
+  const text = '📸 <b>Post for approval</b> #' + t.id + '\\n' + tgEscape(String(p.caption || t.title || '')) + (p.tagline ? '\\n— ' + tgEscape(String(p.tagline)) : '') + '\\n\\nChannels: ' + (plats.join(', ') || 'none set') + '\\n<i>Reply to add a comment.</i>';
+  out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: dir, text, parse_mode: 'HTML', disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: [[{ text: '✅ Approve & post', callback_data: 'dok:' + t.id }, { text: '❌ Reject', callback_data: 'dno:' + t.id }], [{ text: '✍️ Send back', callback_data: 'dchg:' + t.id }]] } } } });
+}
+return out;
+`,
+    { row: 2 },
+  );
+  wf.link(insertTasks, socialApprovals);
+  wf.chain(socialApprovals, tgCall(wf, "Social: send approvals", { row: 2 }));
 
   // The daily note + a 📋 Open tasks button to the director.
   internalChain(wf, "Social", outputs);
