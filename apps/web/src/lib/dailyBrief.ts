@@ -20,6 +20,8 @@
  *     counted separately and both are shown.
  */
 
+import { unansweredLine, type BriefReminders } from "@/lib/staffReminders";
+
 export type BriefMoneyLine = { key: string; label: string; paise: number; count: number };
 
 export type BriefCollection = {
@@ -187,6 +189,12 @@ export type DailyBrief = {
    * (Settings → Modules → Requests). Absent = not computed.
    */
   moduleRequests?: { waiting: number; newToday: number; stuckToday: number };
+  /**
+   * Staff whose reminders went unanswered today — reminded in the app and
+   * still not punched, register not taken, homework missing, marks overdue
+   * (lib/staffReminders). Absent = not computed.
+   */
+  reminders?: BriefReminders;
 };
 
 export function rupees(paise: number): string {
@@ -541,6 +549,9 @@ export function composeBriefSummary(b: DailyBrief): string {
     lines.push(`💡 ${bits.join(" · ")} — ERP → Modules → Requests`);
   }
 
+  const unanswered = unansweredLine(b.reminders);
+  if (unanswered) lines.push(`⏰ ${unanswered.charAt(0).toUpperCase()}${unanswered.slice(1)}`);
+
   if (b.aiNote.trim()) lines.push(`\n${b.aiNote.trim()}`);
 
   return lines.join("\n");
@@ -812,6 +823,12 @@ export function pendingFacts(b: DailyBrief): PendingFact[] {
         6,
       )}`,
     });
+  }
+
+  // The people who were told this morning and did nothing about it: one
+  // conversation each, which is why it ranks with the registers.
+  if (b.reminders && (b.reminders.rows.length || b.reminders.unknown.length)) {
+    out.push({ rank: 2.5, text: unansweredLine(b.reminders) });
   }
 
   if (b.staff.pending.length) {

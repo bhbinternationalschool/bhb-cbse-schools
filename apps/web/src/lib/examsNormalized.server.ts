@@ -1150,6 +1150,58 @@ export async function fetchExamSheetByKeyFromDb(
   return loadSheetChildren(sb, tenantId, header as Record<string, unknown>);
 }
 
+/**
+ * Every mark sheet of one exam, with their child rows — and `ok: false` when
+ * ANY read failed. fetchExamSheetByKeyFromDb answers a failed read as "no
+ * sheet" / "no marks", which a reminder would turn into "marks pending" for
+ * every teacher (lib/staffReminders: unknown must never become fact).
+ */
+export async function fetchExamSheetsForTermStrict(
+  academicYearCode: string,
+  examTermId: string,
+): Promise<{ ok: true; sheets: MarkSheet[] } | { ok: false; error: string }> {
+  const ctx = await resolveCtx();
+  if (!ctx) return { ok: false, error: "tenant unavailable" };
+  const { sb, tenantId } = ctx;
+  const headers = await fetchAllPages<Record<string, unknown>>((from, to) =>
+    sb
+      .from("exam_desk_sheets")
+      .select("*")
+      .eq("tenant_id", tenantId)
+      .eq("academic_year_code", academicYearCode)
+      .eq("exam_term_id", examTermId)
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
+  if (headers.error) return { ok: false, error: headers.error };
+  const out: MarkSheet[] = [];
+  for (const header of headers.rows) {
+    const sheetId = String(header.id);
+    const child = (table: string) =>
+      fetchAllPages<Record<string, unknown>>((from, to) =>
+        sb
+          .from(table)
+          .select("*")
+          .eq("tenant_id", tenantId)
+          .eq("mark_sheet_id", sheetId)
+          .order("id", { ascending: true })
+          .range(from, to),
+      );
+    const parts = await Promise.all([
+      child("exam_desk_marks"),
+      child("exam_desk_coscholastic"),
+      child("exam_desk_remarks"),
+      child("exam_desk_item_scores"),
+      child("exam_desk_absences"),
+    ]);
+    const failed = parts.find((p) => p.error);
+    if (failed) return { ok: false, error: failed.error ?? "child read failed" };
+    const [marks, co, remarks, items, absences] = parts.map((p) => p.rows);
+    out.push(rowToSheet(header, marks ?? [], co, remarks, items, absences));
+  }
+  return { ok: true, sheets: out };
+}
+
 async function loadSheetChildren(
   sb: SupabaseClient,
   tenantId: string,

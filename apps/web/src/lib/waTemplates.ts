@@ -239,6 +239,7 @@ export const WA_TEMPLATE_VARIABLES: WaTemplateVariableDef[] = [
   { key: "leaveFrom", label: "Leave from", group: "Leave", sample: "5 Aug 2026" },
   { key: "leaveTo", label: "Leave to", group: "Leave", sample: "7 Aug 2026" },
   { key: "staffName", label: "Staff name", group: "Staff", sample: "Rajesh Kumar" },
+  { key: "pendingWork", label: "Pending work (one line)", group: "Staff", sample: "Today's register is not taken — Take attendance: Class 5 · A", hint: "Filled by the staff work reminder (lib/staffReminders) — one line, no line breaks." },
   { key: "noticeTitle", label: "Notice title", group: "Comms", sample: "Holiday announcement" },
   { key: "noticeBody", label: "Notice body", group: "Comms", sample: "School closed on Friday." },
   { key: "messageText", label: "Parent's message", group: "Comms", sample: "Amay could not finish the worksheet, please guide." },
@@ -1234,6 +1235,31 @@ const SEED_DEFS: SeedDef[] = [
       "Hello {{staffName}} 🙏\n\nAn update on your leave request:\n\n📋 Status: *{{leaveStatus}}*\n📅 Dates: {{leaveFrom}} to {{leaveTo}}\n\nFor anything about this, please reply to this message or speak to the office. Thank you!",
     bodyHi:
       "नमस्ते {{staffName}} जी 🙏\n\nआपके अवकाश अनुरोध पर अपडेट:\n\n📋 स्थिति: *{{leaveStatus}}*\n📅 दिनांक: {{leaveFrom}} से {{leaveTo}}\n\nइस बारे में कुछ भी पूछना हो तो इसी संदेश का उत्तर दें या कार्यालय से बात करें। धन्यवाद!",
+    footerEn: "School office",
+    footerHi: "विद्यालय कार्यालय",
+  },
+  {
+    /*
+      Staff work reminder (lib/staffReminders.ts, 29 Oct 2026) — the
+      WhatsApp fallback for a member of staff the app cannot reach: no push
+      device, or none seen for 3 days. Business-initiated, so a template is
+      the only way it may go; the sender refuses rather than send free text.
+      {{pendingWork}} is one line ("Today's register is not taken — Take
+      attendance: Class 5 · A"), never a newline: Meta refuses those.
+    */
+    familyKey: "staff_work_reminder",
+    nameEn: "Staff: pending work reminder",
+    nameHi: "स्टाफ: लंबित कार्य स्मरण",
+    module: "staff",
+    category: "UTILITY",
+    metaName: "bhb_staff_work_reminder",
+    headerFormat: "TEXT",
+    headerTextEn: "Work reminder",
+    headerTextHi: "कार्य स्मरण",
+    bodyEn:
+      "Namaste {{staffName}} 🙏\n\nA reminder from *{{schoolName}}* about your work today:\n\n📌 {{pendingWork}}\n\nPlease open the BHB staff app to finish it. If it is already done, you can ignore this message. Thank you!",
+    bodyHi:
+      "नमस्ते {{staffName}} जी 🙏\n\n*{{schoolName}}* की ओर से आज के आपके काम का स्मरण:\n\n📌 {{pendingWork}}\n\nकृपया BHB स्टाफ ऐप खोलकर इसे पूरा करें। यदि यह हो चुका है तो इस संदेश को अनदेखा करें। धन्यवाद!",
     footerEn: "School office",
     footerHi: "विद्यालय कार्यालय",
   },

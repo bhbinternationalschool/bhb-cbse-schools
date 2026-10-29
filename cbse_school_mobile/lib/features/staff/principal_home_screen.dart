@@ -45,6 +45,7 @@ import "staff_activity_screen.dart";
 import "student_leave_queue_screen.dart";
 import "timetable_screen.dart";
 import "waiting_card.dart";
+import "pending_work_card.dart";
 import "../modules/chat_inbox_screen.dart";
 import "../modules/school_chat_screen.dart";
 import "principal_lists.dart";
@@ -881,6 +882,11 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                   WaitingCard(
                     api: widget.api,
                     onOpen: _openWaiting,
+                    refreshKey: _refresh,
+                  ),
+                  PendingWorkCard(
+                    api: widget.api,
+                    onOpen: _openRoute,
                     refreshKey: _refresh,
                   ),
                   const SizedBox(height: 8),

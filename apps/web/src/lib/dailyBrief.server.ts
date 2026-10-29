@@ -48,6 +48,7 @@ import {
   type BriefStudentAttendance,
   type DailyBrief,
 } from "@/lib/dailyBrief";
+import type { BriefReminders } from "@/lib/staffReminders";
 import { isReviewDemoStudent, reviewDemoHouseholdIds } from "@/lib/reviewDemoRecords";
 import { classifyClassHolidayDay, classifyStaffHolidayDay } from "@/lib/holidayPolicy";
 import { normalizeYear } from "@/lib/staffTeachingScope";
@@ -845,6 +846,21 @@ async function readModuleRequestsForBrief(
   }
 }
 
+/**
+ * Staff who were reminded today (lib/staffReminders) and still have it
+ * pending. A failure here is reported as "could not be checked" for every
+ * rule — never as "everyone acted on their reminders".
+ */
+async function readRemindersForBrief(dateIso: string): Promise<BriefReminders> {
+  try {
+    const { readUnansweredReminders } = await import("@/lib/staffReminders.server");
+    return await readUnansweredReminders(dateIso);
+  } catch (e) {
+    console.warn("[dailyBrief] reminders unreadable", e instanceof Error ? e.message : e);
+    return { unknown: ["punch", "register", "homework", "marks"], rows: [] };
+  }
+}
+
 export async function buildDailyBrief(
   opts: { dateIso?: string; aiNote?: string } = {},
 ): Promise<DailyBrief> {
@@ -872,6 +888,7 @@ export async function buildDailyBrief(
   );
 
   const moduleRequests = await readModuleRequestsForBrief(dateIso);
+  const reminders = await readRemindersForBrief(dateIso);
 
   return {
     ...emptyBrief(dateIso, TENANT.nameDisplay),
@@ -882,6 +899,7 @@ export async function buildDailyBrief(
     defaulters,
     homework,
     ...(moduleRequests ? { moduleRequests } : {}),
+    reminders,
     aiNote: opts.aiNote || "",
   };
 }
