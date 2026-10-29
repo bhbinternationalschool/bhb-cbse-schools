@@ -12,7 +12,7 @@ import {
   type TimetableSubstitution,
 } from "@/lib/timetable";
 import {
-  absentTeachersForDate,
+  absentTeachersFromData,
   autoArrangeSubstitutes,
   clearSubstitutionsForDate,
   listSubstitutionsForDate,
@@ -25,6 +25,11 @@ import {
 } from "@/lib/timetableSubstitution";
 import { notifySubstitutes } from "@/lib/timetableSubstitutionAuto";
 import { isoDateWeekday } from "@/lib/examTimetable";
+import {
+  findStaffRegister,
+  type StaffAttendanceState,
+} from "@/lib/staffAttendance";
+import type { LeaveRequest } from "@/lib/staffHr";
 import type { MastersState } from "@/lib/masters";
 import { ErpTable, ErpTableBody, ErpTableHead } from "@/components/ui/erp-roster";
 import { RowActionMenu } from "@/components/ui/erp-grid";
@@ -46,6 +51,16 @@ export function SubstitutionPanel(props: {
   const [manualAbsent, setManualAbsent] = useState<string[]>([]);
   const [manualPick, setManualPick] = useState("");
   const [rows, setRows] = useState<TimetableSubstitution[]>([]);
+
+  // Absent/on-leave teachers come from the staff-attendance register and the
+  // HR leave slice. Those slices are NOT hydrated by TimetableWorkspace (it
+  // loads masters + timetable only), so this panel hydrates them itself —
+  // without it the absent list was always empty (bug, 29 Oct 2026).
+  const [attState, setAttState] = useState<StaffAttendanceState | null>(null);
+  const [hrLeave, setHrLeave] = useState<LeaveRequest[]>([]);
+  const [absenceStatus, setAbsenceStatus] = useState<
+    "loading" | "ready" | "failed"
+  >("loading");
 
   // The Substitute column is a picker, not a value, so it is not a sort handle.
   const subSort = useTableSort(
@@ -112,6 +127,36 @@ export function SubstitutionPanel(props: {
     setState(loadTimetable());
   }, []);
 
+  // Hydrate the staff-attendance + HR leave desk slices (the same source the
+  // Staff attendance panel and Leave approvals read), then feed the register
+  // and approved-leave rows into the pure detector. The whole desk loads once
+  // here; switching the date just re-reads the matching register in memory.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setAbsenceStatus("loading");
+      try {
+        const { loadSubstitutionAbsence } = await import(
+          "@/lib/substitutionAbsence"
+        );
+        const res = await loadSubstitutionAbsence();
+        if (cancelled) return;
+        if (!res.ok) {
+          setAbsenceStatus("failed");
+          return;
+        }
+        setAttState(res.attState);
+        setHrLeave(res.leaveRequests);
+        setAbsenceStatus("ready");
+      } catch {
+        if (!cancelled) setAbsenceStatus("failed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (!props.ayBounds.startsOn && !props.ayBounds.endsOn) return;
     setDate((prev) => {
@@ -129,8 +174,15 @@ export function SubstitutionPanel(props: {
 
   const detectedAbsent = useMemo<AbsentTeacher[]>(() => {
     if (!date || weekday == null) return [];
-    return absentTeachersForDate(masters, ay, date);
-  }, [masters, ay, date, weekday]);
+    if (absenceStatus !== "ready" || !attState) return [];
+    return absentTeachersFromData({
+      staff: masters.staff ?? [],
+      academicYearCode: ay,
+      date,
+      register: findStaffRegister(attState, date, ay),
+      leaveRequests: hrLeave,
+    });
+  }, [masters, ay, date, weekday, attState, hrLeave, absenceStatus]);
 
   const allAbsent = useMemo<AbsentTeacher[]>(() => {
     const seen = new Set(detectedAbsent.map((a) => a.staffId));
@@ -187,7 +239,9 @@ export function SubstitutionPanel(props: {
   function onAutoArrange() {
     if (!allAbsent.length) {
       props.onError(
-        "No absent teachers found for this date — mark staff attendance / approve leave, or add one manually below.",
+        absenceStatus === "failed"
+          ? "Could not load staff attendance / approved leave for this date — reopen this screen, or add an absent teacher manually below."
+          : "No absent teachers found for this date — mark staff attendance / approve leave, or add one manually below.",
       );
       return;
     }
@@ -484,9 +538,21 @@ export function SubstitutionPanel(props: {
             {weekday != null ? ` (${WEEKDAY_SHORT[weekday]})` : ""}
           </h3>
           {allAbsent.length === 0 ? (
-            <p className="mt-1 text-[12px] text-[var(--muted)]">
-              No teacher absent per staff attendance / approved leave.
-            </p>
+            absenceStatus === "loading" ? (
+              <p className="mt-1 text-[12px] text-[var(--muted)]">
+                Checking staff attendance and approved leave…
+              </p>
+            ) : absenceStatus === "failed" ? (
+              <p className="mt-1 text-[12px] font-semibold text-[var(--danger)]">
+                Could not load staff attendance / approved leave — reopen this
+                screen to try again. (You can still add an absent teacher
+                manually below.)
+              </p>
+            ) : (
+              <p className="mt-1 text-[12px] text-[var(--muted)]">
+                No teacher absent per staff attendance / approved leave.
+              </p>
+            )
           ) : (
             <ul className="mt-2 flex flex-wrap gap-2">
               {allAbsent.map((a) => (

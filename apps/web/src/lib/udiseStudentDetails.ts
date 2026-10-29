@@ -8,13 +8,13 @@
  */
 
 import {
-  loadMasters,
   resolveFeeGroupId,
   sortClassIdsByClassBand,
   DEFAULT_AY,
   type FeeStudentType,
   type MastersState,
 } from "@/lib/masters";
+import { requireMasters } from "@/lib/data/requireData";
 import {
   loadSis,
   normalizeHousehold,
@@ -1595,8 +1595,8 @@ function buildPreviewRow(
 
 export function previewUdiseStudentDetailsSync(
   matrix: unknown[][],
-  sis?: SisState,
-  masters?: MastersState,
+  sis: SisState | undefined,
+  masters: MastersState,
   options: UdiseMatchOptions = DEFAULT_UDISE_MATCH_OPTIONS,
   academicYearCode?: string,
 ): {
@@ -1604,7 +1604,7 @@ export function previewUdiseStudentDetailsSync(
   preview: UdiseMatchPreview[];
   formatOk: boolean;
 } {
-  const m = masters ?? loadMasters();
+  const m = requireMasters(masters, "previewUdiseStudentDetailsSync");
   const state = sis ?? loadSis();
   const rows = parseUdiseStudentDetailsMatrix(matrix);
   const formatOk = !!findUdiseHeaderRow(matrix);
@@ -1691,12 +1691,12 @@ function propagateIdentityAcrossSessions(
 
 export function applyUdiseStudentDetailsSync(
   matrix: unknown[][],
-  sis?: SisState,
-  masters?: MastersState,
+  sis: SisState | undefined,
+  masters: MastersState,
   options: UdiseMatchOptions = DEFAULT_UDISE_MATCH_OPTIONS,
   academicYearCode?: string,
 ): UdiseImportResult {
-  const m = masters ?? loadMasters();
+  const m = requireMasters(masters, "applyUdiseStudentDetailsSync");
   const state = sis ?? loadSis();
   const { preview, rows } = previewUdiseStudentDetailsSync(
     matrix,
@@ -1869,11 +1869,11 @@ export type UdiseCandidate = {
  */
 export function findUdiseMatchCandidates(
   row: UdiseStudentRow,
-  sis?: SisState,
-  masters?: MastersState,
+  sis: SisState | undefined,
+  masters: MastersState,
 ): UdiseCandidate[] {
   const state = sis ?? loadSis();
-  const m = masters ?? loadMasters();
+  const m = requireMasters(masters, "findUdiseMatchCandidates");
   const hits = new Map<string, Set<string>>();
   const add = (s: SisStudent, reason: string) => {
     const set = hits.get(s.id) ?? new Set<string>();
@@ -1950,7 +1950,8 @@ export function applyUdiseRowToStudent(input: {
   studentId: string;
   reactivate?: boolean;
   sis?: SisState;
-  masters?: MastersState;
+  /** The school setup (useScreenMasters / loadServerMasters) — 2.3b: data, never a fallback. */
+  masters: MastersState;
   /**
    * Whether this row is settled as being about this pupil. The panel passes
    * the match method's own verdict for an auto-matched row, and `true` when
@@ -2024,7 +2025,8 @@ export function promoteUdiseRowToSession(input: {
   sourceStudentId: string;
   targetAcademicYearCode: string;
   sis?: SisState;
-  masters?: MastersState;
+  /** The school setup (useScreenMasters / loadServerMasters) — 2.3b: data, never a fallback. */
+  masters: MastersState;
 }):
   | {
       ok: true;
@@ -2035,7 +2037,7 @@ export function promoteUdiseRowToSession(input: {
     }
   | { ok: false; error: string } {
   const state = input.sis ?? loadSis();
-  const masters = input.masters ?? loadMasters();
+  const masters = requireMasters(input.masters, "promoteUdiseRowToSession");
   const target = ayVal(input.targetAcademicYearCode);
   if (!target) return { ok: false, error: "No target session selected" };
 
@@ -2274,12 +2276,13 @@ export type UdiseReconciliation = {
 export function reconcileUdisePortalUpload(input: {
   matrix: unknown[][];
   sis?: SisState;
-  masters?: MastersState;
+  /** The school setup (useScreenMasters / loadServerMasters) — 2.3b: data, never a fallback. */
+  masters: MastersState;
   academicYearCode: string;
   options?: UdiseMatchOptions;
 }): UdiseReconciliation {
   const state = input.sis ?? loadSis();
-  const m = input.masters ?? loadMasters();
+  const m = requireMasters(input.masters, "reconcileUdisePortalUpload");
   const options = input.options ?? DEFAULT_UDISE_MATCH_OPTIONS;
   const { preview, rows } = previewUdiseStudentDetailsSync(
     input.matrix,
@@ -2459,10 +2462,12 @@ export function migrateUdiseRowToSis(input: {
   classId?: string;
   sectionId?: string;
   academicYearCode?: string;
+  /** The school setup (useScreenMasters) — 2.3b: data, never a fallback. */
+  masters: MastersState;
 }):
   | { ok: true; student: SisStudent; state: SisState }
   | { ok: false; error: string } {
-  const masters = loadMasters();
+  const masters = requireMasters(input.masters, "migrateUdiseRowToSis");
   const state = loadSis();
   const row = input.row;
   if (!row.fullName.trim()) return { ok: false, error: "Student name required" };
@@ -2600,7 +2605,8 @@ export type UdiseBulkImportResult = {
 export function importUnmatchedUdiseRows(input: {
   matrix: unknown[][];
   sis?: SisState;
-  masters?: MastersState;
+  /** The school setup (useScreenMasters / loadServerMasters) — 2.3b: data, never a fallback. */
+  masters: MastersState;
   studentType: FeeStudentType;
   feeGroupId?: string | null;
   academicYearCode?: string;
@@ -2608,7 +2614,7 @@ export function importUnmatchedUdiseRows(input: {
   defaultClassId?: string;
   defaultSectionId?: string;
 }): UdiseBulkImportResult {
-  const m = input.masters ?? loadMasters();
+  const m = requireMasters(input.masters, "importUnmatchedUdiseRows");
   const state = input.sis ?? loadSis();
   const { preview } = previewUdiseStudentDetailsSync(
     input.matrix,
