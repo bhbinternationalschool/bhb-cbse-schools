@@ -1782,18 +1782,17 @@ for (const a of asks) {
   }
   if (a.cmd === 'tasks') {
     if (!tasks.length) { send(a.chat_id, 'No open tasks. 🎉'); continue; }
-    const numbered = tasks.map((t, i) => (i + 1) + '. ' + tgEscape(String(t.title || '').slice(0, 70))
-      + (t.to_role && t.to_role !== 'director' ? ' <i>[' + tgEscape(t.to_role) + ']</i>' : '')
-      + (t.payload && t.payload.assigned_name ? ' → <i>' + tgEscape(t.payload.assigned_name) + (t.approval_state === 'pending' ? ' (awaiting)' : '') + '</i>' : '')).join('\\n');
-    // Director: a row of number buttons (tap → the task's action menu), plus a
-    // typed-number / "close N" path. Others: read-only numbered list.
+    const shortOf = (t) => String(t.title || t.detail || 'task').replace(/\\s+/g, ' ').trim().slice(0, 48);
+    const numbered = tasks.map((t, i) => (i + 1) + '. ' + tgEscape(String(t.title || t.detail || 'task').replace(/\\s+/g, ' ').trim().slice(0, 80))
+      + (t.to_role && t.to_role !== 'director' ? ' (' + tgEscape(t.to_role) + ')' : '')
+      + (t.payload && t.payload.assigned_name ? ' → ' + tgEscape(t.payload.assigned_name) + (t.approval_state === 'pending' ? ' (awaiting)' : '') : '')).join('\\n');
+    // Director: one labelled button per task (the title IS on the button, not a
+    // bare number), tap → its action menu. Plus the typed number / "close N".
     let keyboard = null;
     if (a.role === 'director') {
-      keyboard = []; let rowB = [];
-      tasks.slice(0, 15).forEach((t, i) => { rowB.push({ text: String(i + 1), callback_data: 'tsel:' + t.id }); if (rowB.length === 5) { keyboard.push(rowB); rowB = []; } });
-      if (rowB.length) keyboard.push(rowB);
+      keyboard = tasks.slice(0, 10).map((t, i) => [{ text: (i + 1) + '. ' + shortOf(t), callback_data: 'tsel:' + t.id }]);
     }
-    const hint = a.role === 'director' ? '\\n\\nTap a number — or reply with the number — to Close / Snooze / Assign it. You can also type "close 2", "snooze 2" or "assign 2".' : '';
+    const hint = a.role === 'director' ? '\\n\\nTap a task to Close / Snooze / Assign — or reply with its number (e.g. "2"), or "close 2".' : '';
     send(a.chat_id, '<b>Open tasks (' + tasks.length + ')</b>\\n' + numbered + hint, keyboard);
     continue;
   }
