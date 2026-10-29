@@ -103,3 +103,41 @@ test("a tap pressed while the notices strip arrives still lands (Masters → Sub
   }
   expect(errors, "no page errors").toEqual([]);
 });
+
+test("with no notices, the comms desk answering late does not move the screen either", async ({ browser }) => {
+  // The seeded school has no notice. An empty bar drawn while the desk was
+  // unknown and dropped when it answered "none" moved every screen UP by the
+  // same 41 px (PR #742's first cut: admissions-comms, masters-exams-reports
+  // and month-groups lost their taps on CI). The shell waits for this read,
+  // so the screen appears with the strip already decided.
+  const context = await browser.newContext({ baseURL: APP_URL, viewport: { width: 1440, height: 900 }, serviceWorkers: "block" });
+  await signIn(context, "office");
+  const page = await context.newPage();
+  const errors = collectPageErrors(page);
+  await page.route("**/api/school-data/school-comms-desk**", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const res = await route.fetch();
+    const body = (await res.json()) as Record<string, unknown>;
+    await new Promise((r) => setTimeout(r, 1_500));
+    return route.fulfill({ response: res, json: { ...body, notices: [], news: [] } });
+  });
+  try {
+    await page.goto("/masters?tab=subjects");
+    const tab = page.getByRole("tab", { name: "3 · Subjects by class" });
+    await expect(tab).toBeVisible({ timeout: 30_000 });
+    const before = await tab.boundingBox();
+    const stripAtShow = await strip(page).count();
+    await expect.poll(() => page.evaluate(() => performance.getEntriesByType("resource").some((e) => e.name.includes("school-comms-desk")))).toBe(true);
+    await page.waitForTimeout(1_000);
+    const after = await tab.boundingBox();
+    expect(after?.y, `the step tab moved from y=${before?.y} to y=${after?.y} after the comms desk answered`).toBe(before?.y);
+    await expect(page.getByTestId("comms-strip-pending"), "no empty bar left behind").toHaveCount(0);
+    // On a fresh stack there is no strip at all; after the write projects a
+    // notice may come from the school's older comms copy — either way the
+    // strip the screen first showed with is the strip it keeps.
+    await expect(strip(page), "the strip as the screen first showed it").toHaveCount(stripAtShow);
+  } finally {
+    await context.close();
+  }
+  expect(errors, "no page errors").toEqual([]);
+});
