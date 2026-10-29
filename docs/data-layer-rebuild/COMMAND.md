@@ -2066,6 +2066,17 @@ the shell's); `kernel`, `admissions-comms`, `masters-exams-reports` (shell error
 **Not done / not proven.** See the PR body: the 2 s phone gate is not met on every page (Mac: /students?tab=register
 2.2–2.9 s, timetable 1.1–2.3 s under load; CI's runner took ~4 s on every page on main), screens that read a replica desk
 once at mount may now mount before it lands (only StudentForm was found and fixed).
+*(2.3a follow-up, built 29 Oct 2026, PR #PRNUM.)* **Lost taps after 2.3a.** With the gate gone a screen is up before the
+comms desk lands (it waits in the hydration queue behind the boot hydrates); the notices strip in the sticky header then
+appeared ~1 s in and pushed the screen down ~41 px between a tap's press and its release, so the tap did nothing. On CI
+(where parent-web-tabs has seeded a staff notice before the write projects run — locally, without it, there is no strip)
+this was every "random" propagation / masters-element-writes / staff-month-register failure of 28–29 Oct: the Playwright
+trace's DOM snapshot before each lost click has no strip and the one after it has. `CommsRunningStrip` now draws its bar
+(empty, `aria-hidden`, a notice's exact line box) from the first paint until the desk has answered; a school with no
+notices loses the bar once that is known. `shell-no-shift.spec` (desktop) holds the comms desk back until the screen is up,
+then proves the step tab does not move and a press held while the strip lands still selects (both fail on main: 41.5 px,
+tap lost). `masters-overlay` blocks the app's service worker: it claims the page ~0.5 s in, and Playwright's `page.route`
+cannot see past it (the refused-save case had its 409 bypassed and saved for real).
 
 **2.3b Delete the four core hydrate tasks and the bridge.** Gated on the all-of-src
 `loadMasters(` occurrence ratchet reaching 0 (the 107 `lib/` readers converted to take `masters`
