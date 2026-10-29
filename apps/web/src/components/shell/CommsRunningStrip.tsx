@@ -249,10 +249,11 @@ function StripBar({
 
         <div className="comms-strip-mask min-w-0 flex-1 overflow-hidden">
           {children ?? (
-            // One line of the track's text height, nothing in it.
-            <div className={`comms-strip-track ${compact ? "text-[12px]" : "text-[13px]"}`}>
+            // One item's line — the same boxes as a notice, with nothing in them.
+            <div className="comms-strip-track">
               <span className="comms-strip-item inline-flex items-center gap-2 whitespace-nowrap px-4">
-                <span className="rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide opacity-0">&nbsp;</span>
+                <span className="rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide">&nbsp;</span>
+                <span className={`font-medium ${compact ? "text-[12px]" : "text-[13px]"}`}>&nbsp;</span>
               </span>
             </div>
           )}
