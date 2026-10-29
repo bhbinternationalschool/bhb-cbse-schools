@@ -16,7 +16,7 @@ import {
 } from "@/lib/bulkRecipients";
 import { listOptedOutSet, toE164India } from "@/lib/waContactState.server";
 import { loadSisForStaff } from "@/lib/sis";
-import { loadMasters } from "@/lib/masters";
+import { loadServerMasters, serverRosterWasRead } from "@/lib/api/v1/auth";
 import { sendPushToSubjects } from "@/lib/webPush.server";
 import { fetchServerBlob } from "@/lib/serverBlob";
 import {
@@ -102,12 +102,21 @@ export async function POST(req: Request) {
   await Promise.all([ensureSisHydratedServer(), ensureSchoolMirrorHydrated()]);
 
   const parentsAudience = audience === "parents" || audience === "parents_language_unset";
+  // Staff: the server's book with the roster READ from sis_staff (data-layer
+  // 2.3b). A roster that could not be read is not "no staff" (R6) — refuse.
+  const staffMasters = parentsAudience ? null : await loadServerMasters().catch(() => null);
+  if (!parentsAudience && (!staffMasters || !serverRosterWasRead(staffMasters))) {
+    return NextResponse.json(
+      { error: "Could not read the staff list — nothing was sent. Please try again." },
+      { status: 503 },
+    );
+  }
   let numbers =
     audience === "parents"
       ? listAllHouseholdWaNumbers()
       : audience === "parents_language_unset"
         ? listLanguageUnsetHouseholdWaNumbers()
-        : listAllStaffMobiles();
+        : listAllStaffMobiles(staffMasters ?? { staff: [] });
   let skippedOptOut = 0;
 
   if (parentsAudience) {
@@ -180,7 +189,7 @@ export async function POST(req: Request) {
         ? loadSisForStaff().households.map((h) => h.id)
         : audience === "parents_language_unset"
           ? loadSisForStaff().households.filter((h) => !(h.preferredLanguage || "").trim()).map((h) => h.id)
-          : (loadMasters().staff ?? [])
+          : (staffMasters?.staff ?? [])
               .filter((s) => s.status === "active")
               .map((s) => s.id);
     push = await sendPushToSubjects(parentsAudience ? "parent" : "staff", subjectIds, {

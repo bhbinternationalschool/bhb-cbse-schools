@@ -78,7 +78,6 @@ import {
   salarySetupCompleteness,
 } from "@/lib/salarySetup";
 import { completeMastersSetup } from "@/lib/mastersCompleteSetup";
-import { forgetSchoolIdentity } from "@/lib/schoolIdentity";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 import type { RowAction } from "@/components/ui/erp-grid";
 
@@ -549,9 +548,8 @@ export function SchoolProfilePanel({
               type="button"
               className="rounded-lg bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-[var(--primary-foreground)]"
               onClick={() => {
-                // Receipts memoise the printed identity — drop it so the very
-                // next receipt shows what was just saved.
-                forgetSchoolIdentity();
+                // Receipts read the identity from this tab's masters answer,
+                // which the save re-reads (data-layer 2.3b: no memo to drop).
                 commit(
                   { ...state, schoolProfile: draft },
                   "School profile saved",

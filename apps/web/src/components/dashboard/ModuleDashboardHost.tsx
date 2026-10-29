@@ -9,11 +9,13 @@ import {
 } from "@/components/dashboard/ModuleDashboard";
 import {
   buildModuleDashboard,
+  DASHBOARDS_READING_MASTERS,
   type DashboardModuleId,
 } from "@/lib/moduleDashboards";
+import { useScreenMasters } from "@/components/data/useScreenMasters";
+import { QueryError } from "@/components/data/QueryError";
 import { useDemoSessionOptional } from "@/components/shell/SessionContext";
 import { openWaMe } from "@/lib/waMe";
-import { useMasters } from "@/lib/data/client/hooks";
 
 export function ModuleDashboardHost({
   moduleId,
@@ -29,15 +31,13 @@ export function ModuleDashboardHost({
   const session = useDemoSessionOptional();
   const [model, setModel] = useState<ModuleDashboardModel | null>(null);
   const [mastersTick, setMastersTick] = useState(0);
-  // A Masters answer (the shell's, or one after a Masters change the
-  // versions poll saw) has been laid on the page copy the dashboard builders
-  // read: redraw (data-layer 2.3a — was 'bhb-masters-updated'). Asks nothing
-  // itself (enabled: false reads the tab's cache), so the field hub, which
+  // The dashboards that read the Masters book get it as data (data-layer
+  // 2.3b): this screen's book (the shell's answer, kept fresh by the versions
+  // poll), never the page copy. The others ask nothing — the field hub, which
   // has no shell, adds no request.
-  const { dataUpdatedAt: mastersAnsweredAt } = useMasters({ enabled: false });
-  useEffect(() => {
-    if (mastersAnsweredAt) setMastersTick((t) => t + 1);
-  }, [mastersAnsweredAt]);
+  const needsMasters = DASHBOARDS_READING_MASTERS.has(moduleId);
+  const screen = useScreenMasters({ enabled: needsMasters });
+  const masters = needsMasters ? screen.masters : null;
 
   useEffect(() => {
     const onDataUpdated = () => setMastersTick((t) => t + 1);
@@ -97,8 +97,13 @@ export function ModuleDashboardHost({
   }, [moduleId]);
 
   useEffect(() => {
+    if (needsMasters && !masters) {
+      setModel(null);
+      return;
+    }
     const built = buildModuleDashboard(moduleId, {
       academicYearCode: session?.academicYearCode,
+      masters,
     });
     setModel(built);
     // Accounts KPIs read the server book — the browser-book figures render
@@ -131,8 +136,11 @@ export function ModuleDashboardHost({
         stale = true;
       };
     }
-  }, [moduleId, refreshKey, mastersTick, session?.academicYearCode]);
+  }, [moduleId, refreshKey, mastersTick, session?.academicYearCode, needsMasters, masters]);
 
+  if (needsMasters && screen.error) {
+    return <QueryError what="the school setup for this dashboard" error={screen.error} retry={screen.retry} />;
+  }
   if (!model) {
     return (
       <p className="mt-6 text-base text-[var(--muted)]">Loading dashboard…</p>

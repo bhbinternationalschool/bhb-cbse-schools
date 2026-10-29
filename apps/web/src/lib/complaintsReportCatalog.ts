@@ -15,7 +15,8 @@ import {
   type ComplaintState,
   type ComplaintTicket,
 } from "@/lib/complaints";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { type MastersState } from "@/lib/masters";
+import { MASTERS_NOT_LOADED_MESSAGE } from "@/lib/data/requireData";
 import { loadSis, type SisState } from "@/lib/sis";
 import { exportFilterReport, type ReportColumn } from "@/lib/reportExport";
 import { TENANT } from "@/lib/types";
@@ -168,7 +169,10 @@ export function runComplaintsReport(
   const notLoaded = refuseReportBeforeLoad(reportDesksFor("complaints", id));
   if (notLoaded) return { ok: false, error: notLoaded };
   const state = filters.state ?? loadComplaints();
-  const masters = filters.masters ?? loadMasters();
+  // The Masters book as data (data-layer 2.3b): never the tab's page copy;
+  // handed nothing, the report refuses rather than run on an empty book.
+  const masters = filters.masters;
+  if (!masters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
   const sis = filters.sis ?? loadSis();
   const def = COMPLAINTS_REPORTS.find((r) => r.id === id);
   if (!def) return { ok: false, error: "Unknown report" };

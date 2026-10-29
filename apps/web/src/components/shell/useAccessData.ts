@@ -40,12 +40,15 @@ export type AccessData = {
  *   - Without a database (offline dev build) this browser is the truth: the
  *     page copies, as before.
  */
-export function useAccessData(): AccessData {
+export function useAccessData(opts: { enabled?: boolean } = {}): AccessData {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   const remote = isSupabaseConfigured();
-  const rbacQ = useRbac({ enabled: remote });
-  const staffQ = useStaffList({ enabled: remote });
+  // `enabled: false` asks nothing (an answer another screen cached is still
+  // used) — a control not yet opened (useScreenMasters' own `enabled`).
+  const ask = remote && opts.enabled !== false;
+  const rbacQ = useRbac({ enabled: ask });
+  const staffQ = useStaffList({ enabled: ask });
 
   const status = accessStatusOf({
     remote,

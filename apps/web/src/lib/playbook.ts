@@ -7,7 +7,7 @@ import {
   type FeeDueLine,
 } from "@/lib/fees";
 import { activePlanForStudent } from "@/lib/installmentPlans";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import type { MastersState } from "@/lib/masters";
 import {
   loadSis,
   type SisState,
@@ -208,20 +208,24 @@ function classLabelOf(
  * Live defaulters from Fee Take ledger — active students with open dues
  * whose dueOn is on/before today (plus optional upcoming-only rows).
  */
-export function listLiveDefaulters(options?: {
+export function listLiveDefaulters(options: {
   asOf?: string;
   academicYearCode?: string;
   includeUpcoming?: boolean;
   /** When true, only inactive students with open dues (TC / left). */
   inactiveOnly?: boolean;
   sis?: SisState;
-  masters?: MastersState;
+  /**
+   * The Masters book (fee structures, classes) — required (data-layer 2.3b):
+   * a screen passes useScreenMasters' book, never the tab's page copy.
+   */
+  masters: MastersState;
 }): LiveDefaulter[] {
-  const today = options?.asOf ?? new Date().toISOString().slice(0, 10);
-  const includeUpcoming = options?.includeUpcoming ?? false;
-  const inactiveOnly = options?.inactiveOnly ?? false;
-  const sis = options?.sis ?? loadSis();
-  const masters = options?.masters ?? loadMasters();
+  const today = options.asOf ?? new Date().toISOString().slice(0, 10);
+  const includeUpcoming = options.includeUpcoming ?? false;
+  const inactiveOnly = options.inactiveOnly ?? false;
+  const sis = options.sis ?? loadSis();
+  const masters = options.masters;
   const fees = loadFees();
   const out: LiveDefaulter[] = [];
   // The Play review family owes nothing, because it is not a family. It

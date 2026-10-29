@@ -5,10 +5,10 @@
 
 import {
   currentAcademicYearCode,
-  loadMasters,
   STUDENT_TYPES,
   type MastersState,
 } from "@/lib/masters";
+import { MASTERS_NOT_LOADED_MESSAGE } from "@/lib/data/requireData";
 import {
   describeFilters,
   exportFilterReport,
@@ -927,7 +927,10 @@ export function runSisReport(
   if (!actorMayExport("students", "runSisReport")) {
     return { ok: false, error: "Your role can view students but not download student reports" };
   }
-  const masters = filters.masters ?? loadMasters();
+  // The Masters book as data (data-layer 2.3b): never the tab's page copy;
+  // handed nothing, the report refuses rather than run on an empty book.
+  const masters = filters.masters;
+  if (!masters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
   const sis = filters.sis ?? loadSis();
   const students = filterSisStudents(sis, masters, filters);
   const note = filterNote(filters, masters);
