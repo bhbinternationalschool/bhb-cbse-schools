@@ -57,6 +57,33 @@ function buildItems(audience: CommsStripAudience): StripItem[] {
   return [...noticeItems, ...newsItems];
 }
 
+/** One read of this tab's notices for the staff strip, shared with the shell's wait. */
+let staffNotices: Promise<void> | null = null;
+
+/**
+ * The comms desk for the staff header's strip, read once per tab. The
+ * shell's data wait (ShellDataWait) awaits this same promise before it shows
+ * a screen, so the strip takes its final shape — notices, or no bar at all —
+ * in the render that shows the screen (29 Oct 2026, see below). Never
+ * rejects: a failed read leaves the strip with nothing to show.
+ */
+export function staffNoticesLanded(): Promise<void> {
+  if (!staffNotices) {
+    staffNotices = (async () => {
+      try {
+        // Not through the hydration queue (withHydrationSlot): every screen
+        // now waits for this one small read, so it must not queue behind the
+        // route's background desks (on CI it landed ~1 s after the screen).
+        const { ensureSchoolCommsHydrated } = await import("@/lib/schoolCommsPersistence");
+        await ensureSchoolCommsHydrated();
+      } catch {
+        /* nothing to show */
+      }
+    })();
+  }
+  return staffNotices;
+}
+
 export function CommsRunningStrip({
   audience = "staff",
   compact = false,
@@ -81,17 +108,11 @@ export function CommsRunningStrip({
   useEffect(() => {
     if (given) return;
     let cancelled = false;
-    void (async () => {
-      const [{ ensureSchoolCommsHydrated }, { withHydrationSlot }] =
-        await Promise.all([
-          import("@/lib/schoolCommsPersistence"),
-          import("@/lib/deskHydrateGuard"),
-        ]);
-      await withHydrationSlot(() => ensureSchoolCommsHydrated());
+    void staffNoticesLanded().then(() => {
       if (cancelled) return;
       setReady(true);
       setTick((n) => n + 1);
-    })();
+    });
     function refresh() {
       setTick((n) => n + 1);
     }
@@ -111,7 +132,21 @@ export function CommsRunningStrip({
   );
   const items = given ?? built;
 
-  if ((!given && !ready) || items.length === 0) return null;
+  // Until this tab's notices are read, the bar holds its place (data-layer
+  // 2.3a follow-up, 29 Oct 2026). The strip sits in the sticky header ABOVE
+  // every screen, and since the shell stopped waiting for the old core
+  // hydrate (2.3a) a screen could be shown before the comms desk landed.
+  // Inserted late, the strip pushed the whole screen down ~41 px under the
+  // pointer: a tap pressed on a tab and released on the card above it did
+  // nothing — on CI a Masters step tab, Timetable's Subject rules, Attendance's
+  // Month register; on a slow phone, a staff member's first tap. Now the
+  // shell waits for staffNoticesLanded() (at most 5 s) before it shows a
+  // screen, and while the notices are unknown an empty bar of the same height
+  // is drawn: notices arriving after a slow read fill it without moving
+  // anything. Only a school with NO notices whose read took over 5 s still
+  // loses the bar after the screen is up.
+  if (!given && !ready) return <StripBar compact={compact} pending />;
+  if (items.length === 0) return null;
 
   // Duplicate for seamless loop
   const loop = items.length === 1 ? [...items, ...items, ...items] : [...items, ...items];
@@ -133,31 +168,7 @@ export function CommsRunningStrip({
   }
 
   return (
-    <div
-      className={`comms-strip relative overflow-hidden border-b border-[rgba(197,160,40,0.35)] ${
-        compact ? "py-1.5" : "py-2"
-      }`}
-      role="region"
-      aria-label="School announcements"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-    >
-      <div className="comms-strip-sheen pointer-events-none absolute inset-0" aria-hidden />
-      <div className="relative flex items-center gap-2">
-        <div
-          className={`comms-strip-badge z-10 flex shrink-0 items-center gap-1.5 pl-3 sm:pl-4 ${
-            compact ? "text-[10px]" : "text-[11px]"
-          }`}
-        >
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgba(197,160,40,0.25)] text-[var(--brand-gold-soft)] shadow-[inset_0_0_0_1px_rgba(197,160,40,0.35)]">
-            <Megaphone className="h-3.5 w-3.5" strokeWidth={2.4} />
-          </span>
-          <span className="hidden font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-soft)] sm:inline">
-            Live
-          </span>
-        </div>
-
-        <div className="comms-strip-mask min-w-0 flex-1 overflow-hidden">
+    <StripBar compact={compact} onPause={setPaused}>
           <div
             className={`comms-strip-track ${paused ? "is-paused" : ""}`}
             style={{ animationDuration: `${durationSec}s` }}
@@ -212,6 +223,62 @@ export function CommsRunningStrip({
               );
             })}
           </div>
+    </StripBar>
+  );
+}
+
+/**
+ * The strip's bar: the badge and the track's mask. `pending` draws it empty
+ * (hidden from assistive tech: there is nothing to announce yet) at exactly
+ * the height it has with notices in it — the same paddings, badge and line.
+ */
+function StripBar({
+  compact,
+  pending = false,
+  onPause,
+  children,
+}: {
+  compact: boolean;
+  pending?: boolean;
+  onPause?: (paused: boolean) => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div
+      className={`comms-strip relative overflow-hidden border-b border-[rgba(197,160,40,0.35)] ${
+        compact ? "py-1.5" : "py-2"
+      }`}
+      {...(pending
+        ? { "aria-hidden": true, "data-testid": "comms-strip-pending" }
+        : { role: "region", "aria-label": "School announcements" })}
+      onMouseEnter={onPause ? () => onPause(true) : undefined}
+      onMouseLeave={onPause ? () => onPause(false) : undefined}
+    >
+      <div className="comms-strip-sheen pointer-events-none absolute inset-0" aria-hidden />
+      <div className="relative flex items-center gap-2">
+        <div
+          className={`comms-strip-badge z-10 flex shrink-0 items-center gap-1.5 pl-3 sm:pl-4 ${
+            compact ? "text-[10px]" : "text-[11px]"
+          }`}
+        >
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgba(197,160,40,0.25)] text-[var(--brand-gold-soft)] shadow-[inset_0_0_0_1px_rgba(197,160,40,0.35)]">
+            <Megaphone className="h-3.5 w-3.5" strokeWidth={2.4} />
+          </span>
+          <span className="hidden font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-soft)] sm:inline">
+            Live
+          </span>
+        </div>
+
+        <div className="comms-strip-mask min-w-0 flex-1 overflow-hidden">
+          {children ?? (
+            // One item's line — the same boxes as a notice, with nothing in them.
+            <div className="comms-strip-track">
+              <span className="comms-strip-item inline-flex items-center gap-2 whitespace-nowrap px-4">
+                <span className="rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide">&nbsp;</span>
+                <span className={`font-medium ${compact ? "text-[12px]" : "text-[13px]"}`}>&nbsp;</span>
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>

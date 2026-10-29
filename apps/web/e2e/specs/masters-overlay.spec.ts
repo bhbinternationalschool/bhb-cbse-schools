@@ -56,7 +56,14 @@ async function putBack(req: APIRequestContext): Promise<void> {
 }
 
 async function principalPage(browser: import("@playwright/test").Browser): Promise<Page> {
-  const context = await browser.newContext({ baseURL: APP_URL, viewport: { width: 1440, height: 900 } });
+  // No service worker (29 Oct 2026). Both tests answer the page's requests
+  // with page.route, and Playwright cannot route a request of a page the
+  // app's worker (public/sw.js) controls — it claims the page ~0.5 s after
+  // load, which since 2.3a is when the screen is up: on CI the refused save
+  // went to the real server (stored, "Campus inactivated") instead of the
+  // 409 this test serves. The worker caches the shell only; nothing here
+  // tests it.
+  const context = await browser.newContext({ baseURL: APP_URL, viewport: { width: 1440, height: 900 }, serviceWorkers: "block" });
   await signIn(context, "principal");
   return context.newPage();
 }
