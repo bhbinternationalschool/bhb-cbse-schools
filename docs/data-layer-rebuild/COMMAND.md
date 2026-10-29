@@ -2066,7 +2066,7 @@ the shell's); `kernel`, `admissions-comms`, `masters-exams-reports` (shell error
 **Not done / not proven.** See the PR body: the 2 s phone gate is not met on every page (Mac: /students?tab=register
 2.2–2.9 s, timetable 1.1–2.3 s under load; CI's runner took ~4 s on every page on main), screens that read a replica desk
 once at mount may now mount before it lands (only StudentForm was found and fixed).
-*(2.3a follow-up, built 29 Oct 2026, PR #PRNUM.)* **Lost taps after 2.3a.** With the gate gone a screen is up before the
+*(2.3a follow-up, built 29 Oct 2026, PR #742.)* **Lost taps after 2.3a.** With the gate gone a screen is up before the
 comms desk lands (it waits in the hydration queue behind the boot hydrates); the notices strip in the sticky header then
 appeared ~1 s in and pushed the screen down ~41 px between a tap's press and its release, so the tap did nothing. On CI
 (where parent-web-tabs has seeded a staff notice before the write projects run — locally, without it, there is no strip)
