@@ -4040,4 +4040,16 @@ class LEn extends L {
   String markEntryRangeHint(String who, String max) {
     return '$who: enter 0–$max or leave blank for absent';
   }
+
+  @override
+  String get coScholasticAbsent => 'Absent';
+
+  @override
+  String get coScholasticGradesNotLoaded =>
+      'Co-scholastic grades could not be loaded. Nothing is shown rather than a guess — reopen the sheet, or grade these on the exams desk.';
+
+  @override
+  String coScholasticGradesSaved(String area, String count) {
+    return '$area grades saved for $count students.';
+  }
 }

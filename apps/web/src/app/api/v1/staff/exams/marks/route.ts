@@ -8,15 +8,20 @@ import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureExamsHydratedServer } from "@/lib/examsPersistence";
 import {
   componentsForSubject,
+  coScholasticAreasForClass,
   getExamPolicy,
   gradedPartsForSubject,
   loadExams,
   prepareMarkSheet,
   schemeForClassId,
 } from "@/lib/exams";
+import { coScholasticRatingsFor } from "@/lib/examSchemes";
 import {
+  mergeStaffAppCoScholastic,
   mergeStaffAppEntries,
+  staffAppCoScholasticProblem,
   staffAppEntriesProblem,
+  type StaffAppCoScholasticEntry,
   type StaffAppMarkEntry,
 } from "@/lib/staffExamMarks";
 import {
@@ -35,6 +40,9 @@ type Body = {
   /** `{ studentId, marksObtained }` = the whole mark (every app build).
    * `{ studentId, component, grade }` = a graded part's letter (2026-10-11). */
   marks?: StaffAppMarkEntry[];
+  /** Co-scholastic grading (2026-10-29): one letter per student × area, on
+   * the sheet's own co-scholastic list — sent instead of `marks`/`subjectId`. */
+  coScholastic?: StaffAppCoScholasticEntry[];
 };
 
 /**
@@ -64,16 +72,9 @@ export async function POST(request: Request) {
     const termId = (body.termId || "").trim();
     const classId = (body.classId || "").trim();
     const sectionId = (body.sectionId || "").trim();
-    const subjectId = (body.subjectId || "").trim();
-    const entries = Array.isArray(body.marks) ? body.marks : [];
-    if (!termId || !classId || !sectionId || !subjectId) {
-      throw new ApiError("bad_request", "termId, classId, sectionId, subjectId required", 400);
-    }
-    if (!entries.length) throw new ApiError("bad_request", "No marks to save", 400);
-    for (const e of entries) {
-      if (e?.marksObtained != null && (typeof e.marksObtained !== "number" || !Number.isFinite(e.marksObtained) || e.marksObtained < 0)) {
-        throw new ApiError("bad_request", "Marks must be a number ≥ 0 or blank", 400);
-      }
+    const coschEntries = Array.isArray(body.coScholastic) ? body.coScholastic : null;
+    if (!termId || !classId || !sectionId) {
+      throw new ApiError("bad_request", "termId, classId, sectionId required", 400);
     }
     const scope = await assertSectionScope(ctx, classId, sectionId);
 
@@ -81,6 +82,90 @@ export async function POST(request: Request) {
     await Promise.all([ensureSisHydratedServer(), ensureExamsHydratedServer()]);
     const ay = scope.academicYearCode;
     const state = loadExams();
+    // The register, read once from the server's hydrated cache and shared by
+    // both save paths (prepareMarkSheet needs it for either).
+    const sis = loadSis();
+
+    // Co-scholastic grading: letters saved to the sheet's own co-scholastic
+    // list (never among the marks, so numeric entry is untouched). Section
+    // scope + exams.edit gate it exactly like the marks grid — co-scholastic
+    // is rated by whoever enters the class's marks, with no separate
+    // class-teacher gate (see lib/exams CoScholasticDomain). No subjectId.
+    if (coschEntries) {
+      if (!coschEntries.length) throw new ApiError("bad_request", "No grades to save", 400);
+      const term = state.terms.find((t) => t.id === termId && t.academicYearCode === ay);
+      if (!term) throw new ApiError("not_found", "Exam term not found", 404);
+      const policy = getExamPolicy(state);
+      const scheme = schemeForClassId(classId, policy);
+      const masters = await loadServerMasters();
+      const areas = coScholasticAreasForClass(classId, policy, masters);
+      const grades = coScholasticRatingsFor(scheme.coScholasticScale);
+      const problem = staffAppCoScholasticProblem(coschEntries, { areas, grades });
+      if (problem) throw new ApiError("bad_request", problem, 400);
+      const existing = (await fetchExamSheetByKeyFromDb(ay, termId, sectionId)) ?? undefined;
+      if (existing?.lockedAt) {
+        throw new ApiError("forbidden", "This mark sheet is locked by the exams desk", 403);
+      }
+      const mergedCosch = mergeStaffAppCoScholastic(existing?.coScholastic ?? [], coschEntries);
+      // marks: [] keeps every stored mark exactly as it is (prepareMarkSheet
+      // keeps subjects not sent); only the co-scholastic list is rewritten.
+      const prepared = prepareMarkSheet(
+        {
+          academicYearCode: ay,
+          examTermId: termId,
+          classId,
+          sectionId,
+          marks: [],
+          coScholastic: mergedCosch,
+          enteredBy: ctx.session.fullName || "Teacher",
+        },
+        state,
+        existing,
+        { masters, sis },
+      );
+      if (!prepared.ok) throw new ApiError("bad_request", prepared.error, 400);
+      const pushed = await pushExamSheetToDb(prepared.sheet, {
+        subjectsUsed: prepared.subjectsUsed,
+        expectedUpdatedAt: existing?.updatedAt ?? null,
+      });
+      if (!pushed.ok) {
+        if (pushed.conflict) throw new ApiError("conflict", pushed.error, 409);
+        console.warn("[staff-exams-v1] co-scholastic push failed", pushed.error);
+        throw new ApiError("server_error", "Could not save — try again", 503);
+      }
+      const meta = requestMeta(request);
+      await writeAudit({
+        session: ctx.session,
+        module: "exams",
+        action: "edit",
+        entityType: "mark_sheet",
+        entityId: prepared.sheet.id,
+        summary: `Co-scholastic grades entered from app: ${coschEntries.length} entries, section ${sectionId}`,
+        after: { termId, sectionId, count: coschEntries.length },
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
+      const codes = new Set(areas.map((a) => a.code));
+      return apiOk({
+        sheetId: prepared.sheet.id,
+        updatedAt: prepared.sheet.updatedAt,
+        coScholastic: prepared.sheet.coScholastic
+          .filter((e) => codes.has(e.domain))
+          .map((e) => ({ studentId: e.studentId, domain: e.domain, rating: e.rating ?? "" })),
+      });
+    }
+
+    const subjectId = (body.subjectId || "").trim();
+    const entries = Array.isArray(body.marks) ? body.marks : [];
+    if (!subjectId) {
+      throw new ApiError("bad_request", "subjectId required", 400);
+    }
+    if (!entries.length) throw new ApiError("bad_request", "No marks to save", 400);
+    for (const e of entries) {
+      if (e?.marksObtained != null && (typeof e.marksObtained !== "number" || !Number.isFinite(e.marksObtained) || e.marksObtained < 0)) {
+        throw new ApiError("bad_request", "Marks must be a number ≥ 0 or blank", 400);
+      }
+    }
     // Exam subjects carry their own ids; the teacher's subjects are matched
     // by code. A class teacher may enter every subject of their section.
     const examSubject = state.subjects.find((x) => x.id === subjectId);
@@ -133,7 +218,7 @@ export async function POST(request: Request) {
       existing,
       // 2.3b: the school setup from the server's reference cache (503 when
       // unread), never an empty copy; the register as the lib used to load it.
-      { masters: await loadServerMasters(), sis: loadSis() },
+      { masters: await loadServerMasters(), sis },
     );
     if (!prepared.ok) throw new ApiError("bad_request", prepared.error, 400);
     const pushed = await pushExamSheetToDb(prepared.sheet, {

@@ -66,7 +66,78 @@ Map<String, dynamic> wholeSheet() => {
   ],
 };
 
+// A class graded on two co-scholastic areas (Work Education, Music) on a
+// three-band A/B/C scale. One student has WE = A already, Music unrated.
+Map<String, dynamic> coschSheet() => {
+  "term": {"label": "Half-yearly", "maxMarks": 100},
+  "locked": false,
+  "updatedAt": "",
+  "enteredBy": "",
+  "passPercent": 33,
+  "subjects": [
+    {"id": "sub_mat", "code": "MAT", "name": "Maths", "maxMarks": 100},
+  ],
+  "coScholastic": {
+    "scale": "three",
+    "grades": ["A", "B", "C"],
+    "areas": [
+      {"code": "WE", "label": "Work Education"},
+      {"code": "MUS", "label": "Music"},
+    ],
+  },
+  "students": [
+    {
+      "id": "stu_1",
+      "fullName": "Asha",
+      "rollNo": "1",
+      "coScholastic": [
+        {"domain": "WE", "rating": "A"},
+        {"domain": "MUS", "rating": ""},
+      ],
+      "marks": [
+        {"subjectId": "sub_mat", "marksObtained": 55, "grade": "D"},
+      ],
+    },
+  ],
+};
+
 void main() {
+  group("co-scholastic grading", () {
+    test("the sheet carries the areas and the allowed grades from the server", () {
+      final s = MarkSheetInfo.fromJson(coschSheet());
+      expect(s.coScholasticAreas.map((a) => a.code).toList(), ["WE", "MUS"]);
+      expect(s.coScholasticAreas.map((a) => a.label).toList(), ["Work Education", "Music"]);
+      // The grade options are the server's, never a hard-coded list.
+      expect(s.coScholasticGrades, ["A", "B", "C"]);
+    });
+
+    test("existing grades pre-fill; unrated and unknown areas read back empty", () {
+      final st = MarkSheetInfo.fromJson(coschSheet()).students.first;
+      expect(st.coScholasticGrade("WE"), "A");
+      expect(st.coScholasticGrade("MUS"), "");
+      expect(st.coScholasticGrade("GK"), "");
+    });
+
+    test("a class without co-scholastic shows none", () {
+      // wholeSheet() carries no coScholastic block at all.
+      final s = MarkSheetInfo.fromJson(wholeSheet());
+      expect(s.coScholasticAreas, isEmpty);
+      expect(s.coScholasticGrades, isEmpty);
+    });
+
+    test("saving posts one grade per student for the area, '' to clear", () {
+      final entries = coScholasticEntriesFor(
+        "WE",
+        ["stu_1", "stu_2"],
+        (id) => {"stu_1": "B", "stu_2": ""}[id],
+      );
+      expect(entries.length, 2);
+      expect(entries[0], (studentId: "stu_1", domain: "WE", rating: "B"));
+      // A blank selection clears that pair back to unrated, never a guess.
+      expect(entries[1], (studentId: "stu_2", domain: "WE", rating: ""));
+    });
+  });
+
   group("mark-entry columns (one field per column)", () {
     test("a split subject gives one column per part, each with its own max", () {
       final sub = MarkSheetInfo.fromJson(splitSheet()).subjects.first;

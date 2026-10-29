@@ -67,6 +67,18 @@ List<({String studentId, String component, double? marks})> markEntriesFor(
   return out;
 }
 
+/// The co-scholastic entries POSTed for one area: one grade per student.
+/// [read] gives the picked grade for a studentId, where "" means unrated
+/// (clear). The domain is the area's code, the same way the web desk stores it.
+List<({String studentId, String domain, String rating})> coScholasticEntriesFor(
+  String areaCode,
+  List<String> studentIds,
+  String? Function(String studentId) read,
+) => [
+  for (final id in studentIds)
+    (studentId: id, domain: areaCode, rating: (read(id) ?? "").trim()),
+];
+
 /// Marks entry from the phone: pick the exam, then a section you teach,
 /// then a subject — the roster appears with one box per student (or one box
 /// per part, for a subject marked in parts). Saves one subject at a time into
@@ -198,6 +210,14 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
   MarkSheetInfo? _sheet;
   String? _error;
   String? _subjectId;
+
+  /// The co-scholastic area code being graded, or null when a scholastic
+  /// subject is selected. Exactly one of [_subjectId] / [_coschArea] is set.
+  String? _coschArea;
+
+  /// studentId → picked grade for the current co-scholastic area ("" = unrated).
+  final Map<String, String> _coschSel = {};
+
   final Map<String, TextEditingController> _ctl = {};
   bool _saving = false;
   bool _dirty = false;
@@ -227,8 +247,15 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
       if (!mounted) return;
       setState(() {
         _sheet = s;
-        _subjectId ??= s.subjects.isEmpty ? null : s.subjects.first.id;
+        if (_subjectId == null && _coschArea == null) {
+          if (s.subjects.isNotEmpty) {
+            _subjectId = s.subjects.first.id;
+          } else if (s.coScholasticAreas.isNotEmpty) {
+            _coschArea = s.coScholasticAreas.first.code;
+          }
+        }
         _fill();
+        _fillCosch();
       });
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
@@ -268,8 +295,113 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
     _dirty = false;
   }
 
+  /// Pre-fill the grade pickers for the current co-scholastic area with what
+  /// is already stored (empty = not yet rated). Never guesses a grade.
+  void _fillCosch() {
+    final s = _sheet;
+    final area = _coschArea;
+    if (s == null || area == null) return;
+    for (final st in s.students) {
+      _coschSel[st.id] = st.coScholasticGrade(area);
+    }
+  }
+
   ExamSubjectInfo? get _subject =>
       _sheet?.subjects.where((x) => x.id == _subjectId).firstOrNull;
+
+  CoScholasticAreaInfo? get _area =>
+      _sheet?.coScholasticAreas.where((x) => x.code == _coschArea).firstOrNull;
+
+  /// The grade of the currently selected chip for the Save button / title.
+  String get _selectionName =>
+      _coschArea != null ? (_area?.label ?? "") : (_subject?.name ?? "");
+
+  /// Offer to discard unsaved edits before switching chips. Returns whether
+  /// to proceed.
+  Future<bool> _confirmDiscard() async {
+    if (!_dirty) return true;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(context.l10n.discardUnsavedMarks),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: Text(context.l10n.stay),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: Text(context.l10n.discard),
+          ),
+        ],
+      ),
+    );
+    return go == true;
+  }
+
+  Future<void> _selectSubject(String id) async {
+    if (!await _confirmDiscard() || !mounted) return;
+    setState(() {
+      _subjectId = id;
+      _coschArea = null;
+      _fill();
+    });
+  }
+
+  Future<void> _selectCosch(String code) async {
+    if (!await _confirmDiscard() || !mounted) return;
+    setState(() {
+      _coschArea = code;
+      _subjectId = null;
+      _fillCosch();
+      _dirty = false;
+    });
+  }
+
+  /// Save the current co-scholastic area's grades. The dropdown only offers
+  /// letters the server sent, so nothing off-scale can be picked here; the
+  /// server validates again and is the final word.
+  Future<void> _saveCosch() async {
+    final s = _sheet;
+    final areaCode = _coschArea;
+    if (s == null || areaCode == null) return;
+    final areaLabel = _area?.label ?? areaCode;
+    final grades = coScholasticEntriesFor(
+      areaCode,
+      [for (final st in s.students) st.id],
+      (id) => _coschSel[id],
+    );
+    setState(() => _saving = true);
+    try {
+      await widget.api.saveCoScholastic(
+        termId: widget.term.id,
+        classId: widget.classId,
+        sectionId: widget.sectionId,
+        grades: grades,
+      );
+      Haptics.success();
+      await _load();
+      if (mounted) {
+        final rated = grades.where((g) => g.rating.isNotEmpty).length;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.l10n.coScholasticGradesSaved(areaLabel, rated.toString()),
+            ),
+          ),
+        );
+      }
+    } on ApiException catch (e) {
+      Haptics.warning();
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   Future<void> _save() async {
     final s = _sheet;
@@ -470,7 +602,7 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
                       ),
                     ),
             )
-          : s.subjects.isEmpty
+          : s.subjects.isEmpty && s.coScholasticAreas.isEmpty
           ? Center(
               child: Padding(
                 padding: EdgeInsets.all(24),
@@ -496,42 +628,35 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
                           padding: const EdgeInsets.only(right: 8),
                           child: ChoiceChip(
                             label: Text("${x.name} /${x.maxMarks}"),
-                            selected: x.id == _subjectId,
-                            onSelected: (_) async {
-                              if (_dirty) {
-                                final go = await showDialog<bool>(
-                                  context: context,
-                                  builder: (c) => AlertDialog(
-                                    title: Text(
-                                      context.l10n.discardUnsavedMarks,
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(c, false),
-                                        child: Text(context.l10n.stay),
-                                      ),
-                                      FilledButton(
-                                        onPressed: () => Navigator.pop(c, true),
-                                        child: Text(context.l10n.discard),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                                if (go != true) return;
-                              }
-                              setState(() {
-                                _subjectId = x.id;
-                                _fill();
-                              });
-                            },
+                            selected: _coschArea == null && x.id == _subjectId,
+                            onSelected: (_) => _selectSubject(x.id),
+                          ),
+                        ),
+                      // Co-scholastic subjects / activities are graded, not
+                      // marked — a chip each, alongside the scholastic ones.
+                      for (final a in s.coScholasticAreas)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            avatar: Icon(
+                              Icons.workspace_premium_outlined,
+                              size: 16,
+                              color: _coschArea == a.code
+                                  ? ModuleTone.amber.foreground
+                                  : AppColors.muted,
+                            ),
+                            label: Text(a.label),
+                            selected: _coschArea == a.code,
+                            onSelected: (_) => _selectCosch(a.code),
                           ),
                         ),
                     ],
                   ),
                 ),
                 Expanded(
-                  child: ListView.builder(
+                  child: _coschArea != null
+                      ? _coschBody(s)
+                      : ListView.builder(
                     padding: const EdgeInsets.fromLTRB(12, 4, 12, 90),
                     itemCount: s.students.length,
                     itemBuilder: (context, i) {
@@ -625,8 +750,24 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
                 ),
               ],
             ),
-      floatingActionButton: s == null || s.locked || s.subjects.isEmpty
+      floatingActionButton:
+          s == null ||
+              s.locked ||
+              (s.subjects.isEmpty && s.coScholasticAreas.isEmpty)
           ? null
+          : _coschArea != null
+          // No save when the grade scale could not be read — nothing to pick.
+          ? (s.coScholasticGrades.isEmpty
+                ? null
+                : FloatingActionButton.extended(
+                    onPressed: _saving ? null : _saveCosch,
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    icon: const Icon(Icons.save_outlined),
+                    label: Text(
+                      _saving ? "Saving…" : "Save $_selectionName",
+                    ),
+                  ))
           : FloatingActionButton.extended(
               onPressed: _saving ? null : _save,
               backgroundColor: AppColors.primary,
@@ -634,6 +775,91 @@ class _MarkEntryScreenState extends State<MarkEntryScreen> {
               icon: const Icon(Icons.save_outlined),
               label: Text(_saving ? "Saving…" : "Save ${sub?.name ?? ""}"),
             ),
+    );
+  }
+
+  /// The co-scholastic grading list: a grade picker per student. Shows
+  /// "not loaded" rather than empty pickers if the scheme's scale is missing.
+  Widget _coschBody(MarkSheetInfo s) {
+    final grades = s.coScholasticGrades;
+    if (grades.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            context.l10n.coScholasticGradesNotLoaded,
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 90),
+      itemCount: s.students.length,
+      itemBuilder: (context, i) => _coschRow(s.students[i], grades, s.locked),
+    );
+  }
+
+  /// One student's co-scholastic row: roll, name, and a grade dropdown whose
+  /// options are exactly the letters the server sent, plus "absent" and
+  /// "not rated". A stored letter off the current scale is still shown.
+  Widget _coschRow(MarkSheetStudent st, List<String> grades, bool locked) {
+    final sel = _coschSel[st.id] ?? "";
+    final items = <DropdownMenuItem<String>>[
+      DropdownMenuItem(value: "", child: Text("—", style: AppText.bodyMediumMuted)),
+      for (final g in grades) DropdownMenuItem(value: g, child: Text(g)),
+      DropdownMenuItem(value: "AB", child: Text(context.l10n.coScholasticAbsent)),
+      if (sel.isNotEmpty && sel != "AB" && !grades.contains(sel))
+        DropdownMenuItem(value: sel, child: Text(sel)),
+    ];
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 3),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 30,
+              child: Text(
+                st.rollNo.isEmpty ? "–" : st.rollNo,
+                style: AppText.bodySmallMuted.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                st.fullName,
+                style: AppText.bodyMediumInk.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 104,
+              child: DropdownButtonFormField<String>(
+                key: ValueKey("${st.id}|$_coschArea|$sel"),
+                initialValue: sel,
+                isDense: true,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 10,
+                  ),
+                ),
+                items: items,
+                onChanged: locked
+                    ? null
+                    : (v) => setState(() {
+                        _coschSel[st.id] = v ?? "";
+                        _dirty = true;
+                      }),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

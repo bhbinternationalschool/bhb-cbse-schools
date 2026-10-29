@@ -392,6 +392,18 @@ class ExamSubjectInfo {
   bool get isSplit => marksParts.isNotEmpty;
 }
 
+/// One co-scholastic subject / activity a class is graded on (Work Education,
+/// Music, Discipline…). Graded A/B/C (A–E on a five-band scale), never marked.
+/// The allowed grades come with the sheet — the app never hard-codes them.
+class CoScholasticAreaInfo {
+  CoScholasticAreaInfo.fromJson(Map<String, dynamic> j)
+    : code = _s(j, "code"),
+      label = _s(j, "label");
+
+  final String code;
+  final String label;
+}
+
 class StudentMark {
   StudentMark.fromJson(Map<String, dynamic> j)
     : subjectId = _s(j, "subjectId"),
@@ -419,12 +431,20 @@ class MarkSheetStudent {
     : id = _s(j, "id"),
       fullName = _s(j, "fullName"),
       rollNo = _s(j, "rollNo"),
-      marks = _list(j, "marks").map(StudentMark.fromJson).toList();
+      marks = _list(j, "marks").map(StudentMark.fromJson).toList(),
+      coScholastic = {
+        for (final e in _list(j, "coScholastic"))
+          if (_s(e, "domain").isNotEmpty) _s(e, "domain"): _s(e, "rating"),
+      };
 
   final String id;
   final String fullName;
   final String rollNo;
   final List<StudentMark> marks;
+
+  /// Already-entered co-scholastic grade per area code (empty = not yet
+  /// rated), so a grade picker pre-fills. Reads back exactly what was stored.
+  final Map<String, String> coScholastic;
 
   StudentMark? markFor(String subjectId) {
     for (final m in marks) {
@@ -432,6 +452,9 @@ class MarkSheetStudent {
     }
     return null;
   }
+
+  /// The stored co-scholastic grade for one area, or "" when none is entered.
+  String coScholasticGrade(String domain) => coScholastic[domain] ?? "";
 }
 
 class MarkSheetInfo {
@@ -445,6 +468,19 @@ class MarkSheetInfo {
       enteredBy = _s(j, "enteredBy"),
       passPercent = _i(j, "passPercent"),
       subjects = _list(j, "subjects").map(ExamSubjectInfo.fromJson).toList(),
+      coScholasticAreas =
+          _list(
+            Map<String, dynamic>.from((j["coScholastic"] as Map?) ?? const {}),
+            "areas",
+          ).map(CoScholasticAreaInfo.fromJson).toList(),
+      coScholasticGrades =
+          ((Map<String, dynamic>.from(
+                    (j["coScholastic"] as Map?) ?? const {},
+                  )["grades"]
+                  as List?) ??
+                  const [])
+              .map((e) => e.toString())
+              .toList(),
       students = _list(j, "students").map(MarkSheetStudent.fromJson).toList();
 
   final String termLabel;
@@ -453,6 +489,15 @@ class MarkSheetInfo {
   final String enteredBy;
   final int passPercent;
   final List<ExamSubjectInfo> subjects;
+
+  /// Co-scholastic subjects / activities this class is graded on — empty when
+  /// the class has none (then the app shows no co-scholastic section).
+  final List<CoScholasticAreaInfo> coScholasticAreas;
+
+  /// The letters a teacher may pick (A/B/C, or A–E on a five-band scale),
+  /// straight from the server. Empty with areas present = scheme not loaded.
+  final List<String> coScholasticGrades;
+
   final List<MarkSheetStudent> students;
 }
 
@@ -1693,6 +1738,35 @@ extension StaffApi on ApiClient {
       data,
       "marks",
     ).map((m) => StudentMark.fromJson({...m, "subjectId": subjectId})).toList();
+  }
+
+  /// Save co-scholastic grades for one section and exam. Each entry is one
+  /// student's letter for one area ([domain] = area code); an empty [rating]
+  /// clears it back to unrated. The server validates each letter against the
+  /// scheme's scale and refuses an area the class does not have. Returns the
+  /// stored grades (area code + rating) per student.
+  Future<Map<String, Map<String, String>>> saveCoScholastic({
+    required String termId,
+    required String classId,
+    required String sectionId,
+    required List<({String studentId, String domain, String rating})> grades,
+  }) async {
+    final data = await _postData("/api/v1/staff/exams/marks", {
+      "termId": termId,
+      "classId": classId,
+      "sectionId": sectionId,
+      "coScholastic": [
+        for (final g in grades)
+          {"studentId": g.studentId, "domain": g.domain, "rating": g.rating},
+      ],
+    });
+    final out = <String, Map<String, String>>{};
+    for (final e in _list(data, "coScholastic")) {
+      final sid = _s(e, "studentId");
+      if (sid.isEmpty) continue;
+      (out[sid] ??= {})[_s(e, "domain")] = _s(e, "rating");
+    }
+    return out;
   }
 
   Future<List<DateSheetRow>> fetchDateSheet({String termId = ""}) async {

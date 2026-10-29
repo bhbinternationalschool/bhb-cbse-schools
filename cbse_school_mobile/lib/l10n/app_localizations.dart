@@ -6913,6 +6913,24 @@ abstract class L {
   /// In en, this message translates to:
   /// **'{who}: enter 0–{max} or leave blank for absent'**
   String markEntryRangeHint(String who, String max);
+
+  /// No description provided for @coScholasticAbsent.
+  ///
+  /// In en, this message translates to:
+  /// **'Absent'**
+  String get coScholasticAbsent;
+
+  /// No description provided for @coScholasticGradesNotLoaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Co-scholastic grades could not be loaded. Nothing is shown rather than a guess — reopen the sheet, or grade these on the exams desk.'**
+  String get coScholasticGradesNotLoaded;
+
+  /// No description provided for @coScholasticGradesSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'{area} grades saved for {count} students.'**
+  String coScholasticGradesSaved(String area, String count);
 }
 
 class _LDelegate extends LocalizationsDelegate<L> {

@@ -44,7 +44,12 @@ import {
   type StudentSubjectMark,
 } from "./exams";
 import { sectionReadiness } from "./examReadiness";
-import { mergeStaffAppEntries, staffAppEntriesProblem } from "./staffExamMarks";
+import {
+  mergeStaffAppCoScholastic,
+  mergeStaffAppEntries,
+  staffAppCoScholasticProblem,
+  staffAppEntriesProblem,
+} from "./staffExamMarks";
 import { defaultMasters } from "./masters";
 import type { SisStudent } from "./sis";
 
@@ -461,6 +466,53 @@ const base = { academicYearCode: "2026-27", examTermId: "term_hy", classId: "cls
   const cleared = mergeStaffAppEntries(split, "sub_eng", [{ studentId: "stu_1", component: "WRIT", marksObtained: null }]);
   assert.equal(cleared.find((m) => m.component === "WRIT")?.marksObtained, null, "Written cleared");
   assert.equal(cleared.find((m) => m.component === "ORAL")?.marksObtained, 15, "Oral untouched");
+}
+
+// ------------------------------------------- staff app co-scholastic grading
+{
+  // A co-scholastic subject / activity is GRADED, never marked — the app
+  // sends { studentId, domain, rating } to the same marks route, and the
+  // letters land on the sheet's own co-scholastic list.
+  const areas = [
+    { code: "WE", label: "Work Education" },
+    { code: "MUS", label: "Music" },
+  ];
+  const three = { areas, grades: ["A", "B", "C"] };
+
+  // A letter from the scale, "AB", or clearing are all fine.
+  assert.equal(staffAppCoScholasticProblem([{ studentId: "stu_1", domain: "WE", rating: "A" }], three), null);
+  assert.equal(staffAppCoScholasticProblem([{ studentId: "stu_1", domain: "we", rating: "b" }], three), null, "code and letter are case-insensitive");
+  assert.equal(staffAppCoScholasticProblem([{ studentId: "stu_1", domain: "MUS", rating: "AB" }], three), null, "absent is allowed");
+  assert.equal(staffAppCoScholasticProblem([{ studentId: "stu_1", domain: "WE", rating: "" }], three), null, "clearing is allowed");
+
+  // An off-scale letter, an unknown area, and a missing studentId are refused.
+  assert.match(staffAppCoScholasticProblem([{ studentId: "stu_1", domain: "WE", rating: "D" }], three) ?? "", /not one of the grades/, "D is off a three-band scale");
+  assert.match(staffAppCoScholasticProblem([{ studentId: "stu_1", domain: "GK", rating: "A" }], three) ?? "", /not a co-scholastic area/, "GK is not one of this class's areas");
+  assert.match(staffAppCoScholasticProblem([{ studentId: "", domain: "WE", rating: "A" }], three) ?? "", /studentId/);
+  // On a five-band scale D is valid.
+  assert.equal(staffAppCoScholasticProblem([{ studentId: "stu_1", domain: "WE", rating: "D" }], { areas, grades: ["A", "B", "C", "D", "E"] }), null, "D is fine on A–E");
+  // A class with no co-scholastic areas cannot be graded from the app.
+  assert.match(staffAppCoScholasticProblem([{ studentId: "stu_1", domain: "WE", rating: "A" }], { areas: [], grades: ["A", "B", "C"] }) ?? "", /no co-scholastic areas/);
+
+  // Merge: one row per student × area; other rows ride through untouched; a
+  // blank clears that pair back to unrated without wiping the rest.
+  const existing = [
+    { studentId: "stu_1", domain: "WE", rating: "A" as const },
+    { studentId: "stu_1", domain: "MUS", rating: "B" as const },
+    { studentId: "stu_2", domain: "WE", rating: "C" as const },
+  ];
+  const mergedCosch = mergeStaffAppCoScholastic(existing, [
+    { studentId: "stu_1", domain: "WE", rating: "C" },
+    { studentId: "stu_1", domain: "MUS", rating: "" },
+  ]);
+  assert.equal(mergedCosch.length, 3, "no row added or lost");
+  assert.equal(mergedCosch.find((e) => e.studentId === "stu_1" && e.domain === "WE")?.rating, "C", "WE updated");
+  assert.equal(mergedCosch.find((e) => e.studentId === "stu_1" && e.domain === "MUS")?.rating, null, "MUS cleared to unrated");
+  assert.equal(mergedCosch.find((e) => e.studentId === "stu_2" && e.domain === "WE")?.rating, "C", "another student's grade untouched");
+  // A new pair is appended.
+  const added = mergeStaffAppCoScholastic(existing, [{ studentId: "stu_2", domain: "MUS", rating: "A" }]);
+  assert.equal(added.length, 4);
+  assert.equal(added.find((e) => e.studentId === "stu_2" && e.domain === "MUS")?.rating, "A");
 }
 
 console.log("OK — examGradedParts.selftest.ts");

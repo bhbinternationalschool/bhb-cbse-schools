@@ -1157,5 +1157,18 @@
         "type": "String"
       }
     }
+  },
+  "coScholasticAbsent": "अनुपस्थित",
+  "coScholasticGradesNotLoaded": "सह-शैक्षिक ग्रेड लोड नहीं हो सके। अनुमान के बजाय कुछ नहीं दिखाया गया — शीट फिर से खोलें, या इन्हें परीक्षा डेस्क पर ग्रेड करें।",
+  "coScholasticGradesSaved": "{area} के ग्रेड {count} विद्यार्थियों के लिए सहेजे गए।",
+  "@coScholasticGradesSaved": {
+    "placeholders": {
+      "area": {
+        "type": "String"
+      },
+      "count": {
+        "type": "String"
+      }
+    }
   }
 }
