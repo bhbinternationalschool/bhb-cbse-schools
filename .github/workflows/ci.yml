@@ -377,6 +377,9 @@ jobs:
       - name: Test — academics readers take Masters as data; not loaded = refuse, never empty (data-layer 2.3b)
         working-directory: apps/web
         run: npm run test:academics-masters-as-data
+      - name: Test — certificates / UDISE+ readers take Masters as data; not loaded = refuse, never empty (data-layer 2.3b)
+        working-directory: apps/web
+        run: npm run test:certificates-udise-masters-as-data
 
       - name: Test — fee structure / import / automation suites
         working-directory: apps/web
