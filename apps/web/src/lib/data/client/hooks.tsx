@@ -43,6 +43,7 @@ import { writeMastersLocalRaw } from "@/lib/mastersPersistence";
 import { bridgeMastersToPageMemory, parseMastersView, type MastersBridgeDeps } from "./mastersBridge";
 import { readView } from "./query";
 import { viewLoadMetric } from "./viewLoadMetric";
+import { setTabQueryClient } from "./tabCache";
 import {
   ErpQueryError,
   pollOutcome,
@@ -93,6 +94,9 @@ export function invalidateTabDesks(desks: readonly string[]): string[] {
 export function ErpQueryProvider({ children }: { children: React.ReactNode }) {
   const [client] = useState(makeErpQueryClient);
   tabQueryClient = client;
+  // lib/ code outside React (the save checks, the printed identity) reads
+  // this tab's answers from the same cache (./tabCache, data-layer 2.3b).
+  setTabQueryClient(client);
   return (
     <QueryClientProvider client={client}>
       <VersionsPoller />

@@ -2073,6 +2073,33 @@ as a parameter from the hook, or to server code). Then delete the `masters`, `st
 `moduleRegistry` tasks from `deskHydrationSchedule.ts` (a deletion in a frozen file) and the
 2.1 bridge. Acceptance: the `ensure*Hydrated` component ratchet falls by 4; `counts` and
 `propagation` green.
+*(2.3b batch 1 — shell, permissions and identity. Built 29 Oct 2026, PR #735.)* **What exists.** The lib/ save
+checks (`lib/rbacGuard`: `assertModulePermission`, `assertSelfOrModulePermission`, `actorMayExport`,
+`assertCanConfigureRbac`, `assertStaffAdvancesPermission`, `holdsModuleFeatureWrite`, `isFunctionOnlyWriter`; and
+`rbac.saveRbac`, which now calls `assertCanConfigureRbac`) decide with this tab's views/rbac + views/staff-list answers in
+the shared React Query cache (`lib/data/client/tabCache.ts`: `tabAccessCopy`, the access copy's own rules — ready only
+when both answered), not the page copies. Not answered yet / failed → the check refuses with
+`bhb-rbac-denied {reason:"not_loaded"}`, the shell says "Could not load your permissions, so this was not saved. Check
+the connection and try again.", and the two reads are asked again — never "You do not have permission". Offline builds
+(no database) and pages outside the staff shell (no query provider) read the page copies as before (one `loadMasters`
+left in rbacGuard). No client check was deleted (none proven server-enforced in this batch). `schoolIdentity()` with no
+book reads the tab's masters answer (`tabMastersBook`; the 5 s memo and `forgetSchoolIdentity` are gone), else the
+tenant's built-in identity; `pdfLetterhead` resolves through it (no `loadMasters`). `buildModuleDashboard` /
+`buildSchoolDashboard` take `masters` (the host and the home dashboard pass `useScreenMasters`' book, show "Loading…"
+until it is there and `<QueryError>` on failure; `DASHBOARDS_READING_MASTERS`); `useAccessData({enabled})`
+/`useScreenMasters({enabled})` ask nothing when disabled (the field hub's dashboard adds no request).
+`listLiveDefaulters` requires `masters` (home dashboard: the screen's book; office assistant: `loadServerMasters()`).
+`listAllStaffMobiles(masters)` — the owner broadcast route passes `loadServerMasters()` and answers 503 "Could not read
+the staff list — nothing was sent" when the roster was not read. Six report catalogs (admissions, complaints, SIS,
+student attendance, staff leave, transport) refuse with `MASTERS_NOT_LOADED_MESSAGE` (`lib/data/requireData.ts`,
+shared with the academics batch) instead of reading the copy. Not in this batch: the fee and payroll report catalogs
+(MONEY batches 4/5), `feeAgreementPdf`, `receiptArchive.server`, `DefaultersPlaybook` (fees), the exam / teaching /
+timetable catalogs (academics batch). Ratchet `load_masters_calls_src` 317 → 293 (after the academics batch, #732).
+**Proof.** Self-test `test:rbac-guard-access` (11 cases): 7 fail on origin/main cad6c512 (every "not loaded" case, and a
+real "no" the old headless read let through). New `error.spec` case: the certificates clerk (role by assignment) saves
+Birthday settings while the rbac page copy 503s — the save goes out, no "You do not have permission". It passes on old
+code too: with no rbac copy the old check found her on no roster and fell back to "principal" (an over-grant, not a
+refusal), so it is a regression guard, not a fail-on-old proof.
 
 *(2.3b-2 academics built 28 Oct 2026, PR #732.)* `exams.ts`, `attendance.ts`, `homework.ts`, `ptm.ts`,
 `ptmBook.server.ts`, `studentLeave.ts`, the timetable / teaching / exam report catalogs, `admitCardPdf.ts`

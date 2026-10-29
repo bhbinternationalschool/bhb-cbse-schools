@@ -1396,6 +1396,8 @@ export function ComplaintsReportsRunner() {
   const [fromDate, setFromDate] = useState(`${todayIso().slice(0, 4)}-04-01`);
   const [toDate, setToDate] = useState(todayIso);
   const { show, view } = useRunResult();
+  // 2.3b: the report reads Masters as data (null = it refuses, never empty).
+  const { masters: complaintsMasters } = useScreenMasters();
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
@@ -1415,7 +1417,7 @@ export function ComplaintsReportsRunner() {
       {view}
       <ExportList
         reports={COMPLAINTS_REPORTS}
-        onRun={(id) => show(runComplaintsReport(id as ComplaintsReportId, { fromDate, toDate, format }))}
+        onRun={(id) => show(runComplaintsReport(id as ComplaintsReportId, { fromDate, toDate, format, masters: complaintsMasters ?? undefined }))}
       />
     </div>
   );
