@@ -121,8 +121,8 @@ export function HouseholdMessageLogPanel({
       <p className="text-[12px] text-[var(--muted)]">
         One household&apos;s cross-channel message history — &ldquo;what did we
         send this family?&rdquo; Covers WhatsApp (fee reminders, duty/
-        substitution notify, admission campaigns, broadcasts) and in-app
-        staff↔parent chat. <span className="text-amber-800">IVRS and email
+        substitution notify, admission campaigns, broadcasts) and school
+        chat (the family&apos;s chats with staff and everything it sent). <span className="text-amber-800">IVRS and email
         are not tracked yet</span> — IVRS has no call history stored anywhere
         in this system today, and email has no provider configured.
       </p>

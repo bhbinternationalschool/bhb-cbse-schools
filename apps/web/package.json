@@ -14,6 +14,7 @@
     "test:fee-backdate": "npx tsx src/lib/feeBackdate.selftest.ts",
     "test:month-groups": "npx tsx src/lib/monthGroups.selftest.ts",
     "test:school-chat": "npx tsx src/lib/schoolChat.selftest.ts",
+    "test:school-chat-log": "npx tsx src/lib/schoolChatLog.selftest.ts",
     "test:month-range": "npx tsx src/lib/monthRange.selftest.ts",
     "test:class-upgrade-fee-group": "npx tsx src/lib/classUpgradeFeeGroup.selftest.ts",
     "test:receipt-auto-wa": "npx tsx src/lib/feeReceiptAutoWa.selftest.ts",
