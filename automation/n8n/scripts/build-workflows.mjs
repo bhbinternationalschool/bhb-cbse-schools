@@ -1422,15 +1422,31 @@ for (const u of updates) {
     const tsz = /^tsnz:(\\d+)$/.exec(data); if (tsz) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'snooze', task_id: Number(tsz[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
     const tas = /^tasg:(\\d+)$/.exec(data); if (tas) { if (role === 'director') out.push({ json: { kind: 'command', cmd: 'tassign', task_id: Number(tas[1]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
     const ast = /^aset:(\\d+):(.+)$/.exec(data); if (ast) { if (role === 'director') out.push({ json: { kind: 'taskaction', action: 'assign_set', task_id: Number(ast[1]), assignee: String(ast[2]), ...base } }); else out.push({ json: { kind: 'command', cmd: 'not_director', ...base } }); continue; }
-    const dlg = /^(dok|dno):(\\d+)$/.exec(data); if (dlg) { if (role) out.push({ json: { kind: 'taskaction', action: dlg[1], task_id: Number(dlg[2]), ...base } }); continue; }
+    const dlg = /^(dok|dno|dchg):(\\d+)$/.exec(data); if (dlg) { if (role) out.push({ json: { kind: 'taskaction', action: dlg[1], task_id: Number(dlg[2]), ...base } }); continue; }
     continue;
   }
   const msg = u.message;
   if (!msg || !msg.text) continue;
   const chat_id = String(msg.chat && msg.chat.id || '');
-  const role = tgRoleOf(chat_id);
+  const role = roleOf(chat_id);
   const text = String(msg.text || '').trim();
   const base = { chat_id, role, callback_id: null, message_id: null, message_text: '' };
+  // A reply to an approval message is a comment (optionally a decision). The
+  // replied message carries the task id as "#<id>"; the action hub looks the
+  // task up and applies it only where safe (assigned tasks / social / proposals).
+  const rep = msg.reply_to_message;
+  if (rep && role) {
+    const ridm = /#(\\d{1,10})(?![0-9])/.exec(String(rep.text || rep.caption || ''));
+    if (ridm) {
+      const low = text.toLowerCase();
+      let dec = 'comment';
+      if (/(approve|approved|^ok\\b|^okay\\b|^yes\\b|haan|^ha\\b|ठीक|हाँ|हां)/.test(low)) dec = 'dok';
+      else if (/(reject|rejected|^no\\b|nahi|nahin|नहीं)/.test(low)) dec = 'dno';
+      else if (/(change|changes|modify|revise|send back|सुधार|बदल)/.test(low)) dec = 'dchg';
+      out.push({ json: { kind: 'taskaction', action: dec, task_id: Number(ridm[1]), comment: text.slice(0, 500), ...base } });
+      continue;
+    }
+  }
   // Director-only user management (needs arguments, so handled before the
   // plain-command match). /adduser <chatid> <name>, /removeuser <chatid>.
   const au = /^\\/adduser\\s+(\\S+)(?:\\s+([\\s\\S]+))?$/i.exec(text);
@@ -1987,25 +2003,48 @@ for (const a of asks) {
     catch (e) { ack(a.chat_id, 'Could not assign that task.'); continue; }
     ack(a.chat_id, '📨 Assigned to <b>' + tgEscape(nm) + '</b> for approval: ' + tgEscape(String(t.title || '')));
     out.push({ json: { tg_method: 'sendMessage', tg: { chat_id: chat, parse_mode: 'HTML', disable_web_page_preview: true,
-      text: '📨 <b>For your approval</b>\\n' + tgEscape(String(t.title || '')) + (t.detail ? '\\n' + tgEscape(String(t.detail).slice(0, 400)) : ''),
-      reply_markup: { inline_keyboard: [[{ text: '✅ Approve', callback_data: 'dok:' + t.id }, { text: '❌ Reject', callback_data: 'dno:' + t.id }]] } } } });
+      text: '📨 <b>For your approval</b> #' + t.id + '\\n' + tgEscape(String(t.title || '')) + (t.detail ? '\\n' + tgEscape(String(t.detail).slice(0, 400)) : '') + '\\n\\n<i>Reply to this message to add a comment.</i>',
+      reply_markup: { inline_keyboard: [[{ text: '✅ Approve', callback_data: 'dok:' + t.id }, { text: '❌ Reject', callback_data: 'dno:' + t.id }], [{ text: '✍️ Send back for changes', callback_data: 'dchg:' + t.id }]] } } } });
     continue;
   }
 
-  // ── assignee (or director) approves / rejects an assigned task ──
-  if (a.action === 'dok' || a.action === 'dno') {
+  // ── assignee (or director) approves / rejects / sends back, with a comment ──
+  if (a.action === 'dok' || a.action === 'dno' || a.action === 'dchg' || a.action === 'comment') {
     const t = resolve(a);
     if (!t) { ack(a.chat_id, 'That task is no longer open.'); continue; }
+    const src = String(t.source || '');
+    // Gmail / assistant drafts are sent by the Approve-button path; never close
+    // one from a typed reply — guide the user to the buttons instead.
+    if ((a.action === 'dok' || a.action === 'dno') && (src === 'receptionist' || src === 'assistant')) {
+      ack(a.chat_id, 'For that draft, use the ✅ Approve / ❌ Reject buttons on its message.'); continue;
+    }
     const assigned = String((t.payload || {}).assigned_to || '');
     const isDirector = tgRoleOf(a.chat_id) === 'director';
     if (!isDirector && String(a.chat_id) !== assigned) { ack(a.chat_id, 'That task is not assigned to you.'); continue; }
+    const cmt = String(a.comment || '').trim();
+    const who = nameOf(a.chat_id);
+    const quote = cmt ? '\\n“' + tgEscape(cmt) + '”' : '';
+    if (a.action === 'comment') {
+      try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { updated_at: now, payload: { ...(t.payload || {}), last_comment: cmt, last_comment_by: who, last_comment_at: now } }); } catch (e) {}
+      ack(a.chat_id, '💬 Comment noted on #' + t.id + '.');
+      if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, '💬 ' + tgEscape(who) + ' on #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);
+      continue;
+    }
+    if (a.action === 'dchg') {
+      try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, { approval_state: 'changes', status: 'open', updated_at: now, payload: { ...(t.payload || {}), change_note: cmt, change_by: who, change_at: now } }); } catch (e) { ack(a.chat_id, 'Could not send it back.'); continue; }
+      ack(a.chat_id, '✍️ Sent back for changes: ' + tgEscape(String(t.title || '')) + quote);
+      const assigner = String((t.payload || {}).assigned_by || '');
+      if (assigner && assigner !== String(a.chat_id)) ack(assigner, '✍️ ' + tgEscape(who) + ' sent back #' + t.id + ' for changes — ' + tgEscape(String(t.title || '')) + quote);
+      else if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, '✍️ ' + tgEscape(who) + ' sent back #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);
+      continue;
+    }
     const approve = a.action === 'dok';
     const patch = approve
-      ? { approval_state: 'approved', status: 'done', decided_by: nameOf(a.chat_id), decided_at: now, updated_at: now, payload: { ...(t.payload || {}), approved_by: String(a.chat_id), approved_at: now } }
-      : { approval_state: 'rejected', status: 'open', updated_at: now, payload: { ...(t.payload || {}), rejected_by: String(a.chat_id), rejected_at: now } };
+      ? { approval_state: 'approved', status: 'done', decided_by: who, decided_at: now, updated_at: now, payload: { ...(t.payload || {}), approved_by: String(a.chat_id), approved_at: now, decision_comment: cmt } }
+      : { approval_state: 'rejected', status: 'open', updated_at: now, payload: { ...(t.payload || {}), rejected_by: String(a.chat_id), rejected_at: now, decision_comment: cmt } };
     try { await sb('PATCH', 'office_tasks?id=eq.' + t.id + '&tenant_id=eq.' + TENANT, patch); } catch (e) { ack(a.chat_id, 'Could not record that.'); continue; }
-    ack(a.chat_id, (approve ? '✅ You approved: ' : '🚫 You rejected: ') + tgEscape(String(t.title || '')));
-    if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, (approve ? '✅ ' : '🚫 ') + tgEscape(nameOf(a.chat_id)) + (approve ? ' approved' : ' rejected') + ' task #' + t.id + ' — ' + tgEscape(String(t.title || '')));
+    ack(a.chat_id, (approve ? '✅ You approved: ' : '🚫 You rejected: ') + tgEscape(String(t.title || '')) + quote);
+    if (!isDirector && TG_CHATS.director) ack(TG_CHATS.director, (approve ? '✅ ' : '🚫 ') + tgEscape(who) + (approve ? ' approved' : ' rejected') + ' #' + t.id + ' — ' + tgEscape(String(t.title || '')) + quote);
     continue;
   }
 
