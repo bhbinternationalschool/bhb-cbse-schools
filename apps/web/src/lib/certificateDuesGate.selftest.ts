@@ -196,14 +196,14 @@ for (const kind of GATED) {
 for (const kind of GATED) {
   check(`full book with dues (OWES): ${kind} REFUSED`, () => {
     useBook(full);
-    const e = cert.certificateEligibility(OWES, kind, { server: serverAnswer(OWES), bookIsFull: true });
+    const e = cert.certificateEligibility(OWES, kind, { server: serverAnswer(OWES), bookIsFull: true, book: full });
     assert.equal(e.canIssue, false);
     assert.equal(e.openDueCount, 12, "the twelve tuition months");
   });
 
   check(`full book without dues (CLEAR): ${kind} PASSES`, () => {
     useBook(full);
-    const e = cert.certificateEligibility(CLEAR, kind, { server: serverAnswer(CLEAR), bookIsFull: true });
+    const e = cert.certificateEligibility(CLEAR, kind, { server: serverAnswer(CLEAR), bookIsFull: true, book: full });
     assert.equal(e.canIssue, true, `blockers: ${JSON.stringify(e.blockers)}`);
     assert.equal(e.openBalancePaise, 0);
     assert.deepEqual(e.blockers, []);
@@ -214,12 +214,14 @@ for (const kind of GATED) {
     const serverClear = cert.certificateEligibility(OWES, kind, {
       server: { state: "known", openBalancePaise: 0, openDueCount: 0 },
       bookIsFull: true,
+      book: full,
     });
     assert.equal(serverClear.canIssue, false, "the screen's full book shows dues → refused");
     assert.ok(serverClear.warnings.some((w) => w.startsWith("This screen's copy shows")), "the disagreement is said");
     const serverOwes = cert.certificateEligibility(CLEAR, kind, {
       server: { state: "known", openBalancePaise: 50000, openDueCount: 1 },
       bookIsFull: true,
+      book: full,
     });
     assert.equal(serverOwes.canIssue, false, "the server shows dues → refused");
     assert.equal(serverOwes.openBalancePaise, 50000);
@@ -227,7 +229,7 @@ for (const kind of GATED) {
 
   check(`full book, server unreachable: ${kind} REFUSED (the screen's book alone is not trusted)`, () => {
     useBook(full);
-    const e = cert.certificateEligibility(CLEAR, kind, { server: { state: "failed" }, bookIsFull: true });
+    const e = cert.certificateEligibility(CLEAR, kind, { server: { state: "failed" }, bookIsFull: true, book: full });
     assert.equal(e.canIssue, false);
     assert.ok(e.blockers.includes("Fee dues could not be checked just now — try again"));
   });
@@ -245,6 +247,7 @@ check("bonafide with unknown dues: allowed, dues null (not ₹0)", () => {
 check("issueCertificate: TC on a teaching-subset book with no server answer is refused", () => {
   useBook(teaching);
   const r = cert.issueCertificate({
+    masters: teaching,
     kind: "tc",
     studentId: OWES.id,
     issuedBy: "selftest",
@@ -260,6 +263,7 @@ check("issueCertificate: TC on a teaching-subset book with no server answer is r
 check("issueCertificate: fee clearance with the server's dues is refused", () => {
   useBook(teaching);
   const r = cert.issueCertificate({
+    masters: teaching,
     kind: "fee_clearance",
     studentId: OWES.id,
     issuedBy: "selftest",
