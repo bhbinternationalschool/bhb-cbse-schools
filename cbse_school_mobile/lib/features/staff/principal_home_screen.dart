@@ -54,6 +54,7 @@ import "self_attendance_screen.dart";
 import "students_screen.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/push/notification_bell.dart";
+import "../../core/push/chat_button.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -847,6 +848,10 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                         ),
                       ],
                     ),
+                  ),
+                  SchoolChatButton(
+                    api: widget.api,
+                    onOpen: () => _push(staffSchoolChat(widget.api)),
                   ),
                   NotificationBellButton(
                     api: widget.api,
