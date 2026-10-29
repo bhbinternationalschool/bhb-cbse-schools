@@ -566,8 +566,9 @@ export function MastersWorkspace() {
                 // element pending entries stay until an answer holds them.
                 void retryMasters();
               }}
-            />
-            <SubjectsPanel state={state} commit={commit} />
+            >
+              <SubjectsPanel state={state} commit={commit} />
+            </SubjectRequestsCard>
           </div>
         ) : null}
         {tab === "custom-fields" ? (

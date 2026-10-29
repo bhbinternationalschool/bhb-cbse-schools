@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { btn, btnOutline, field } from "@/components/ui/erp-ui";
 import type { Subject } from "@/lib/foundationMasters";
 import { suggestSubjectCode, type SubjectRequest } from "@/lib/subjectRequests";
@@ -10,7 +10,15 @@ import { suggestSubjectCode, type SubjectRequest } from "@/lib/subjectRequests";
  * (lib/subjectRequests). Approve applies it to Masters on the server, then
  * this screen re-reads Masters so the next save starts from the new
  * version. Shown only when something is waiting or was decided recently.
+ *
+ * The card sits above the subjects panel, so it holds the panel (children)
+ * back until its first read has answered: a card drawn after the step tabs
+ * were up pushed them down mid-tap (shell-no-shift spec, 29 Oct 2026). A
+ * failed read lets the panel through with the error; a read slower than
+ * PANEL_WAIT_MS lets it through anyway, as the shell does (ShellDataWait).
  */
+
+const PANEL_WAIT_MS = 5_000;
 
 const ACTION_LABEL: Record<SubjectRequest["action"], string> = {
   add: "Add to class",
@@ -25,16 +33,20 @@ export function SubjectRequestsCard({
   subjects,
   canEdit,
   onMastersChanged,
+  children,
 }: {
   subjects: Subject[];
   canEdit: boolean;
   onMastersChanged: () => void;
+  /** The subjects panel, drawn under the card once its first read settles. */
+  children: ReactNode;
 }) {
   const [pending, setPending] = useState<SubjectRequest[]>([]);
   const [recent, setRecent] = useState<SubjectRequest[]>([]);
   const [codes, setCodes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [settled, setSettled] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -45,11 +57,15 @@ export function SubjectRequestsCard({
       setRecent(j.recent ?? []);
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : "Could not load teachers' requests" });
+    } finally {
+      setSettled(true);
     }
   }, []);
 
   useEffect(() => {
     void load();
+    const t = setTimeout(() => setSettled(true), PANEL_WAIT_MS);
+    return () => clearTimeout(t);
   }, [load]);
 
   async function decide(r: SubjectRequest, decision: "approve" | "reject") {
@@ -83,9 +99,10 @@ export function SubjectRequestsCard({
     }
   }
 
-  if (!pending.length && !recent.length && !msg) return null;
+  const panel = settled ? children : <p className="text-sm text-[var(--muted)]" role="status">Loading subjects…</p>;
+  if (!pending.length && !recent.length && !msg) return panel;
 
-  return (
+  const card = (
     <section className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3" aria-label="Teachers' subject requests">
       <div>
         <h3 className="text-sm font-semibold text-[var(--brand-deep)]">
@@ -148,5 +165,12 @@ export function SubjectRequestsCard({
         </details>
       ) : null}
     </section>
+  );
+
+  return (
+    <>
+      {card}
+      {panel}
+    </>
   );
 }
