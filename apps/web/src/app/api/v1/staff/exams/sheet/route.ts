@@ -5,6 +5,7 @@ import { ensureSisHydratedServer } from "@/lib/sisPersistence";
 import { ensureExamsHydratedServer } from "@/lib/examsPersistence";
 import {
   componentsForSubject,
+  coScholasticAreasForClass,
   effectiveMaxMarks,
   findMarkSheet,
   getExamPolicy,
@@ -13,6 +14,7 @@ import {
   schemeForClassId,
   subjectsForMarkEntry,
 } from "@/lib/exams";
+import { coScholasticRatingsFor } from "@/lib/examSchemes";
 import { loadSisForStaff } from "@/lib/sis";
 import { assertSectionScope, scopeAllowsSubjectCode } from "@/lib/api/v1/staffScope";
 
@@ -107,6 +109,20 @@ export async function GET(request: Request) {
         .map((m) => [`${m.studentId}:${m.subjectId}:${m.component}`, m]),
     );
 
+    // Co-scholastic subjects / activities (Work Education, Music, Discipline…)
+    // are graded A/B/C (A–E on a five-band scale), never marked. The areas and
+    // the allowed grades come from the class's scheme and Masters — the app
+    // never hard-codes a grade list. Empty areas → the app shows no section.
+    const coScholasticAreas = coScholasticAreasForClass(classId, getExamPolicy(state), masters);
+    const coScholasticGrades = coScholasticRatingsFor(scheme.coScholasticScale);
+    const coschByStudent = new Map<string, Map<string, string>>();
+    for (const e of sheet?.coScholastic ?? []) {
+      if (!e.rating) continue;
+      const m = coschByStudent.get(e.studentId) ?? new Map<string, string>();
+      m.set(e.domain, e.rating);
+      coschByStudent.set(e.studentId, m);
+    }
+
     return apiOk({
       academicYearCode: ay,
       term: { id: term.id, label: term.label, maxMarks: term.maxMarks },
@@ -117,10 +133,23 @@ export async function GET(request: Request) {
       updatedAt: sheet?.updatedAt || "",
       enteredBy: sheet?.enteredBy || "",
       subjects,
+      // The graded co-scholastic side of the sheet, alongside the marked
+      // subjects. Areas empty = this class has none (the app shows nothing).
+      coScholastic: {
+        scale: scheme.coScholasticScale,
+        grades: coScholasticGrades,
+        areas: coScholasticAreas.map((a) => ({ code: a.code, label: a.label })),
+      },
       students: students.map((st) => ({
         id: st.id,
         fullName: st.fullName,
         rollNo: st.rollNo,
+        // One row per co-scholastic area this class has, pre-filled with the
+        // letter already given (empty = not yet rated). The app grades these.
+        coScholastic: coScholasticAreas.map((a) => ({
+          domain: a.code,
+          rating: coschByStudent.get(st.id)?.get(a.code) ?? "",
+        })),
         marks: subjects.map((sub) => {
           const m = marks.get(`${st.id}:${sub.id}`);
           return {

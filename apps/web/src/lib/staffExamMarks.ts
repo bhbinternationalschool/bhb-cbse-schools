@@ -18,7 +18,8 @@
 
 import type { SchemeComponent, GradedPart } from "@/lib/examSchemes";
 import { parsePartGrade } from "@/lib/examSchemes";
-import type { StudentSubjectMark } from "@/lib/exams";
+import type { StudentSubjectMark, StudentCoScholasticEntry, CoScholasticRating } from "@/lib/exams";
+import { parseCoScholasticRating, CO_SCHOLASTIC_ABSENT } from "@/lib/exams";
 
 export type StaffAppMarkEntry = {
   studentId: string;
@@ -147,6 +148,80 @@ export function mergeStaffAppEntries(
       remark: prev?.remark ?? "",
       remarkSource: prev?.remarkSource ?? "manual",
     });
+  }
+  return [...byKey.values()];
+}
+
+/**
+ * Co-scholastic grading from the app (2026-10-29). A co-scholastic subject /
+ * activity (Work Education, Music, Discipline…) is GRADED A/B/C (A–E on a
+ * five-band scale), never marked. It is stored on the sheet's own
+ * `coScholastic` list — one letter per student × area — not among the marks,
+ * so it rides alongside the numeric entry (#724) without touching it.
+ *
+ * The app sends one entry per student × area: `{ studentId, domain, rating }`.
+ * `rating` is a letter from the scheme's scale, "AB" for absent, or "" to
+ * clear back to unrated. A letter off the scale, or an area the class does
+ * not have, is refused here rather than on a teacher's phone.
+ */
+export type StaffAppCoScholasticEntry = {
+  studentId: string;
+  domain: string;
+  /** A letter from the scale, "AB", or "" to clear. */
+  rating?: string | null;
+};
+
+export type StaffAppCoScholasticRules = {
+  /** coScholasticAreasForClass for this class — the only areas it may grade. */
+  areas: { code: string; label?: string }[];
+  /** coScholasticRatingsFor the scheme's scale — the letters it may pick. */
+  grades: string[];
+};
+
+/** Why these co-scholastic grades cannot be saved, or null when they can. */
+export function staffAppCoScholasticProblem(
+  entries: StaffAppCoScholasticEntry[],
+  rules: StaffAppCoScholasticRules,
+): string | null {
+  if (rules.areas.length === 0) {
+    return "This class has no co-scholastic areas — grade them on the exams desk if the school adds them";
+  }
+  const areaByCode = new Map(rules.areas.map((a) => [a.code.trim().toUpperCase(), a]));
+  const allowed = rules.grades.map((g) => g.toUpperCase());
+  for (const e of entries) {
+    if (!e || typeof e.studentId !== "string" || !e.studentId) return "Every entry needs a studentId";
+    const domain = String(e.domain ?? "").trim().toUpperCase();
+    const area = areaByCode.get(domain);
+    if (!area) return `"${e.domain}" is not a co-scholastic area for this class`;
+    const raw = String(e.rating ?? "").trim();
+    if (raw === "" || raw === "—") continue; // clearing back to unrated
+    const up = raw.toUpperCase();
+    if (up === CO_SCHOLASTIC_ABSENT) continue; // absent
+    if (!allowed.includes(up)) {
+      return `${area.label || area.code}: "${raw}" is not one of the grades (${rules.grades.join(", ")})`;
+    }
+  }
+  return null;
+}
+
+/**
+ * The sheet's co-scholastic list with the app's entries applied: one row per
+ * student × area, every other row exactly as stored. A "" / "—" rating clears
+ * that pair back to unrated. Run staffAppCoScholasticProblem first.
+ */
+export function mergeStaffAppCoScholastic(
+  existing: StudentCoScholasticEntry[],
+  entries: StaffAppCoScholasticEntry[],
+): StudentCoScholasticEntry[] {
+  const key = (studentId: string, domain: string) => `${studentId}:${domain.toUpperCase()}`;
+  const byKey = new Map(existing.map((e) => [key(e.studentId, e.domain), e]));
+  for (const e of entries) {
+    const domain = String(e.domain ?? "").trim().toUpperCase();
+    if (!domain) continue;
+    const raw = String(e.rating ?? "").trim();
+    const rating: CoScholasticRating | null =
+      raw === "" || raw === "—" ? null : parseCoScholasticRating(raw.toUpperCase());
+    byKey.set(key(e.studentId, domain), { studentId: e.studentId, domain, rating });
   }
   return [...byKey.values()];
 }
