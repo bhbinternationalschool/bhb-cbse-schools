@@ -6,7 +6,7 @@
  * Supabase-only), not here.
  */
 import { loadSis, householdWhatsApp } from "@/lib/sis";
-import { loadMasters } from "@/lib/masters";
+import type { MastersState } from "@/lib/masters";
 
 /** Deduped WhatsApp numbers for every household with one on file. */
 export function listAllHouseholdWaNumbers(): string[] {
@@ -31,9 +31,12 @@ export function listLanguageUnsetHouseholdWaNumbers(): string[] {
   return Array.from(seen);
 }
 
-/** Deduped mobiles for every active staff member. */
-export function listAllStaffMobiles(): string[] {
-  const masters = loadMasters();
+/**
+ * Deduped mobiles for every active staff member of `masters` — the server's
+ * book (loadServerMasters, with the roster read from sis_staff; data-layer
+ * 2.3b — was the process's mirror copy, loadMasters()).
+ */
+export function listAllStaffMobiles(masters: Pick<MastersState, "staff">): string[] {
   const seen = new Set<string>();
   for (const s of masters.staff ?? []) {
     if (s.status !== "active") continue;

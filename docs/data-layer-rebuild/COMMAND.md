@@ -2066,6 +2066,22 @@ the shell's); `kernel`, `admissions-comms`, `masters-exams-reports` (shell error
 **Not done / not proven.** See the PR body: the 2 s phone gate is not met on every page (Mac: /students?tab=register
 2.2–2.9 s, timetable 1.1–2.3 s under load; CI's runner took ~4 s on every page on main), screens that read a replica desk
 once at mount may now mount before it lands (only StudentForm was found and fixed).
+*(2.3a follow-up, built 29 Oct 2026, PR #742.)* **Lost taps after 2.3a.** With the gate gone a screen is up before the
+comms desk lands (it waits in the hydration queue behind the boot hydrates); the notices strip in the sticky header then
+appeared ~1 s in and pushed the screen down ~41 px between a tap's press and its release, so the tap did nothing. On CI
+(where parent-web-tabs has seeded a staff notice before the write projects run — locally, without it, there is no strip)
+this was every "random" propagation / masters-element-writes / staff-month-register failure of 28–29 Oct: the Playwright
+trace's DOM snapshot before each lost click has no strip and the one after it has. Fix: `ShellDataWait` also waits (at
+most 5 s, never blocking on failure) for the comms read the strip draws from — `staffNoticesLanded()` in
+`CommsRunningStrip`, one shared promise per tab, read outside the hydration queue — so the strip takes its final shape
+(notices, or no bar) in the render that shows the screen; past the 5 s cap the strip draws an empty bar of a notice's
+exact line box (`aria-hidden`) that the notices fill without moving anything. (A first cut with the empty bar alone
+collapsed it when the school has no notices, moving every screen UP 41 px — the desktop project on CI.) Only a school with
+no notices whose comms read takes over 5 s still loses a bar under an open screen. `shell-no-shift.spec` (desktop): the
+comms desk held back with a notice → the step tab does not move and a press held while the strip lands still selects
+(both fail on main: 41.5 px, tap lost); no notices, answering 1.5 s late → the screen does not move (fails on the first
+cut: 41.5 px up). `masters-overlay` blocks the app's service worker: it claims the page ~0.5 s in, and Playwright's
+`page.route` cannot see past it (the refused-save case had its 409 bypassed and saved for real).
 
 **2.3b Delete the four core hydrate tasks and the bridge.** Gated on the all-of-src
 `loadMasters(` occurrence ratchet reaching 0 (the 107 `lib/` readers converted to take `masters`
@@ -2073,6 +2089,33 @@ as a parameter from the hook, or to server code). Then delete the `masters`, `st
 `moduleRegistry` tasks from `deskHydrationSchedule.ts` (a deletion in a frozen file) and the
 2.1 bridge. Acceptance: the `ensure*Hydrated` component ratchet falls by 4; `counts` and
 `propagation` green.
+*(2.3b batch 1 — shell, permissions and identity. Built 29 Oct 2026, PR #735.)* **What exists.** The lib/ save
+checks (`lib/rbacGuard`: `assertModulePermission`, `assertSelfOrModulePermission`, `actorMayExport`,
+`assertCanConfigureRbac`, `assertStaffAdvancesPermission`, `holdsModuleFeatureWrite`, `isFunctionOnlyWriter`; and
+`rbac.saveRbac`, which now calls `assertCanConfigureRbac`) decide with this tab's views/rbac + views/staff-list answers in
+the shared React Query cache (`lib/data/client/tabCache.ts`: `tabAccessCopy`, the access copy's own rules — ready only
+when both answered), not the page copies. Not answered yet / failed → the check refuses with
+`bhb-rbac-denied {reason:"not_loaded"}`, the shell says "Could not load your permissions, so this was not saved. Check
+the connection and try again.", and the two reads are asked again — never "You do not have permission". Offline builds
+(no database) and pages outside the staff shell (no query provider) read the page copies as before (one `loadMasters`
+left in rbacGuard). No client check was deleted (none proven server-enforced in this batch). `schoolIdentity()` with no
+book reads the tab's masters answer (`tabMastersBook`; the 5 s memo and `forgetSchoolIdentity` are gone), else the
+tenant's built-in identity; `pdfLetterhead` resolves through it (no `loadMasters`). `buildModuleDashboard` /
+`buildSchoolDashboard` take `masters` (the host and the home dashboard pass `useScreenMasters`' book, show "Loading…"
+until it is there and `<QueryError>` on failure; `DASHBOARDS_READING_MASTERS`); `useAccessData({enabled})`
+/`useScreenMasters({enabled})` ask nothing when disabled (the field hub's dashboard adds no request).
+`listLiveDefaulters` requires `masters` (home dashboard: the screen's book; office assistant: `loadServerMasters()`).
+`listAllStaffMobiles(masters)` — the owner broadcast route passes `loadServerMasters()` and answers 503 "Could not read
+the staff list — nothing was sent" when the roster was not read. Six report catalogs (admissions, complaints, SIS,
+student attendance, staff leave, transport) refuse with `MASTERS_NOT_LOADED_MESSAGE` (`lib/data/requireData.ts`,
+shared with the academics batch) instead of reading the copy. Not in this batch: the fee and payroll report catalogs
+(MONEY batches 4/5), `feeAgreementPdf`, `receiptArchive.server`, `DefaultersPlaybook` (fees), the exam / teaching /
+timetable catalogs (academics batch). Ratchet `load_masters_calls_src` 317 → 293 (after the academics batch, #732).
+**Proof.** Self-test `test:rbac-guard-access` (11 cases): 7 fail on origin/main cad6c512 (every "not loaded" case, and a
+real "no" the old headless read let through). New `error.spec` case: the certificates clerk (role by assignment) saves
+Birthday settings while the rbac page copy 503s — the save goes out, no "You do not have permission". It passes on old
+code too: with no rbac copy the old check found her on no roster and fell back to "principal" (an over-grant, not a
+refusal), so it is a regression guard, not a fail-on-old proof.
 
 *(2.3b-2 academics built 28 Oct 2026, PR #732.)* `exams.ts`, `attendance.ts`, `homework.ts`, `ptm.ts`,
 `ptmBook.server.ts`, `studentLeave.ts`, the timetable / teaching / exam report catalogs, `admitCardPdf.ts`
@@ -2084,6 +2127,15 @@ nothing; report runners answer `MASTERS_NOT_LOADED_MESSAGE` for `masters: null`.
 cases fail on the old lib (old answered `[]`, `null`, "0 rows", 30 rows from the default book).
 **Not done.** `loadSis()` in these files' other readers (3.4) and in the two writers; the date sheet's
 "Add day" on an EMPTY sheet opens an editor that never renders (pre-existing, seen while checking).
+*(2.3b-3 certificates and UDISE built 28 Oct 2026, PR #733.)* `certificates.ts` (save grant, number
+series, class label, the dues gate's screen figure), `udiseCompliance.ts`, `udiseStudentDetails.ts` and
+`studentLegacyAdmission.ts` take `masters` as data and refuse without it (`lib/data/requireData.ts`). The
+TC / no-dues gate's second opinion is computed from `CertificateDuesInput.book` — the screen's FULL book —
+and `bookIsFull` without a book refuses (never a quietly server-only gate). `load_masters_calls_src`
+341 → 323 on its own (318 − 18 = 300 once 2.3b-2 #732 is merged too). Proof:
+`certificatesUdiseMastersAsData.selftest.ts` — 13 of 14 cases fail on the old lib (old answered "—",
+"BNF-0001", ₹0 open dues, `[]`); `certificates-dues-gate.spec` 10 passed locally.
+**Not done.** `app/api/ai/student-certificate` still reads `loadMasters()` (server; item 6).
 
 ### Phase 3 — Students: removes S2 and most of S4
 

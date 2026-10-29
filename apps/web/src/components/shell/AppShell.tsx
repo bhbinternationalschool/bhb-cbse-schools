@@ -344,7 +344,16 @@ function AppShellBody({
         `Session ${code} is closed, so this cannot be changed. Switch to the current session to make edits.`,
       );
     }
-    function onRbacDenied() {
+    function onRbacDenied(e: Event) {
+      // Data-layer 2.3b: a check made before this tab's roles and staff list
+      // answered is not a "no" (lib/rbacGuard reason "not_loaded").
+      const reason = (e as CustomEvent<{ reason?: string }>).detail?.reason;
+      if (reason === "not_loaded") {
+        void notify(
+          "Could not load your permissions, so this was not saved. Check the connection and try again.",
+        );
+        return;
+      }
       void notify(
         "You do not have permission for this action. Ask an admin to update Roles & permissions.",
       );

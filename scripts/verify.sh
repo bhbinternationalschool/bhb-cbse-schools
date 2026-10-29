@@ -100,6 +100,7 @@ SELFTESTS=(
   test:masters-merge
   test:accounts
   test:academics-masters-as-data
+  test:certificates-udise-masters-as-data
   test:playbook
   test:erp-chat
   test:wa-templates-automation
@@ -571,6 +572,7 @@ SELFTESTS=(
   test:versions-route
   test:query-kernel
   test:access-copy
+  test:rbac-guard-access
   test:view-load-metric
   test:reference-views
   test:masters-bridge
