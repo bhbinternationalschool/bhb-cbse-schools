@@ -561,3 +561,43 @@ export async function readHomeworkPostById(
   const row = ((data ?? []) as Record<string, unknown>[]).find((r) => String(r.id) === postId);
   return { ok: true, post: row ? rowToPost(row) : null };
 }
+
+/**
+ * The published homework posts and diary (classwork) entries of some
+ * sections, newest first, made since `sinceIso` — for school chat, which
+ * shows each one as a card in the section's class / subject group (one
+ * record: the homework desk's own rows, read here, never copied). Paged
+ * through fetchAllPages. {ok:false} = the read failed — unknown, not "none".
+ */
+export async function readSectionWorkRows(input: {
+  academicYearCode: string;
+  sectionIds: string[];
+  sinceIso: string;
+}): Promise<{ ok: true; posts: HomeworkPost[]; diary: DiaryEntry[] } | { ok: false; reason: string }> {
+  const sectionIds = [...new Set(input.sectionIds.filter(Boolean))];
+  if (!sectionIds.length) return { ok: true, posts: [], diary: [] };
+  const ctx = await getServerTenantContext();
+  if (!ctx) return { ok: false, reason: "no tenant context" };
+  const page = (table: string) =>
+    fetchAllPages<Record<string, unknown>>((from, to) =>
+      ctx.sb
+        .from(table)
+        .select("*")
+        .eq("tenant_id", ctx.tenantId)
+        .eq("academic_year_code", input.academicYearCode)
+        .in("section_id", sectionIds)
+        .gte("created_at", input.sinceIso)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to) as unknown as PromiseLike<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>,
+      { maxRows: 2000 },
+    );
+  const [p, d] = await Promise.all([page("homework_desk_posts"), page("homework_desk_diary")]);
+  if (p.error) return { ok: false, reason: p.error };
+  if (d.error) return { ok: false, reason: d.error };
+  return {
+    ok: true,
+    posts: p.rows.map(rowToPost).filter((x) => x.status === "published"),
+    diary: d.rows.map(rowToDiary),
+  };
+}

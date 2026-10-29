@@ -3059,6 +3059,9 @@ class ApiClient {
     "/api/v1/homework/post",
     // The message is checked (rules, then the model, up to 15 s) before it is stored.
     "/api/v1/school-chat/send",
+    // Homework from a class chat is the Homework module's post (written out
+    // for parents, WhatsApped) — POST /api/v1/homework/post's slow path.
+    "/api/v1/school-chat/work",
     "/api/v1/staff/class-gallery/complete",
     "/api/v1/staff/broadcast",
     "/api/v1/staff/broadcast/audience",

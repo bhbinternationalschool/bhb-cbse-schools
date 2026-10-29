@@ -20,7 +20,13 @@ export type ConversationsView = {
   me: { kind: "staff"; staffId: string } | { kind: "family"; studentId: string; section: string };
 };
 export type MessagesView = {
-  conversation: ConversationAccess & { canSend: boolean; muted: boolean; moderator: boolean };
+  conversation: ConversationAccess & {
+    canSend: boolean;
+    muted: boolean;
+    moderator: boolean;
+    /** Homework / classwork / notice composer: null = this person cannot post work here. */
+    compose: { subjects: { id: string; name: string }[]; fixedSubject: string } | null;
+  };
   messages: ChatMessageOut[];
 };
 export type ContactsView = {
