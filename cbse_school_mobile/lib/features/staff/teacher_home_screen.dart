@@ -52,6 +52,7 @@ import "students_screen.dart";
 import "timetable_screen.dart";
 import "online_classes_teacher_screen.dart";
 import "waiting_card.dart";
+import "pending_work_card.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/push/notification_bell.dart";
 
@@ -1023,6 +1024,11 @@ class _TeacherHomeScreenState extends State<TeacherHomeScreen> {
                   WaitingCard(
                     api: widget.api,
                     onOpen: _openWaiting,
+                    refreshKey: _refresh,
+                  ),
+                  PendingWorkCard(
+                    api: widget.api,
+                    onOpen: _openRoute,
                     refreshKey: _refresh,
                   ),
                   const SizedBox(height: 8),

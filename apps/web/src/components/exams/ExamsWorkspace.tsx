@@ -34,6 +34,7 @@ import {
   listExamTerms,
   promotionDecisionLabel,
   saveExamPolicy,
+  setExamMarksDueOn,
   loadExams,
   reportTemplateForClassId,
   saveMarkSheet,
@@ -706,6 +707,8 @@ export function ExamsWorkspace() {
   const [editStart, setEditStart] = useState("");
   const [editEnd, setEditEnd] = useState("");
   const [editNote, setEditNote] = useState("");
+  /** Staff marks reminder deadline (policy.marksDueByTerm). */
+  const [editMarksDue, setEditMarksDue] = useState("");
   const [editCountsHy, setEditCountsHy] = useState(true);
   const [editCountsFinal, setEditCountsFinal] = useState(true);
   const [editWeightHy, setEditWeightHy] = useState("0");
@@ -1381,6 +1384,7 @@ export function ExamsWorkspace() {
     setEditStart(t.startsOn);
     setEditEnd(t.endsOn);
     setEditNote(t.note);
+    setEditMarksDue(getExamPolicy().marksDueByTerm[t.id] ?? "");
     setEditCountsHy(t.countsTowardHy);
     setEditCountsFinal(t.countsTowardFinal);
     setEditWeightHy(String(t.weightInHy));
@@ -1424,6 +1428,13 @@ export function ExamsWorkspace() {
     if (!result.ok) {
       setError(result.error);
       return;
+    }
+    if ((getExamPolicy().marksDueByTerm[editingId] ?? "") !== editMarksDue) {
+      const due = setExamMarksDueOn(editingId, editMarksDue);
+      if (!due.ok) {
+        setError(due.error);
+        return;
+      }
     }
     setEditingId(null);
     refresh();
@@ -2450,6 +2461,16 @@ export function ExamsWorkspace() {
                             value={editEnd}
                             onChange={(e) => setEditEnd(e.target.value)}
                           />
+                          <label className="flex flex-col gap-0.5 text-[11px] text-[var(--muted)] sm:col-span-2">
+                            Marks due by — teachers are reminded daily from 3 days before
+                            <input
+                              type="date"
+                              className="field !py-1"
+                              aria-label="Marks due by"
+                              value={editMarksDue}
+                              onChange={(e) => setEditMarksDue(e.target.value)}
+                            />
+                          </label>
                           <input
                             className="field !py-1 sm:col-span-2"
                             value={editNote}
@@ -2560,6 +2581,9 @@ export function ExamsWorkspace() {
                             Max {t.maxMarks}
                             {t.startsOn ? ` · ${t.startsOn}` : ""}
                             {t.endsOn ? ` → ${t.endsOn}` : ""}
+                            {getExamPolicy(exams).marksDueByTerm[t.id]
+                              ? ` · marks due ${getExamPolicy(exams).marksDueByTerm[t.id]}`
+                              : ""}
                             {hasData ? (
                               <span className="ml-1 font-semibold text-[var(--brand-mid)]">
                                 · has marks

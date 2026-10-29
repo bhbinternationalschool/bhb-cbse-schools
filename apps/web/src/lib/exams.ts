@@ -237,6 +237,14 @@ export type ExamPolicy = {
     homeworkMinDue: number;
     subjectDrops: number;
   };
+  /**
+   * The date each exam's marks must be entered by ("YYYY-MM-DD"), keyed by
+   * exam term id (29 Oct 2026). Drives the staff marks reminder
+   * (lib/staffReminders): daily from 3 days before, then on the day. An
+   * exam with no date here sends no reminder. Kept in the policy (one JSON
+   * row) rather than a new exam_desk_terms column, so no migration.
+   */
+  marksDueByTerm: Record<string, string>;
 };
 
 export type ExamSubject = {
@@ -770,6 +778,7 @@ export function defaultExamPolicy(): ExamPolicy {
     schemes: [defaultAssessmentScheme(33)],
     reportTemplates: normalizeReportCardTemplates([]),
     riskThresholds: { attendancePct: 75, incidents: 3, homeworkRatio: 0.6, homeworkMinDue: 5, subjectDrops: 2 },
+    marksDueByTerm: {},
   };
 }
 
@@ -824,7 +833,20 @@ export function normalizeExamPolicy(
     schemes: normalizeAssessmentSchemes(p.schemes, passPercent),
     reportTemplates: normalizeReportCardTemplates(p.reportTemplates),
     riskThresholds: normalizeRiskThresholds(p.riskThresholds),
+    marksDueByTerm: normalizeMarksDueByTerm(p.marksDueByTerm),
   };
+}
+
+/** Exam id → "YYYY-MM-DD"; anything else dropped. */
+export function normalizeMarksDueByTerm(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [termId, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!termId || typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) continue;
+    if (Number.isNaN(Date.parse(`${v}T00:00:00Z`))) continue;
+    out[termId] = v;
+  }
+  return out;
 }
 
 /** The scheme that assesses this class (the default when none names it). */
@@ -1468,7 +1490,9 @@ export function saveExamPolicy(
   | { ok: false; error: string } {
   const state = loadExams();
   const prev = normalizeExamPolicy(state.policy);
-  const policy = normalizeExamPolicy({ ...prev, ...patch });
+  // Marks deadlines are set per exam (setExamMarksDueOn), never by the policy
+  // form: a policy draft loaded before a deadline was set must not erase it.
+  const policy = normalizeExamPolicy({ ...prev, ...patch, marksDueByTerm: prev.marksDueByTerm });
 
   const updatedExamIds: string[] = [];
   const terms = state.terms.map((t) => {
@@ -1595,6 +1619,30 @@ export function createExamTerm(input: {
 
   saveExams({ ...state, terms: [...state.terms, term] });
   return { ok: true, term };
+}
+
+/**
+ * Set (or clear, with "") the date an exam's marks must be entered by —
+ * the staff marks reminder's deadline (lib/staffReminders). Only this key of
+ * the policy changes.
+ */
+export function setExamMarksDueOn(
+  termId: string,
+  dueOn: string,
+): { ok: true } | { ok: false; error: string } {
+  const state = loadExams();
+  if (!state.terms.some((t) => t.id === termId)) return { ok: false, error: "Exam not found" };
+  const prev = normalizeExamPolicy(state.policy);
+  const next = { ...prev.marksDueByTerm };
+  const d = (dueOn || "").trim();
+  if (d) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return { ok: false, error: "Marks due date must be a date" };
+    next[termId] = d;
+  } else {
+    delete next[termId];
+  }
+  saveExams({ ...state, policy: { ...prev, marksDueByTerm: next } });
+  return { ok: true };
 }
 
 export function updateExamTerm(
