@@ -311,6 +311,10 @@ const PUBLIC_API_ROUTES: Record<string, string> = {
     "school chat member route (16 Oct 2026): staff AND parent sessions by design (resolveApiAuth 401); membership is decided per request in lib/schoolChat.server (chatActor: a family must name its own active child; accessConversation: groups from the roster / published timetable / Staff → Duties, DMs by participant) — 403 otherwise. No module grant fits a child's class group; moderation is the discipline.chat_moderate function",
   "v1/school-chat/send":
     "school chat member route (16 Oct 2026): staff AND parent sessions by design (resolveApiAuth 401); membership is decided per request in lib/schoolChat.server (chatActor: a family must name its own active child; accessConversation: groups from the roster / published timetable / Staff → Duties, DMs by participant) — 403 otherwise. No module grant fits a child's class group; moderation is the discipline.chat_moderate function",
+  "v1/school-chat/groups":
+    "school chat: make a group (29 Oct 2026): STAFF sessions only (403 for a family before anything is read); any member of staff may make a group of staff, as any may open a staff direct chat; a class section only by a teacher of it (staffForChild) or a chat moderator (discipline.chat_moderate) — lib/schoolChat.server createStaffGroup. Membership is the stored staff_ids + that section's roll, decided per request",
+  "v1/school-chat/unread":
+    "school chat: the caller's OWN unread count (29 Oct 2026): staff and parent sessions (resolveApiAuth 401); computed by listConversations for the caller only (chatActor: a family must name its own active child) — no request field can name another person",
   "data/views/notifications":
     "the caller's OWN notifications (20 Oct 2026): any signed-in staff member or family, gated in lib/notify/inbox.ts (resolveApiAuth 401; API keys 403); every query is filtered to the session's own push key — no request field can name another recipient. Who receives what is decided by roles at send time (lib/notify/audience.ts)",
   "v1/notifications":

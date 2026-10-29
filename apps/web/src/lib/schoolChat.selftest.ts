@@ -19,6 +19,7 @@ import {
   staffDmId,
   staffForChild,
   staffGroups,
+  staffMadeGroupId,
   subjectGroupId,
   type ChatBlock,
   type ChatRoster,
@@ -77,6 +78,12 @@ await t("ids round-trip; DMs are sorted; junk is refused", () => {
   assert.equal(staffDmId("b", "a"), "dms:a:b");
   assert.equal(parseConversationId("dms:b:a"), null, "an unsorted pair is not an id this server makes");
   assert.deepEqual(parseConversationId(parentDmId("ct5a", "stu1")), { kind: "dm_parent", staffId: "ct5a", studentId: "stu1" });
+  // A staff-made group (29 Oct 2026): one random part; anything else is refused.
+  assert.equal(staffMadeGroupId("a1b2c3"), "grp:a1b2c3");
+  assert.deepEqual(parseConversationId("grp:a1b2c3"), { kind: "group", groupId: "a1b2c3" });
+  assert.equal(parseConversationId("grp:a:b"), null, "a group id has one part");
+  assert.equal(parseConversationId("grp:"), null, "an empty group id is refused");
+  assert.throws(() => staffMadeGroupId("bad id"), /unusable id/);
   assert.equal(parseConversationId("dmx:stu1:stu2"), null, "there is no student-to-student kind");
   assert.equal(parseConversationId("cls:2026-27:c5"), null);
   assert.equal(parseConversationId("cls:2026-27:c5:s5a;drop"), null);

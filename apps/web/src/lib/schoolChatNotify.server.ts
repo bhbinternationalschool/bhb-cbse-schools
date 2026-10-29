@@ -41,7 +41,8 @@ export type SchoolChatEvent = {
   urgent: boolean;
   flagged: boolean;
   staffIds: string[];
-  group: GroupRef | null;
+  /** The section whose families are pushed (a class / subject group, or a staff-made group with a section). */
+  group: Pick<GroupRef, "classId" | "sectionId"> | null;
   ay: string;
   householdIds: string[];
   exceptHousehold: string;

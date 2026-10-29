@@ -491,6 +491,8 @@ test("writes go through the server: leave, complaint, chat — and survive a rel
   await expect(chat).toBeVisible();
   const chip = chat.locator(`button[data-child-id="${MINE.id}"]`);
   if (await chip.count()) await chip.click();
+  // School chat opens first (29 Oct 2026); the class-teacher thread has its own tab.
+  await chat.getByRole("tab", { name: "Class teacher (older chat)" }).click();
   await chat.getByLabel("Message").fill(CHAT);
   await chat.getByRole("button", { name: "Send" }).click();
   await expect(
@@ -503,6 +505,7 @@ test("writes go through the server: leave, complaint, chat — and survive a rel
     .getByTestId("parent-chat")
     .locator(`button[data-child-id="${MINE.id}"]`);
   if (await chip2.count()) await chip2.click();
+  await page.getByTestId("parent-chat").getByRole("tab", { name: "Class teacher (older chat)" }).click();
   await expect(
     page.getByTestId("parent-chat-messages").getByText(CHAT),
   ).toBeVisible({ timeout: 30_000 });
