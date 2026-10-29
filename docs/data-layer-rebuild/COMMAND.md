@@ -2127,6 +2127,15 @@ nothing; report runners answer `MASTERS_NOT_LOADED_MESSAGE` for `masters: null`.
 cases fail on the old lib (old answered `[]`, `null`, "0 rows", 30 rows from the default book).
 **Not done.** `loadSis()` in these files' other readers (3.4) and in the two writers; the date sheet's
 "Add day" on an EMPTY sheet opens an editor that never renders (pre-existing, seen while checking).
+*(2.3b-3 certificates and UDISE built 28 Oct 2026, PR #733.)* `certificates.ts` (save grant, number
+series, class label, the dues gate's screen figure), `udiseCompliance.ts`, `udiseStudentDetails.ts` and
+`studentLegacyAdmission.ts` take `masters` as data and refuse without it (`lib/data/requireData.ts`). The
+TC / no-dues gate's second opinion is computed from `CertificateDuesInput.book` — the screen's FULL book —
+and `bookIsFull` without a book refuses (never a quietly server-only gate). `load_masters_calls_src`
+341 → 323 on its own (318 − 18 = 300 once 2.3b-2 #732 is merged too). Proof:
+`certificatesUdiseMastersAsData.selftest.ts` — 13 of 14 cases fail on the old lib (old answered "—",
+"BNF-0001", ₹0 open dues, `[]`); `certificates-dues-gate.spec` 10 passed locally.
+**Not done.** `app/api/ai/student-certificate` still reads `loadMasters()` (server; item 6).
 
 ### Phase 3 — Students: removes S2 and most of S4
 
