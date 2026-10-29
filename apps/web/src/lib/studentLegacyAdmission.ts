@@ -10,7 +10,8 @@ import {
 } from "@/lib/numberSeries";
 import type { NumberSeries } from "@/lib/foundationMasters";
 import { normalizeSessionCode } from "@/lib/studentImport";
-import { loadMasters, type MastersState } from "@/lib/masters";
+import { type MastersState } from "@/lib/masters";
+import { requireMasters } from "@/lib/data/requireData";
 import {
   loadSis,
   normalizeStudent,
@@ -141,9 +142,9 @@ export function listPendingSystemAdmissions(
 
 export function verifyAndAssignSystemAdmission(
   studentId: string,
-  masters?: MastersState,
+  masters: MastersState,
 ): { ok: true; student: SisStudent; sis: SisState } | { ok: false; error: string } {
-  const m = masters ?? loadMasters();
+  const m = requireMasters(masters, "verifyAndAssignSystemAdmission");
   const sis = loadSis();
   const student = sis.students.find((s) => s.id === studentId);
   if (!student) return { ok: false, error: "Student not found" };
@@ -192,9 +193,9 @@ export function verifyAndAssignSystemAdmission(
 }
 
 export function verifyAllPendingSystemAdmissions(
-  masters?: MastersState,
+  masters: MastersState,
 ): { assigned: number; errors: string[] } {
-  const m = masters ?? loadMasters();
+  const m = requireMasters(masters, "verifyAllPendingSystemAdmissions");
   let sis = loadSis();
   let assigned = 0;
   const errors: string[] = [];

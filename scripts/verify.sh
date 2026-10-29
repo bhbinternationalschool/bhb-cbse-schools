@@ -100,6 +100,7 @@ SELFTESTS=(
   test:masters-merge
   test:accounts
   test:academics-masters-as-data
+  test:certificates-udise-masters-as-data
   test:playbook
   test:erp-chat
   test:wa-templates-automation

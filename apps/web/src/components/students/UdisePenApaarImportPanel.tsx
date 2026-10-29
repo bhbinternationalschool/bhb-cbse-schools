@@ -914,6 +914,7 @@ export function UdisePenApaarImportPanel({
       row: p.udise,
       studentType: migrateType,
       feeGroupId: migrateType === "RTE" ? migrateFeeGroupId || null : migrateFeeGroupId,
+      masters,
     });
     if (!r.ok) {
       setError(r.error);

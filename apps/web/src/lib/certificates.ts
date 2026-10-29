@@ -15,7 +15,8 @@ import {
   type FeesState,
 } from "@/lib/fees";
 import { checkHold, holdCodeForCertificate } from "@/lib/holds";
-import { DEFAULT_AY, loadMasters, type MastersState } from "@/lib/masters";
+import { DEFAULT_AY, type MastersState } from "@/lib/masters";
+import { requireMasters } from "@/lib/data/requireData";
 import {
   persistSeriesUse,
   suggestFromSeriesCode,
@@ -372,11 +373,15 @@ export function loadCertificates(): CertificatesState {
   }
 }
 
-export function saveCertificates(state: CertificatesState) {
+/**
+ * `masters` — the screen's book (useScreenMasters); the certificates grant is
+ * read from it (2.3b: data, not the tab's copy; none = refuse).
+ */
+export function saveCertificates(state: CertificatesState, mastersIn: MastersState) {
   if (!assertSessionWritable("saveCertificates")) return;
   const session = getSessionActor();
   if (session && typeof window !== "undefined") {
-    const masters = loadMasters();
+    const masters = requireMasters(mastersIn, "saveCertificates");
     const allowed =
       hasPermission(session, masters, "certificates", "edit") ||
       hasPermission(session, masters, "certificates", "create");
@@ -513,8 +518,9 @@ function allocateCertificateNumber(
   kind: CertificateKind,
   ay: string,
   state: CertificatesState,
+  mastersIn: MastersState,
 ): string {
-  const masters = loadMasters();
+  const masters = requireMasters(mastersIn, "allocateCertificateNumber");
   const code = seriesCodeForCertificateKind(kind);
   const existing = state.issues.map((i) => i.certNo);
   const suggested = suggestFromSeriesCode(
@@ -534,8 +540,9 @@ function allocateCertificateNumber(
 export function suggestNextCertificateNumber(
   kind: CertificateKind,
   ay: string,
+  mastersIn: MastersState,
 ): string {
-  const masters = loadMasters();
+  const masters = requireMasters(mastersIn, "suggestNextCertificateNumber");
   const state = loadCertificates();
   const code = seriesCodeForCertificateKind(kind);
   const suggested = suggestFromSeriesCode(
@@ -713,8 +720,8 @@ export function previewFeesPaidForStudent(
   });
 }
 
-export function classLabelForStudent(student: SisStudent): string {
-  const masters = loadMasters();
+export function classLabelForStudent(student: SisStudent, mastersIn: MastersState): string {
+  const masters = requireMasters(mastersIn, "classLabelForStudent");
   const c =
     masters.classes.find((x) => x.id === student.classId)?.name ?? "—";
   const sec =
@@ -749,9 +756,9 @@ export function openBalanceFrom(
   };
 }
 
-/** This tab's own figure, from its page copies (Masters, fees, transport). */
-export function studentOpenBalance(student: SisStudent): OpenBalance {
-  return openBalanceFrom(student, loadMasters(), loadFees());
+/** This screen's own figure: its Masters book (passed — 2.3b) and the fees page copy. */
+export function studentOpenBalance(student: SisStudent, masters: MastersState): OpenBalance {
+  return openBalanceFrom(student, requireMasters(masters, "studentOpenBalance"), loadFees());
 }
 
 /** GET /api/data/views/certificate-dues → data. */
@@ -786,6 +793,12 @@ export type CertificateDuesAnswer =
 export type CertificateDuesInput = {
   server: CertificateDuesAnswer;
   bookIsFull: boolean;
+  /**
+   * The screen's FULL book (2.3b: passed, not the tab's copy) — required when
+   * `bookIsFull`, for the second opinion. Missing then = refuse, never a
+   * quietly looser server-only gate.
+   */
+  book?: MastersState | null;
 };
 
 export const DUES_UNKNOWN_FOR_ROLE =
@@ -815,7 +828,7 @@ export type ResolvedCertificateDues =
 export function resolveCertificateDues(
   student: SisStudent,
   input: CertificateDuesInput,
-  localImpl: (s: SisStudent) => OpenBalance = studentOpenBalance,
+  localImpl?: (s: SisStudent) => OpenBalance,
 ): ResolvedCertificateDues {
   const server = input.server;
   if (server.state !== "known") return { known: false, state: server.state };
@@ -824,7 +837,9 @@ export function resolveCertificateDues(
     openDueCount: server.openDueCount,
   };
   if (!input.bookIsFull) return { known: true, screenDiffers: null, ...fromServer };
-  const local = localImpl(student);
+  const local = localImpl
+    ? localImpl(student)
+    : studentOpenBalance(student, requireMasters(input.book, "resolveCertificateDues"));
   const differs =
     local.openBalancePaise !== fromServer.openBalancePaise ||
     local.openDueCount !== fromServer.openDueCount;
@@ -943,6 +958,8 @@ function monthNameFromIso(iso: string): string {
 }
 
 export type IssueCertificateInput = {
+  /** The screen's book (useScreenMasters): class label, number series, the grant (2.3b). */
+  masters: MastersState;
   kind: CertificateKind;
   studentId: string;
   issuedBy: string;
@@ -1030,7 +1047,7 @@ export function issueCertificate(
 
   const state = loadCertificates();
   const ay = student.academicYearCode || DEFAULT_AY;
-  const classLabel = classLabelForStudent(student);
+  const classLabel = classLabelForStudent(student, input.masters);
   const issuedOn = input.issuedOn || todayIso();
   // Unknown dues (only possible for a certificate that does not state them —
   // the gate refused the others) are recorded as not cleared, never as ₹0.
@@ -1100,7 +1117,7 @@ export function issueCertificate(
   const issue = normalizeIssue({
     id: id("cert"),
     kind: input.kind,
-    certNo: allocateCertificateNumber(input.kind, ay, state),
+    certNo: allocateCertificateNumber(input.kind, ay, state, input.masters),
     studentId: student.id,
     householdId: student.householdId,
     academicYearCode: ay,
@@ -1137,11 +1154,11 @@ export function issueCertificate(
     feesPaid,
   });
 
-  saveCertificates({ version: 1, issues: [issue, ...state.issues] });
+  saveCertificates({ version: 1, issues: [issue, ...state.issues] }, input.masters);
   return { ok: true, issue };
 }
 
-export function voidCertificate(issueId: string): boolean {
+export function voidCertificate(issueId: string, masters: MastersState): boolean {
   const state = loadCertificates();
   const issue = state.issues.find((i) => i.id === issueId);
   if (!issue || issue.voidedAt) return false;
@@ -1152,7 +1169,7 @@ export function voidCertificate(issueId: string): boolean {
         ? { ...i, voidedAt: new Date().toISOString() }
         : i,
     ),
-  });
+  }, masters);
   return true;
 }
 
