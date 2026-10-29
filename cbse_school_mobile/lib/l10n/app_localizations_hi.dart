@@ -4036,4 +4036,16 @@ class LHi extends L {
   String markEntryRangeHint(String who, String max) {
     return '$who: 0–$max भरें, या अनुपस्थित के लिए खाली छोड़ें';
   }
+
+  @override
+  String get coScholasticAbsent => 'अनुपस्थित';
+
+  @override
+  String get coScholasticGradesNotLoaded =>
+      'सह-शैक्षिक ग्रेड लोड नहीं हो सके। अनुमान के बजाय कुछ नहीं दिखाया गया — शीट फिर से खोलें, या इन्हें परीक्षा डेस्क पर ग्रेड करें।';
+
+  @override
+  String coScholasticGradesSaved(String area, String count) {
+    return '$area के ग्रेड $count विद्यार्थियों के लिए सहेजे गए।';
+  }
 }
