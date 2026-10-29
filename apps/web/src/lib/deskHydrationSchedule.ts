@@ -31,8 +31,6 @@ export type DeskHydrateId =
   | "transport"
   | "waTemplates"
   | "automation"
-  | "erpChat"
-  | "staffChat"
   | "salarySetup"
   | "moduleStates";
 
@@ -80,7 +78,7 @@ const ROUTE_IDS: Record<string, DeskHydrateId[]> = {
   masters: ["salarySetup", "staffHr", "staff", "staffAttendance"],
   // The profile's fee card and fee tab bill transport too (15 Oct 2026).
   students: ["fees", "payments", "attendance", "transport"],
-  comms: ["waTemplates", "erpChat", "staffChat", "automation"],
+  comms: ["waTemplates", "automation"],
   payroll: ["staff", "staffHr", "staffAdvances", "salarySetup"],
   reports: ["fees", "payments", "attendance", "exams", "transport"],
   // Day close and fuel refills write the fee book and transport.
@@ -252,18 +250,6 @@ function allDeskHydrateTasks(): DeskHydrateTask[] {
         ),
     },
     {
-      id: "erpChat",
-      run: () =>
-        import("@/lib/erpChatPersistence").then((m) => m.ensureErpChatHydrated()),
-    },
-    {
-      id: "staffChat",
-      run: () =>
-        import("@/lib/staffChatPersistence").then((m) =>
-          m.ensureStaffChatHydrated(),
-        ),
-    },
-    {
       id: "salarySetup",
       run: () =>
         import("@/lib/salarySetupPersistence").then((m) =>
@@ -407,8 +393,6 @@ const DESK_HYDRATE_ID_BY_MODULE: Readonly<Record<string, DeskHydrateId>> = {
   transport: "transport",
   wa_templates: "waTemplates",
   automation: "automation",
-  erp_chat: "erpChat",
-  staff_chat: "staffChat",
   salary_setup: "salarySetup",
 };
 
