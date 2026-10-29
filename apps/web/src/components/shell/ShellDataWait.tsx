@@ -20,19 +20,21 @@ let pageCopies: Promise<void> | null = null;
  * page and the module gate waited for them; the access DECISIONS now come
  * from the views (useAccessData), but a save made before the copies landed
  * would be judged on built-in defaults. The roles and the module registry are
- * waited for until their read settles; the roster at most 5 s; a
+ * waited for until their read settles; the roster, and the comms desk the
+ * header's notices strip draws from, at most 5 s each; a
  * failure does not block (the views decide the module gate and the menu).
  */
 function loadPageCopies(): Promise<void> {
   if (pageCopies) return pageCopies;
   pageCopies = (async () => {
     try {
-      const [{ ensureRbacHydrated }, { ensureStaffHydrated }, { ensureModuleRegistryHydrated }, { withHydrationSlot }] =
+      const [{ ensureRbacHydrated }, { ensureStaffHydrated }, { ensureModuleRegistryHydrated }, { withHydrationSlot }, { staffNoticesLanded }] =
         await Promise.all([
           import("@/lib/rbacPersistence"),
           import("@/lib/staffPersistence"),
           import("@/lib/moduleRegistryPersistence"),
           import("@/lib/deskHydrateGuard"),
+          import("@/components/shell/CommsRunningStrip"),
         ]);
       const capped = (run: () => Promise<unknown>) =>
         Promise.race([
@@ -54,6 +56,12 @@ function loadPageCopies(): Promise<void> {
         // before the registry is in. Until 2.3a the access copy re-decided
         // on its hydrate event.
         hasDeskLoaded("module_registry") ? null : settled(() => ensureModuleRegistryHydrated()),
+        // The staff header's notices strip (29 Oct 2026): the same read the
+        // strip waits for, so the strip takes its final shape in the render
+        // that shows the screen. Landing later, it pushed the screen down
+        // ~41 px between a tap's press and release and the tap was lost
+        // (components/shell/CommsRunningStrip). At most 5 s, never blocking.
+        Promise.race([staffNoticesLanded(), new Promise((r) => setTimeout(r, PAGE_COPY_WAIT_MS))]),
       ]);
     } catch {
       /* best-effort: the views decide what is shown */
@@ -90,7 +98,9 @@ export function ShellDataWait({ children }: { children: React.ReactNode }) {
   const remote = isSupabaseConfigured();
   const masters = useMasters({ enabled: remote });
   const [copiesReady, setCopiesReady] = useState(
-    () => !remote || (hasDeskLoaded("rbac") && hasDeskLoaded("staff") && hasDeskLoaded("module_registry")),
+    () =>
+      !remote ||
+      (hasDeskLoaded("rbac") && hasDeskLoaded("staff") && hasDeskLoaded("module_registry") && hasDeskLoaded("school_comms")),
   );
   // The masters view failed: is the tab's copy filled anyway (the old
   // masters-desk hydrate)? Then the screens render and each says what it

@@ -57,6 +57,33 @@ function buildItems(audience: CommsStripAudience): StripItem[] {
   return [...noticeItems, ...newsItems];
 }
 
+/** One read of this tab's notices for the staff strip, shared with the shell's wait. */
+let staffNotices: Promise<void> | null = null;
+
+/**
+ * The comms desk for the staff header's strip, read once per tab. The
+ * shell's data wait (ShellDataWait) awaits this same promise before it shows
+ * a screen, so the strip takes its final shape — notices, or no bar at all —
+ * in the render that shows the screen (29 Oct 2026, see below). Never
+ * rejects: a failed read leaves the strip with nothing to show.
+ */
+export function staffNoticesLanded(): Promise<void> {
+  if (!staffNotices) {
+    staffNotices = (async () => {
+      try {
+        // Not through the hydration queue (withHydrationSlot): every screen
+        // now waits for this one small read, so it must not queue behind the
+        // route's background desks (on CI it landed ~1 s after the screen).
+        const { ensureSchoolCommsHydrated } = await import("@/lib/schoolCommsPersistence");
+        await ensureSchoolCommsHydrated();
+      } catch {
+        /* nothing to show */
+      }
+    })();
+  }
+  return staffNotices;
+}
+
 export function CommsRunningStrip({
   audience = "staff",
   compact = false,
@@ -81,17 +108,11 @@ export function CommsRunningStrip({
   useEffect(() => {
     if (given) return;
     let cancelled = false;
-    void (async () => {
-      const [{ ensureSchoolCommsHydrated }, { withHydrationSlot }] =
-        await Promise.all([
-          import("@/lib/schoolCommsPersistence"),
-          import("@/lib/deskHydrateGuard"),
-        ]);
-      await withHydrationSlot(() => ensureSchoolCommsHydrated());
+    void staffNoticesLanded().then(() => {
       if (cancelled) return;
       setReady(true);
       setTick((n) => n + 1);
-    })();
+    });
     function refresh() {
       setTick((n) => n + 1);
     }
@@ -114,15 +135,16 @@ export function CommsRunningStrip({
   // Until this tab's notices are read, the bar holds its place (data-layer
   // 2.3a follow-up, 29 Oct 2026). The strip sits in the sticky header ABOVE
   // every screen, and since the shell stopped waiting for the old core
-  // hydrate (2.3a) a screen is shown before the comms desk has landed —
-  // which waits its turn in the hydration queue behind the boot hydrates.
-  // Inserted late, the strip pushed the whole screen down ~40 px under the
-  // pointer: a tap pressed on a tab and released on the card above it (the
-  // tab moved between press and release) did nothing — on CI a step tab on
-  // Masters, the Subject rules tab, a picker; on a slow phone, a staff
-  // member's first tap. An empty bar of the same height is drawn instead, so
-  // the notices fill in without moving anything. A school with no notices
-  // still loses the bar once that is known (never while it is unknown).
+  // hydrate (2.3a) a screen could be shown before the comms desk landed.
+  // Inserted late, the strip pushed the whole screen down ~41 px under the
+  // pointer: a tap pressed on a tab and released on the card above it did
+  // nothing — on CI a Masters step tab, Timetable's Subject rules, Attendance's
+  // Month register; on a slow phone, a staff member's first tap. Now the
+  // shell waits for staffNoticesLanded() (at most 5 s) before it shows a
+  // screen, and while the notices are unknown an empty bar of the same height
+  // is drawn: notices arriving after a slow read fill it without moving
+  // anything. Only a school with NO notices whose read took over 5 s still
+  // loses the bar after the screen is up.
   if (!given && !ready) return <StripBar compact={compact} pending />;
   if (items.length === 0) return null;
 
