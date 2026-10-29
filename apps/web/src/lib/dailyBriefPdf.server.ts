@@ -399,6 +399,25 @@ export async function renderDailyBriefPdf(
     }
   }
 
+  /* ── Reminders nobody acted on (lib/staffReminders) ── */
+  const rem = brief.reminders;
+  if (rem && (rem.rows.length || rem.unknown.length)) {
+    heading("Reminders not acted on");
+    if (rem.rows.length) {
+      note("Reminded in the staff app today, and still pending at the time of this brief.");
+      for (const r of rem.rows) {
+        y += 2;
+        line(r.name, `${r.what.length} pending`, true);
+        note(r.what.join("; "));
+      }
+    }
+    if (rem.unknown.length) {
+      note(
+        `Could not be checked tonight: ${rem.unknown.join(", ")} — this is not the same as everyone having acted on their reminders.`,
+      );
+    }
+  }
+
   /* ── Tomorrow's calls ── */
   heading("Calling list — overdue fees");
   if (brief.defaulters.rows.length === 0) {

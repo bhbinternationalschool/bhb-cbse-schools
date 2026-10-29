@@ -380,6 +380,23 @@ create_job "bhb-cashfree-settlement-sweep" "30 7 * * *" \
   "${APP_URL}/api/payments/cashfree/settlements" \
   "Asia/Kolkata" "300s"
 
+# Staff work reminders (lib/staffReminders.ts, director 29 Oct 2026): each
+# member of staff is reminded in the app of their OWN pending work — punch-in
+# 08:15, class register 09:30, homework 15:00, exam marks 16:00, approvals
+# waiting 17:30 (times are the reminder settings, not this schedule).
+#
+# Every 15 minutes through the school day, Mon-Sat: a tick sends only the
+# rules whose configured time has come and whose window (90 min) has not
+# passed, and each person gets each reminder once a day (the notification's
+# dedupe key), so the 15-minute grain is just how close to the configured
+# time it lands. Nothing to find at 3 a.m., so no night ticks.
+#
+# On LITE: frequent, and everything the tick sends is awaited before it
+# replies — no after(), no debounced push.
+create_job "bhb-staff-reminders-tick" "*/15 7-19 * * 1-6" \
+  "${LITE_URL}/api/staff/reminders/tick" \
+  "Asia/Kolkata" "300s"
+
 echo ""
 echo "Done. Jobs in $REGION:"
 gcloud scheduler jobs list --location="$REGION" --format="table(name,schedule,state)"

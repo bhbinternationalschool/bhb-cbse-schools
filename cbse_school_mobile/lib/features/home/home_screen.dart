@@ -38,6 +38,7 @@ import "home_stats.dart";
 import "student_id_screen.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/push/notification_bell.dart";
+import "../../core/push/chat_button.dart";
 
 class _Module {
   const _Module(this.label, this.icon, this.tone);
@@ -430,8 +431,8 @@ class _HomeScreenState extends State<HomeScreen> {
   /// School chat for the picked child: its class group, its subject groups
   /// and direct chats with its teachers; the older class-teacher thread is
   /// the first row.
-  void _openSchoolChat(ParentChild child) {
-    Navigator.of(context).push(
+  Future<void> _openSchoolChat(ParentChild child) {
+    return Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SchoolChatScreen(
           api: widget.api,
@@ -547,9 +548,19 @@ class _HomeScreenState extends State<HomeScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
             _Header(
-              bell: NotificationBellButton(
-                api: widget.api,
-                onOpenRoute: _openRoute,
+              bell: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SchoolChatButton(
+                    api: widget.api,
+                    studentId: child.id,
+                    onOpen: () => _openSchoolChat(child),
+                  ),
+                  NotificationBellButton(
+                    api: widget.api,
+                    onOpenRoute: _openRoute,
+                  ),
+                ],
               ),
               child: child,
               siblings: summary.children,

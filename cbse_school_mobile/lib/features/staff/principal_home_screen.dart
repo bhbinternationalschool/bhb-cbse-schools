@@ -45,6 +45,7 @@ import "staff_activity_screen.dart";
 import "student_leave_queue_screen.dart";
 import "timetable_screen.dart";
 import "waiting_card.dart";
+import "pending_work_card.dart";
 import "../modules/chat_inbox_screen.dart";
 import "../modules/school_chat_screen.dart";
 import "principal_lists.dart";
@@ -53,6 +54,7 @@ import "self_attendance_screen.dart";
 import "students_screen.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/push/notification_bell.dart";
+import "../../core/push/chat_button.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -847,6 +849,10 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                       ],
                     ),
                   ),
+                  SchoolChatButton(
+                    api: widget.api,
+                    onOpen: () => _push(staffSchoolChat(widget.api)),
+                  ),
                   NotificationBellButton(
                     api: widget.api,
                     onOpenRoute: _openRoute,
@@ -881,6 +887,11 @@ class _PrincipalHomeScreenState extends State<PrincipalHomeScreen> {
                   WaitingCard(
                     api: widget.api,
                     onOpen: _openWaiting,
+                    refreshKey: _refresh,
+                  ),
+                  PendingWorkCard(
+                    api: widget.api,
+                    onOpen: _openRoute,
                     refreshKey: _refresh,
                   ),
                   const SizedBox(height: 8),

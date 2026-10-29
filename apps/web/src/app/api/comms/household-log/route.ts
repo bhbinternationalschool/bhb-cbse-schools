@@ -3,6 +3,7 @@ import { requireWaStaffApi } from "@/lib/apiRouteAuth.server";
 import { orCommsFunction } from "@/lib/commsFunctionGate.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getHouseholdMessageTimeline } from "@/lib/householdMessageLog.server";
+import { ChatLogReadError } from "@/lib/schoolChatLog.server";
 
 export const runtime = "nodejs";
 
@@ -33,8 +34,14 @@ export async function GET(req: Request) {
     );
   }
 
-  const { householdId, entries } = await getHouseholdMessageTimeline(
-    householdIdParam ? { householdId: householdIdParam } : { mobile },
-  );
-  return NextResponse.json({ ok: true, householdId, entries });
+  try {
+    const { householdId, entries } = await getHouseholdMessageTimeline(
+      householdIdParam ? { householdId: householdIdParam } : { mobile },
+    );
+    return NextResponse.json({ ok: true, householdId, entries });
+  } catch (e) {
+    // A failed read is a 503 the panel shows — never an empty history.
+    if (e instanceof ChatLogReadError) return NextResponse.json({ ok: false, error: e.message }, { status: 503 });
+    throw e;
+  }
 }

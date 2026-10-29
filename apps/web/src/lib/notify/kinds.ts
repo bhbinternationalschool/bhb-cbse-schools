@@ -61,6 +61,12 @@ export const NOTIFY_KINDS = {
   "fees.received": { topic: "fees", urgent: false, what: "A fee was received" },
   "fees.receipt": { topic: "fees", urgent: false, what: "Your fee receipt" },
   "notice.published": { topic: "notice", urgent: false, what: "A notice was published" },
+  // Personal work reminders (lib/staffReminders.ts, 29 Oct 2026) — once per person per day.
+  "staff_reminder.punch": { topic: "attendance", urgent: false, what: "Reminder: you have not punched in" },
+  "staff_reminder.register": { topic: "attendance", urgent: false, what: "Reminder: your class register is not taken" },
+  "staff_reminder.homework": { topic: "homework", urgent: false, what: "Reminder: homework not posted for today's classes" },
+  "staff_reminder.marks": { topic: "notice", urgent: false, what: "Reminder: exam marks to enter before the deadline" },
+  "staff_reminder.approvals": { topic: "approval", urgent: false, what: "Reminder: things waiting for your decision" },
 } as const satisfies Record<string, NotifyKindDef>;
 
 export type NotifyKind = keyof typeof NOTIFY_KINDS;

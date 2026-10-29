@@ -2,6 +2,7 @@
 
 import { PropelProgressPanel } from "@/components/staff/PropelProgressPanel";
 import { CoordinatorsPanel } from "@/components/staff/CoordinatorsPanel";
+import { StaffRemindersPanel } from "@/components/staff/StaffRemindersPanel";
 import { ProfileChangeRequestsCard } from "@/components/staff/ProfileChangeRequestsCard";
 import { useAccessData } from "@/components/shell/useAccessData";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -525,10 +526,17 @@ export function StaffWorkspace() {
       />
 
       {tab === "dashboard" ? (
-        <ModuleDashboardHost
-          moduleId="staff"
-          onNavigateTab={(t) => setTab(t as StaffMainTab)}
-        />
+        <>
+          <ModuleDashboardHost
+            moduleId="staff"
+            onNavigateTab={(t) => setTab(t as StaffMainTab)}
+          />
+          {state ? (
+            <div className="mt-4">
+              <StaffRemindersPanel canEdit={hasPermission(session, state, "staff", "edit")} />
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       {tab === "allocate" ? (
