@@ -75,6 +75,10 @@ jobs:
         working-directory: apps/web
         run: npm run test:school-chat-work
 
+      - name: Test — school chat in the staff and household message logs
+        working-directory: apps/web
+        run: npm run test:school-chat-log
+
       - name: Test — session cookie cannot be forged
         working-directory: apps/web
         run: npm run test:session-cookie

@@ -41,6 +41,7 @@ import "waiting_card.dart";
 import "pending_work_card.dart";
 import "../../core/i18n/locale_controller.dart";
 import "../../core/push/notification_bell.dart";
+import "../../core/push/chat_button.dart";
 
 String _greeting() {
   final h = DateTime.now().hour;
@@ -588,6 +589,12 @@ class _DeskHomeScreenState extends State<DeskHomeScreen> {
                         ),
                       ],
                     ),
+                  ),
+                  // Every office login, whatever its tiles: what each person
+                  // may message is the server's school-chat rules.
+                  SchoolChatButton(
+                    api: widget.api,
+                    onOpen: () => _push(staffSchoolChat(widget.api)),
                   ),
                   NotificationBellButton(
                     api: widget.api,

@@ -65,7 +65,7 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|chat-one|chat-homework|masters-overlay|masters-element-writes|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens|staff-locked-validation|staff-editor-writes|staff-followups|fee-writes|masters-push-gone|subject-request-approval)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|chat-one|chat-logs|chat-homework|masters-overlay|masters-element-writes|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens|staff-locked-validation|staff-editor-writes|staff-followups|fee-writes|masters-push-gone|subject-request-approval)\.spec\.ts/,
       use: { ...desktop },
     },
     {
@@ -104,7 +104,7 @@ export default defineConfig<GateOptions>({
       // Writes chat messages, a mute and a block (lifted again), so it runs
       // after everything that reads the stack (16 Oct 2026, school chat).
       name: "chat-writes",
-      testMatch: /(school-chat|chat-one|chat-homework)\.spec\.ts/,
+      testMatch: /(school-chat|chat-one|chat-logs|chat-homework)\.spec\.ts/,
       dependencies: ["desktop", "phone-375-cpu4x"],
       use: { ...desktop },
     },

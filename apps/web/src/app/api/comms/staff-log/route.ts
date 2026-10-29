@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireStaffPermission } from "@/lib/apiRouteAuth.server";
 import { ensureSchoolMirrorHydrated } from "@/lib/schoolDataMirror.server";
 import { getStaffMessageTimeline } from "@/lib/staffMessageLog.server";
+import { ChatLogReadError } from "@/lib/schoolChatLog.server";
 
 export const runtime = "nodejs";
 
@@ -25,6 +26,12 @@ export async function GET(req: Request) {
     ? Math.min(limitRaw, 500)
     : undefined;
 
-  const { entries } = await getStaffMessageTimeline({ staffId, mobile, limit });
-  return NextResponse.json({ ok: true, entries });
+  try {
+    const { entries } = await getStaffMessageTimeline({ staffId, mobile, limit });
+    return NextResponse.json({ ok: true, entries });
+  } catch (e) {
+    // A failed read is a 503 the panel shows — never an empty timeline.
+    if (e instanceof ChatLogReadError) return NextResponse.json({ ok: false, error: e.message }, { status: 503 });
+    throw e;
+  }
 }
