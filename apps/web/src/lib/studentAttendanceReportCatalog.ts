@@ -9,9 +9,9 @@ import {
   type AttendanceStatus,
 } from "@/lib/attendance";
 import {
-  loadMasters,
   type MastersState,
 } from "@/lib/masters";
+import { MASTERS_NOT_LOADED_MESSAGE } from "@/lib/data/requireData";
 import {
   exportFilterReport,
   describeFilters,
@@ -188,7 +188,10 @@ function buildReport(
   id: StudentAttReportId,
   f: StudentAttReportFilters,
 ): { ok: true; built: Built } | { ok: false; error: string } {
-  const masters = f.masters ?? loadMasters();
+  // The Masters book as data (data-layer 2.3b): never the tab's page copy;
+  // handed nothing, the report refuses rather than run on an empty book.
+  const masters = f.masters;
+  if (!masters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
   const sis = f.sis ?? loadSis();
   const attendance = f.attendance ?? loadAttendance();
   const students = filterStudents(sis, f);
@@ -747,7 +750,10 @@ export function runStudentAttReport(
   if (!result.ok) return result;
 
   const format = filters.format ?? "preview";
-  const masters = filters.masters ?? loadMasters();
+  // The Masters book as data (data-layer 2.3b): never the tab's page copy;
+  // handed nothing, the report refuses rather than run on an empty book.
+  const masters = filters.masters;
+  if (!masters) return { ok: false, error: MASTERS_NOT_LOADED_MESSAGE };
   const filterNote = describeFilters([
     filters.date ? `Date ${filters.date}` : "",
     filters.fromDate ? `From ${filters.fromDate}` : "",
