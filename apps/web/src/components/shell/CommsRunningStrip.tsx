@@ -111,7 +111,20 @@ export function CommsRunningStrip({
   );
   const items = given ?? built;
 
-  if ((!given && !ready) || items.length === 0) return null;
+  // Until this tab's notices are read, the bar holds its place (data-layer
+  // 2.3a follow-up, 29 Oct 2026). The strip sits in the sticky header ABOVE
+  // every screen, and since the shell stopped waiting for the old core
+  // hydrate (2.3a) a screen is shown before the comms desk has landed —
+  // which waits its turn in the hydration queue behind the boot hydrates.
+  // Inserted late, the strip pushed the whole screen down ~40 px under the
+  // pointer: a tap pressed on a tab and released on the card above it (the
+  // tab moved between press and release) did nothing — on CI a step tab on
+  // Masters, the Subject rules tab, a picker; on a slow phone, a staff
+  // member's first tap. An empty bar of the same height is drawn instead, so
+  // the notices fill in without moving anything. A school with no notices
+  // still loses the bar once that is known (never while it is unknown).
+  if (!given && !ready) return <StripBar compact={compact} pending />;
+  if (items.length === 0) return null;
 
   // Duplicate for seamless loop
   const loop = items.length === 1 ? [...items, ...items, ...items] : [...items, ...items];
@@ -133,31 +146,7 @@ export function CommsRunningStrip({
   }
 
   return (
-    <div
-      className={`comms-strip relative overflow-hidden border-b border-[rgba(197,160,40,0.35)] ${
-        compact ? "py-1.5" : "py-2"
-      }`}
-      role="region"
-      aria-label="School announcements"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-    >
-      <div className="comms-strip-sheen pointer-events-none absolute inset-0" aria-hidden />
-      <div className="relative flex items-center gap-2">
-        <div
-          className={`comms-strip-badge z-10 flex shrink-0 items-center gap-1.5 pl-3 sm:pl-4 ${
-            compact ? "text-[10px]" : "text-[11px]"
-          }`}
-        >
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgba(197,160,40,0.25)] text-[var(--brand-gold-soft)] shadow-[inset_0_0_0_1px_rgba(197,160,40,0.35)]">
-            <Megaphone className="h-3.5 w-3.5" strokeWidth={2.4} />
-          </span>
-          <span className="hidden font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-soft)] sm:inline">
-            Live
-          </span>
-        </div>
-
-        <div className="comms-strip-mask min-w-0 flex-1 overflow-hidden">
+    <StripBar compact={compact} onPause={setPaused}>
           <div
             className={`comms-strip-track ${paused ? "is-paused" : ""}`}
             style={{ animationDuration: `${durationSec}s` }}
@@ -212,6 +201,61 @@ export function CommsRunningStrip({
               );
             })}
           </div>
+    </StripBar>
+  );
+}
+
+/**
+ * The strip's bar: the badge and the track's mask. `pending` draws it empty
+ * (hidden from assistive tech: there is nothing to announce yet) at exactly
+ * the height it has with notices in it — the same paddings, badge and line.
+ */
+function StripBar({
+  compact,
+  pending = false,
+  onPause,
+  children,
+}: {
+  compact: boolean;
+  pending?: boolean;
+  onPause?: (paused: boolean) => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div
+      className={`comms-strip relative overflow-hidden border-b border-[rgba(197,160,40,0.35)] ${
+        compact ? "py-1.5" : "py-2"
+      }`}
+      {...(pending
+        ? { "aria-hidden": true, "data-testid": "comms-strip-pending" }
+        : { role: "region", "aria-label": "School announcements" })}
+      onMouseEnter={onPause ? () => onPause(true) : undefined}
+      onMouseLeave={onPause ? () => onPause(false) : undefined}
+    >
+      <div className="comms-strip-sheen pointer-events-none absolute inset-0" aria-hidden />
+      <div className="relative flex items-center gap-2">
+        <div
+          className={`comms-strip-badge z-10 flex shrink-0 items-center gap-1.5 pl-3 sm:pl-4 ${
+            compact ? "text-[10px]" : "text-[11px]"
+          }`}
+        >
+          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[rgba(197,160,40,0.25)] text-[var(--brand-gold-soft)] shadow-[inset_0_0_0_1px_rgba(197,160,40,0.35)]">
+            <Megaphone className="h-3.5 w-3.5" strokeWidth={2.4} />
+          </span>
+          <span className="hidden font-bold uppercase tracking-[0.14em] text-[var(--brand-gold-soft)] sm:inline">
+            Live
+          </span>
+        </div>
+
+        <div className="comms-strip-mask min-w-0 flex-1 overflow-hidden">
+          {children ?? (
+            // One line of the track's text height, nothing in it.
+            <div className={`comms-strip-track ${compact ? "text-[12px]" : "text-[13px]"}`}>
+              <span className="comms-strip-item inline-flex items-center gap-2 whitespace-nowrap px-4">
+                <span className="rounded px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide opacity-0">&nbsp;</span>
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>
