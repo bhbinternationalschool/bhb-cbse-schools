@@ -1,6 +1,20 @@
 /**
  * RBAC + closed-session guards for lib mutation helpers.
- * Uses runtime require for loadMasters to avoid masters ↔ rbacGuard cycles.
+ *
+ * Data-layer 2.3b: the checks decide with the SAME roles and roster the
+ * sidebar and the module gate use — this tab's rbac and staff-list view
+ * answers in the shared React Query cache (lib/data/client/tabCache) — not
+ * the page copies (loadMasters().staff + loadRbac()), which before they
+ * landed were an empty roster and the built-in roles: someone who held the
+ * grant was told "You do not have permission" (R6: unknown became "no").
+ *
+ * When those answers are not there yet (or the read failed) a check REFUSES
+ * with reason "not_loaded" — the shell says the permissions could not be
+ * checked and to try again — and asks the two reads again. It never says
+ * "no permission" for that.
+ *
+ * Without a database (offline dev build) and outside the staff shell (no
+ * query provider: the parent page) the page copies are read as before.
  */
 
 import { assertSessionWritable } from "@/lib/sessionWriteGuard";
@@ -11,9 +25,12 @@ import {
   hasPermission,
   type RbacAction,
   type RbacModule,
+  type RbacState,
 } from "@/lib/rbac";
 import type { MastersState } from "@/lib/masters";
 import { featuresForModule } from "@/lib/rbacFeatures";
+import { isSupabaseConfigured } from "@/lib/supabase/client";
+import { retryTabAccess, tabAccessCopy } from "@/lib/data/client/tabCache";
 
 function loadMastersSafe(): MastersState | null {
   if (typeof window === "undefined") return null;
@@ -26,19 +43,51 @@ function loadMastersSafe(): MastersState | null {
   }
 }
 
+/** What a check decides with, or that it cannot decide yet. */
+export type CheckAccess =
+  | { known: true; masters: MastersState | null; rbac: RbacState | undefined }
+  | { known: false; status: "loading" | "failed" };
+
+/**
+ * The roster + roles for a check made now. Exported for its self-test.
+ * `rbac: undefined` = the legacy page-copy read (hasPermission → loadRbac).
+ */
+export function checkAccess(): CheckAccess {
+  if (typeof window === "undefined") return { known: true, masters: null, rbac: undefined };
+  if (isSupabaseConfigured()) {
+    const t = tabAccessCopy();
+    if (t.status === "ready") return { known: true, masters: t.masters, rbac: t.rbac };
+    if (t.status === "loading" || t.status === "failed") return { known: false, status: t.status };
+  }
+  return { known: true, masters: loadMastersSafe(), rbac: undefined };
+}
+
+/** "Your permissions have not loaded" — never "you do not have permission". */
+function refuseNotLoaded(module: RbacModule, action: RbacAction, label: string, status: "loading" | "failed"): false {
+  retryTabAccess();
+  window.dispatchEvent(
+    new CustomEvent("bhb-rbac-denied", {
+      detail: { module, action, label, reason: "not_loaded", status },
+    }),
+  );
+  return false;
+}
+
 /**
  * True when the actor holds a write on some FUNCTION of the module (e.g. a
  * teacher's Masters → Class subjects) without the module itself. The
  * server decides which rows of the save stand (lib/deskFeatureAuth.ts).
+ * Not known yet → false (claims nothing).
  */
 export function holdsModuleFeatureWrite(module: RbacModule): boolean {
   if (typeof window === "undefined") return false;
   const session = getSessionActor();
   if (!session) return false;
-  const masters = loadMastersSafe();
+  const a = checkAccess();
+  if (!a.known) return false;
   const writes: RbacAction[] = ["create", "edit", "delete"];
   return featuresForModule(module).some((f) =>
-    writes.some((a) => featureAccess(session, masters, f.id, a).allowed),
+    writes.some((w) => featureAccess(session, a.masters, f.id, w, a.rbac).allowed),
   );
 }
 
@@ -51,12 +100,24 @@ export function isFunctionOnlyWriter(module: RbacModule): boolean {
   if (typeof window === "undefined") return false;
   const session = getSessionActor();
   if (!session) return false;
-  if (hasPermission(session, loadMastersSafe(), module, "edit")) return false;
+  const a = checkAccess();
+  if (!a.known) return false;
+  if (hasPermission(session, a.masters, module, "edit", a.rbac)) return false;
   return holdsModuleFeatureWrite(module);
 }
 
+function denied(module: RbacModule, action: RbacAction, label: string): false {
+  window.dispatchEvent(
+    new CustomEvent("bhb-rbac-denied", {
+      detail: { module, action, label },
+    }),
+  );
+  return false;
+}
+
 /**
- * Returns false when closed-year locked or actor lacks permission.
+ * Returns false when closed-year locked or actor lacks permission — or when
+ * the permissions have not loaded (reason "not_loaded", never "denied").
  * When no actor is registered (SSR / public forms), permission is skipped
  * but closed-year lock still applies.
  */
@@ -69,8 +130,9 @@ export function assertModulePermission(
   const session = getSessionActor();
   if (!session) return true;
   if (typeof window === "undefined") return true;
-  const masters = loadMastersSafe();
-  if (!hasPermission(session, masters, module, action)) {
+  const a = checkAccess();
+  if (!a.known) return refuseNotLoaded(module, action, label, a.status);
+  if (!hasPermission(session, a.masters, module, action, a.rbac)) {
     // A function holder's save goes to the server, which keeps only the
     // rows their functions own and refuses the rest with a reason.
     if (
@@ -79,14 +141,7 @@ export function assertModulePermission(
     ) {
       return true;
     }
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(
-        new CustomEvent("bhb-rbac-denied", {
-          detail: { module, action, label },
-        }),
-      );
-    }
-    return false;
+    return denied(module, action, label);
   }
   return true;
 }
@@ -118,17 +173,9 @@ export function assertSelfOrModulePermission(
     return true;
   }
   if (typeof window === "undefined") return true;
-  const masters = loadMastersSafe();
-  if (!hasPermission(session, masters, module, action)) {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(
-        new CustomEvent("bhb-rbac-denied", {
-          detail: { module, action, label },
-        }),
-      );
-    }
-    return false;
-  }
+  const a = checkAccess();
+  if (!a.known) return refuseNotLoaded(module, action, label, a.status);
+  if (!hasPermission(session, a.masters, module, action, a.rbac)) return denied(module, action, label);
   return true;
 }
 
@@ -143,31 +190,19 @@ export function actorMayExport(module: RbacModule, label = "export"): boolean {
   const session = getSessionActor();
   if (!session) return true;
   if (typeof window === "undefined") return true;
-  const masters = loadMastersSafe();
-  if (hasPermission(session, masters, module, "export")) return true;
-  window.dispatchEvent(
-    new CustomEvent("bhb-rbac-denied", {
-      detail: { module, action: "export", label },
-    }),
-  );
-  return false;
+  const a = checkAccess();
+  if (!a.known) return refuseNotLoaded(module, "export", label, a.status);
+  if (hasPermission(session, a.masters, module, "export", a.rbac)) return true;
+  return denied(module, "export", label);
 }
 
 export function assertCanConfigureRbac(label = "saveRbac"): boolean {
   if (!assertSessionWritable(label)) return false;
   const session = getSessionActor();
   if (!session) return true;
-  const masters = loadMastersSafe();
-  if (!canConfigureRbac(session, masters)) {
-    if (typeof window !== "undefined") {
-      window.dispatchEvent(
-        new CustomEvent("bhb-rbac-denied", {
-          detail: { module: "settings", action: "edit", label },
-        }),
-      );
-    }
-    return false;
-  }
+  const a = checkAccess();
+  if (!a.known) return refuseNotLoaded("settings", "edit", label, a.status);
+  if (!canConfigureRbac(session, a.masters, a.rbac)) return denied("settings", "edit", label);
   return true;
 }
 
@@ -180,19 +215,13 @@ export function assertStaffAdvancesPermission(
   const session = getSessionActor();
   if (!session) return true;
   if (typeof window === "undefined") return true;
-  const masters = loadMastersSafe();
+  const a = checkAccess();
+  if (!a.known) return refuseNotLoaded("staff_advances", action, label, a.status);
   if (
-    hasPermission(session, masters, "staff_advances", action) ||
-    hasPermission(session, masters, "payroll", "edit")
+    hasPermission(session, a.masters, "staff_advances", action, a.rbac) ||
+    hasPermission(session, a.masters, "payroll", "edit", a.rbac)
   ) {
     return true;
   }
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(
-      new CustomEvent("bhb-rbac-denied", {
-        detail: { module: "staff_advances", action, label },
-      }),
-    );
-  }
-  return false;
+  return denied("staff_advances", action, label);
 }

@@ -11,7 +11,6 @@ import {
 } from "@/lib/mobileFeatures";
 import type { StaffRecord } from "@/lib/foundationMasters";
 import { canAccessModuleHref } from "@/lib/moduleRegistry";
-import { getSessionActor } from "@/lib/sessionActor";
 import { assertSessionWritable } from "@/lib/sessionWriteGuard";
 import { isProtectedSuperAdminEmail } from "@/lib/superAdmin";
 import { writeCacheOrInvalidate, readCache } from "@/lib/browserStorage";
@@ -1309,20 +1308,16 @@ export function loadRbac(): RbacState {
 }
 
 export function saveRbac(state: RbacState): void {
-  if (!assertSessionWritable("saveRbac")) return;
-  const actor = getSessionActor();
-  if (actor && typeof window !== "undefined") {
-    // Lazy load to avoid masters ↔ rbac cycles at module init
+  if (typeof window !== "undefined") {
+    // The same check every lib save makes (lib/rbacGuard, data-layer 2.3b):
+    // decided on this tab's rbac + staff-list answers; not loaded yet is a
+    // refusal that says so, never "no permission". Lazy: rbacGuard imports
+    // this module.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { loadMasters } = require("@/lib/masters") as typeof import("@/lib/masters");
-    if (!canConfigureRbac(actor, loadMasters())) {
-      window.dispatchEvent(
-        new CustomEvent("bhb-rbac-denied", {
-          detail: { module: "settings", action: "edit", label: "saveRbac" },
-        }),
-      );
-      return;
-    }
+    const { assertCanConfigureRbac } = require("@/lib/rbacGuard") as typeof import("@/lib/rbacGuard");
+    if (!assertCanConfigureRbac("saveRbac")) return;
+  } else if (!assertSessionWritable("saveRbac")) {
+    return;
   }
   if (typeof window === "undefined") return;
   writeCacheOrInvalidate(
