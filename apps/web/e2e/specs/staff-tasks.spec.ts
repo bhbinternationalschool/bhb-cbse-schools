@@ -84,7 +84,11 @@ test("staff tasks: assign, own-only visibility, evidence upload/download privacy
       await expect(assignSub).toBeVisible({ timeout: 15_000 });
       await assignSub.click();
       await expect(principal.page.getByText("Assign a new task")).toBeVisible({ timeout: 15_000 });
-      await principal.page.locator("select").first().selectOption(ASSIGNEE);
+      // Scope to the assign panel: the page header has its own dropdown.
+      const newTaskPanel = principal.page
+        .getByRole("heading", { name: "Assign a new task", exact: true })
+        .locator("..");
+      await newTaskPanel.locator("select").selectOption(ASSIGNEE);
       await principal.page.getByLabel("Task", { exact: true }).fill(TITLE);
       // "Completion evidence required" stays ticked — that is the rule under test.
       await principal.page.getByRole("button", { name: "Assign task", exact: true }).click();
