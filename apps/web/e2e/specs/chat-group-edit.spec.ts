@@ -292,12 +292,17 @@ test.describe.serial("chat-group-edit: rename, members, section, leave", () => {
     );
     expect(notes.some((n) => n.endsWith(`renamed the group to "Annual day (office) ${tag}"`))).toBe(true);
     // History lines are nobody's message: they do not count as unread.
-    const list = (await p28.get("/api/v1/school-chat/conversations")).body.data.conversations as unknown as { id: string; unread: number }[];
-    await msgs(p28, groupId);
-    expect(list.find((c) => c.id === groupId)).toBeTruthy();
+    await msgs(p28, groupId); // read up to now
+    const pm = (await msgs(principal, groupId)).body.data.conversation.manage!;
+    expect((await change(principal, groupId, pm.rev, { op: "rename", title: `Annual day (final) ${tag}` })).status).toBe(200);
+    const list = (await p28.get("/api/v1/school-chat/conversations")).body.data.conversations as unknown as { id: string; unread: number; lastMessage: string | null }[];
+    const row = list.find((c) => c.id === groupId)!;
+    expect(row.lastMessage, "the list shows the history line").toContain(`renamed the group to "Annual day (final) ${tag}"`);
+    expect(row.unread, "a history line is not unread").toBe(0);
   });
 
   test("7. seen: the group menu, Members with Add, Edit name", async ({ browser }, testInfo) => {
+    test.setTimeout(300_000);
     const ct = fx.sessions.teacher;
     for (const v of [
       { name: "desktop-light", viewport: { width: 1280, height: 800 }, colorScheme: "light" as const, isMobile: false },

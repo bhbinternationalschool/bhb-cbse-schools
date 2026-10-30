@@ -66,7 +66,7 @@ export function StaffChecklist({
 /** The ⋮ menu in the group's header: only the items this person may use. */
 export function GroupMenu({ manage, onPick, onLeave }: { manage: GroupManage; onPick: (p: GroupPane) => void; onLeave: () => void }) {
   const [open, setOpen] = useState(false);
-  const item = "block w-full px-3 py-2 text-left text-sm text-[var(--ink)] hover:bg-[var(--muted-surface)]";
+  const item = "block w-full px-3 py-2 text-left text-sm hover:bg-[var(--muted-surface)]";
   const pick = (p: GroupPane) => {
     setOpen(false);
     onPick(p);
@@ -79,15 +79,15 @@ export function GroupMenu({ manage, onPick, onLeave }: { manage: GroupManage; on
       {open ? (
         <div role="menu" className="absolute right-0 z-20 mt-1 w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--panel)] shadow-lg">
           {manage.canManage ? (
-            <button type="button" role="menuitem" className={item} onClick={() => pick("name")}>
+            <button type="button" role="menuitem" className={`${item} text-[var(--ink)]`} onClick={() => pick("name")}>
               Edit name
             </button>
           ) : null}
-          <button type="button" role="menuitem" className={item} onClick={() => pick("members")}>
+          <button type="button" role="menuitem" className={`${item} text-[var(--ink)]`} onClick={() => pick("members")}>
             Members ({manage.members.length})
           </button>
           {manage.canManage ? (
-            <button type="button" role="menuitem" className={item} onClick={() => pick("section")}>
+            <button type="button" role="menuitem" className={`${item} text-[var(--ink)]`} onClick={() => pick("section")}>
               Class section
             </button>
           ) : null}
@@ -217,7 +217,7 @@ export function GroupSettings({
                   {manage.canManage && m.id !== me ? (
                     <button
                       type="button"
-                      className={`${btn} shrink-0 px-2 py-1 text-xs text-[var(--danger)]`}
+                      className="shrink-0 rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-semibold text-[var(--danger)] hover:bg-[var(--muted-surface)] disabled:opacity-50"
                       disabled={busy || manage.members.length <= 2}
                       title={manage.members.length <= 2 ? "A group needs at least two staff" : undefined}
                       aria-label={`Remove ${m.name}`}
