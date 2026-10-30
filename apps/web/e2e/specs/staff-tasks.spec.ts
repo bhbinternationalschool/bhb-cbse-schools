@@ -45,12 +45,22 @@ test("staff tasks: assign, own-only visibility, evidence upload/download privacy
   try {
     await test.step("the Principal assigns through the real panel", async () => {
       await principal.page.goto("/staff");
-      await principal.page.getByRole("button", { name: "Tasks", exact: true }).click();
+      // ModuleTabs renders role="tab", and there is no action timeout in the
+      // gate's config — expect before every action so a wrong locator fails
+      // fast and named, instead of hanging to the test timeout.
+      const tasksTab = principal.page.getByRole("tab", { name: "Tasks", exact: true });
+      await expect(tasksTab).toBeVisible({ timeout: 15_000 });
+      await tasksTab.click();
+      // The assign form sits behind the manager's "Assign" sub-tab.
+      const assignSub = principal.page.getByRole("button", { name: "Assign", exact: true });
+      await expect(assignSub).toBeVisible({ timeout: 15_000 });
+      await assignSub.click();
       await expect(principal.page.getByText("Assign a new task")).toBeVisible({ timeout: 15_000 });
       await principal.page.locator("select").first().selectOption(ASSIGNEE);
-      await principal.page.getByLabel(/Task/).fill(TITLE);
+      await principal.page.getByLabel("Task", { exact: true }).fill(TITLE);
       // "Completion evidence required" stays ticked — that is the rule under test.
-      await principal.page.getByRole("button", { name: "Assign task" }).click();
+      await principal.page.getByRole("button", { name: "Assign task", exact: true }).click();
+      // A successful assign returns to the board, which lists the new task.
       await expect(principal.page.getByText(TITLE)).toBeVisible({ timeout: 15_000 });
       const view = (await (await principal.page.request.get("/api/staff/tasks")).json()) as {
         tasks: { id: string; title: string; updatedAt: string }[];
@@ -63,7 +73,9 @@ test("staff tasks: assign, own-only visibility, evidence upload/download privacy
     await test.step("the task is the assignee's alone", async () => {
       // The assignee sees it in My tasks.
       await teacher.page.goto("/staff");
-      await teacher.page.getByRole("button", { name: "Tasks", exact: true }).click();
+      const teacherTab = teacher.page.getByRole("tab", { name: "Tasks", exact: true });
+      await expect(teacherTab).toBeVisible({ timeout: 15_000 });
+      await teacherTab.click();
       await expect(teacher.page.getByText(TITLE)).toBeVisible({ timeout: 15_000 });
 
       // Another member of staff: list hides it, direct read refuses it.
@@ -74,7 +86,9 @@ test("staff tasks: assign, own-only visibility, evidence upload/download privacy
       const direct = await other.page.request.get(`/api/staff/tasks/${taskId}`);
       expect(direct.status()).toBe(403);
       await other.page.goto("/staff");
-      await other.page.getByRole("button", { name: "Tasks", exact: true }).click();
+      const otherTab = other.page.getByRole("tab", { name: "Tasks", exact: true });
+      await expect(otherTab).toBeVisible({ timeout: 15_000 });
+      await otherTab.click();
       await expect(other.page.getByText("My tasks")).toBeVisible({ timeout: 15_000 });
       await expect(other.page.getByText(TITLE)).toHaveCount(0);
 
@@ -84,14 +98,16 @@ test("staff tasks: assign, own-only visibility, evidence upload/download privacy
       });
       expect(refused.status()).toBe(403);
       await officePage.goto("/staff");
-      await officePage.getByRole("button", { name: "Tasks", exact: true }).click();
+      const officeTab = officePage.getByRole("tab", { name: "Tasks", exact: true });
+      await expect(officeTab).toBeVisible({ timeout: 15_000 });
+      await officeTab.click();
       await expect(officePage.getByText("My tasks")).toBeVisible({ timeout: 15_000 });
       await expect(officePage.getByText("Assign a new task")).toHaveCount(0);
     });
 
     await test.step("evidence is required before review", async () => {
       await teacher.page.getByText(TITLE).click();
-      await teacher.page.getByRole("button", { name: "Done — send for review" }).click();
+      await teacher.page.getByRole("button", { name: "Done — send for review", exact: true }).click();
       await expect(
         teacher.page.getByText("This task needs a photo, file or link as evidence before it can be sent for review."),
       ).toBeVisible();
@@ -104,15 +120,23 @@ test("staff tasks: assign, own-only visibility, evidence upload/download privacy
         buffer: PHOTO,
       });
       await expect(teacher.page.getByText("photo.jpg")).toBeVisible({ timeout: 15_000 });
-      await teacher.page.getByRole("button", { name: "Done — send for review" }).click();
+      await teacher.page.getByRole("button", { name: "Done — send for review", exact: true }).click();
 
-      const one = await teacher.page.request.get(`/api/staff/tasks/${taskId}`);
-      expect(one.status()).toBe(200);
-      const body = (await one.json()) as {
+      let body!: {
         task: { status: string; updatedAt: string };
         updates: { attachments: { kind: string; name: string; path: string }[] }[];
       };
-      expect(body.task.status).toBe("submitted");
+      await expect
+        .poll(
+          async () => {
+            const one = await teacher.page.request.get(`/api/staff/tasks/${taskId}`);
+            if (one.status() !== 200) return "";
+            body = (await one.json()) as typeof body;
+            return body.task.status;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe("submitted");
       const att = body.updates.flatMap((u) => u.attachments ?? []).find((a) => a.name === "photo.jpg");
       expect(att, "the submitted evidence is on the task's own log").toBeTruthy();
       evidencePath = att!.path;
