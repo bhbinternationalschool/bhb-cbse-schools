@@ -42,6 +42,34 @@ test("staff tasks: assign, own-only visibility, evidence upload/download privacy
   const principal = await openAs(browser, "principal");
   const teacher = await openAs(browser, "teacher");
   const other = await openAs(browser, "timetableTeacher");
+  // The gate's config sets no action/navigation timeout: without these, a
+  // wrong locator or an unanswered option waits the full 120 s test timeout
+  // and reports nothing. Bound every action so a hang names its step, and
+  // dump each page's state on failure — CI artifacts are not always readable.
+  for (const ctx of [principal.context, teacher.context, other.context, officePage.context()]) {
+    ctx.setDefaultTimeout(20_000);
+    ctx.setDefaultNavigationTimeout(30_000);
+  }
+  const dumpPages = async (why: unknown) => {
+    const pages: [string, import("@playwright/test").Page][] = [
+      ["principal", principal.page],
+      ["teacher", teacher.page],
+      ["other", other.page],
+      ["office", officePage],
+    ];
+    for (const [name, pg] of pages) {
+      try {
+        const snap = await Promise.race([
+          pg.evaluate(() => location.pathname + " :: " + document.body.innerText.slice(0, 600)),
+          new Promise<string>((_, rej) => setTimeout(() => rej(new Error("snap timeout")), 5_000)),
+        ]);
+        console.log(`[staff-tasks dump] ${name}: ${snap}`);
+      } catch (e) {
+        console.log(`[staff-tasks dump] ${name}: unreadable (${String(e).slice(0, 120)})`);
+      }
+    }
+    throw why;
+  };
   try {
     await test.step("the Principal assigns through the real panel", async () => {
       await principal.page.goto("/staff");
@@ -187,9 +215,15 @@ test("staff tasks: assign, own-only visibility, evidence upload/download privacy
         await second.context.close();
       }
     });
+  } catch (e) {
+    await dumpPages(e);
   } finally {
-    await principal.context.close();
-    await teacher.context.close();
-    await other.context.close();
+    // Teardown must never hang or mask the real failure: a stuck context
+    // close once hid the actual assertion behind a bare 120 s timeout.
+    await Promise.allSettled(
+      [principal, teacher, other].map(({ context }) =>
+        Promise.race([context.close(), new Promise((res) => setTimeout(res, 10_000))]),
+      ),
+    );
   }
 });
