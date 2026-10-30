@@ -458,6 +458,152 @@ async function main() {
     ok("conflict: 409 with the stored task, no log row");
   }
 
+  // ── evidence download: the task-level read rule on every file ──
+  {
+    const { staffTaskEvidenceFileGet } = await import("./staffTaskEvidenceFile.server");
+    type FDeps = import("./staffTaskEvidenceFile.server").StaffTaskEvidenceFileDeps;
+    const fdeps = (over: Partial<FDeps> = {}): FDeps => ({
+      requireStaff: async () => authed(ctxOf("st_other", "teacher", "Bina Other")),
+      canManage: () => false,
+      canReview: () => false,
+      selfStaffId: (ctx) => ctx.session.staffId ?? null,
+      readTasks: async () => [taskRow()],
+      download: async () => ({ ok: true, data: new TextEncoder().encode("evidence").buffer as ArrayBuffer }),
+      ...over,
+    });
+    const path = "staff-tasks/st_1/photo.jpg";
+    const get = (d: FDeps) =>
+      staffTaskEvidenceFileGet(new Request(`https://test.local/api/staff/tasks/evidence/${path}`), d, path);
+
+    // Another member of staff, even signed in, is denied — a copied URL
+    // must not open someone else's task evidence.
+    let res = await get(fdeps());
+    assert.equal(res.status, 403, "other staff denied");
+    ok("evidence file: other staff 403");
+
+    res = await get(fdeps({ requireStaff: async () => authed(ctxOf("st_teacher", "teacher", "Asha Teacher")) }));
+    assert.equal(res.status, 200, "the assignee reads their evidence");
+    ok("evidence file: assignee 200");
+
+    res = await get(fdeps({ requireStaff: async () => authed(ctxOf("st_principal", "principal", "Chandra Principal")) }));
+    assert.equal(res.status, 200, "the assigner reads it");
+    ok("evidence file: assigner 200");
+
+    res = await get(fdeps({ canManage: () => true }));
+    assert.equal(res.status, 200, "a manager reads it");
+    ok("evidence file: manager 200");
+
+    res = await get(fdeps({ canReview: () => true }));
+    assert.equal(res.status, 200, "a reviewer reads it");
+    ok("evidence file: reviewer 200");
+
+    res = await staffTaskEvidenceFileGet(
+      new Request("https://test.local/api/staff/tasks/evidence/staff-photos/x.jpg"),
+      fdeps(),
+      "staff-photos/x.jpg",
+    );
+    assert.equal(res.status, 404, "paths outside staff-tasks/ are refused");
+    ok("evidence file: non-task path 404");
+
+    res = await get(fdeps({ readTasks: async () => null }));
+    assert.equal(res.status, 503, "a failed read is 503, never a silent allow");
+    ok("evidence file: read failure 503");
+  }
+
+  // ── evidence upload: every decision the POST route makes ──
+  {
+    const { staffTaskEvidencePost, STAFF_TASK_EVIDENCE_MAX_BYTES } = await import("./staffTaskEvidenceUpload.server");
+    type PDeps = import("./staffTaskEvidenceUpload.server").StaffTaskEvidencePostDeps;
+    const stored: { path: string; bytes: number }[] = [];
+    const pdeps = (over: Partial<PDeps> = {}): PDeps => ({
+      requireStaff: async () => authed(ctxOf("st_teacher", "teacher", "Asha Teacher")),
+      readTasks: async () => [taskRow()],
+      canManage: () => false,
+      canReview: () => false,
+      selfStaffId: (ctx) => ctx.session.staffId ?? null,
+      store: { put: async () => ({ ok: true }) },
+      ...over,
+    });
+    // store is an object with put(); fix the stub shape
+    const withStore = (over: Partial<PDeps> = {}, put?: (path: string, data: Buffer) => Promise<{ ok: true } | { ok: false; error: string }>): PDeps =>
+      pdeps({
+        store: {
+          put: put ?? (async (path, data) => {
+            stored.push({ path, bytes: data.length });
+            return { ok: true };
+          }),
+        },
+        ...over,
+      });
+    const jpg = (bytes = 16) => new File([new Uint8Array(bytes)], "photo.jpg", { type: "image/jpeg" });
+    const evReq = (taskId: string | null, file?: File) => {
+      const f = new FormData();
+      if (taskId !== null) f.append("taskId", taskId);
+      if (file) f.append("file", file);
+      return new Request("https://test.local/api/staff/tasks/evidence", { method: "POST", body: f });
+    };
+
+    let res = await staffTaskEvidencePost(evReq(null, jpg()), withStore());
+    assert.equal(res.status, 400, "no taskId is a 400");
+    ok("evidence upload: missing taskId 400");
+
+    res = await staffTaskEvidencePost(evReq("st_nope", jpg()), withStore());
+    assert.equal(res.status, 404, "an unknown task is a 404");
+    ok("evidence upload: unknown task 404");
+
+    res = await staffTaskEvidencePost(evReq("st_1", jpg()), withStore({ requireStaff: async () => authed(ctxOf("st_other", "teacher", "Bina Other")) }));
+    assert.equal(res.status, 403, "another member of staff is refused");
+    ok("evidence upload: other staff 403");
+
+    res = await staffTaskEvidencePost(evReq("st_1", jpg()), withStore({ readTasks: async () => [taskRow({ status: "done" })] }));
+    assert.equal(res.status, 409, "a closed task refuses new evidence");
+    ok("evidence upload: done task 409");
+
+    res = await staffTaskEvidencePost(evReq("st_1"), withStore());
+    assert.equal(res.status, 400, "no file is a 400");
+    ok("evidence upload: missing file 400");
+
+    res = await staffTaskEvidencePost(evReq("st_1", new File(["hello"], "notes.txt", { type: "text/plain" })), withStore());
+    assert.equal(res.status, 400, "a text file is refused — photo or PDF only");
+    ok("evidence upload: wrong type 400");
+
+    res = await staffTaskEvidencePost(evReq("st_1", jpg(STAFF_TASK_EVIDENCE_MAX_BYTES + 1)), withStore());
+    assert.equal(res.status, 413, "over the size cap is a 413");
+    ok("evidence upload: oversize 413");
+
+    res = await staffTaskEvidencePost(evReq("st_1", jpg()), withStore({}, async () => ({ ok: false, error: "bucket down" })));
+    assert.equal(res.status, 500, "a storage failure is a 500, never a fake success");
+    const upErr = await res.json();
+    assert.match(upErr.error, /bucket down/, "the storage error reaches the answer");
+    ok("evidence upload: storage failure 500 with cause");
+
+    res = await staffTaskEvidencePost(evReq("st_1", jpg()), withStore());
+    assert.equal(res.status, 200, "the assignee uploads");
+    const upOk = await res.json();
+    assert.equal(upOk.attachment.kind, "photo");
+    assert.equal(upOk.attachment.name, "photo.jpg");
+    assert.match(upOk.attachment.path, /^staff-tasks\/st_1\/[0-9a-f-]+\.jpg$/, "stored under the task's own folder");
+    ok("evidence upload: assignee 200, task-scoped path");
+
+    res = await staffTaskEvidencePost(evReq("st_1", new File([new Uint8Array(8)], "proof.pdf", { type: "application/pdf" })), withStore());
+    const upPdf = await res.json();
+    assert.equal(res.status, 200);
+    assert.equal(upPdf.attachment.kind, "file", "a PDF is a file, not a photo");
+    ok("evidence upload: pdf kind file");
+
+    res = await staffTaskEvidencePost(evReq("st_1", jpg()), withStore({ canManage: () => true }));
+    assert.equal(res.status, 200, "a board holder (manager) uploads");
+    ok("evidence upload: manager 200");
+
+    res = await staffTaskEvidencePost(evReq("st_1", jpg()), withStore({ canReview: () => true }));
+    assert.equal(res.status, 200, "a reviewer uploads");
+    ok("evidence upload: reviewer 200");
+
+    res = await staffTaskEvidencePost(evReq("st_1", jpg()), withStore({ readTasks: async () => null }));
+    assert.equal(res.status, 503, "a failed read is 503, never a silent allow");
+    ok("evidence upload: read failure 503");
+  }
+
   console.log(`staffTasks selftest: ${passed} checks passed`);
 }
 
