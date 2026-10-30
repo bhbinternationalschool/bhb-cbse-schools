@@ -428,11 +428,317 @@ class _SchoolChatThreadScreenState extends State<SchoolChatThreadScreen> {
     if (posted == true) await _load();
   }
 
+  // ── A staff-made group's ⋮ menu (director, 30 Oct 2026) ──────────────
+
+  bool get _hindi => Localizations.localeOf(context).languageCode == "hi";
+
+  void _snack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// One change against the version last read. A refusal (403, 400, or 409
+  /// when someone else changed the group first) is shown as the server
+  /// worded it, and the group is read again.
+  Future<bool> _change(
+    String op, {
+    String? title,
+    List<String>? staffIds,
+    ({String classId, String sectionId})? section,
+    required String done,
+  }) async {
+    final m = _thread?.manage;
+    if (m == null) return false;
+    try {
+      await widget.api.changeSchoolChatGroup(
+        conversationId: widget.conversationId,
+        rev: m.rev,
+        op: op,
+        title: title,
+        staffIds: staffIds,
+        section: section,
+      );
+      _snack(done);
+      if (op != "leave") await _load();
+      return true;
+    } on ApiException catch (e) {
+      _snack(e.message);
+      await _load(quiet: true);
+      return false;
+    } catch (_) {
+      if (mounted) _snack(context.l10n.couldNotReachTheSchoolServer);
+      return false;
+    }
+  }
+
+  Future<void> _rename() async {
+    final controller = TextEditingController(text: _thread?.title ?? "");
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(_hindi ? "समूह का नाम" : "Edit name"),
+        content: TextField(
+          key: const Key("school-chat-group-name"),
+          controller: controller,
+          autofocus: true,
+          maxLength: 120,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(_hindi ? "रद्द करें" : "Cancel"),
+          ),
+          FilledButton(
+            key: const Key("school-chat-group-name-save"),
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: Text(_hindi ? "सहेजें" : "Save"),
+          ),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty || name == _thread?.title) return;
+    await _change(
+      "rename",
+      title: name,
+      done: _hindi ? "नाम सहेजा गया।" : "Name saved.",
+    );
+  }
+
+  Future<void> _members() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) => StatefulBuilder(
+        builder: (sheet, setSheet) {
+          final m = _thread?.manage;
+          if (m == null) return const SizedBox.shrink();
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(sheet).height * 0.8,
+              ),
+              child: ListView(
+                key: const Key("school-chat-members"),
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                children: [
+                  ListTile(
+                    title: Text(
+                      "${_hindi ? "सदस्य" : "Staff in this group"} (${m.members.length})",
+                      style: AppText.titleMedium,
+                    ),
+                  ),
+                  if (m.creatorLeft)
+                    Padding(
+                      key: const Key("school-chat-creator-left"),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: Text(
+                        "${m.creatorName.isEmpty ? "The staff member who made this group" : "${m.creatorName}, who made this group,"} has left it — only a chat moderator can change it now.",
+                        style: AppText.bodySmall.copyWith(
+                          color: AppColors.warning,
+                        ),
+                      ),
+                    ),
+                  for (final x in m.members)
+                    ListTile(
+                      dense: true,
+                      title: Text(x.id == m.me ? "${x.name} (you)" : x.name),
+                      trailing: m.canManage && x.id != m.me
+                          ? IconButton(
+                              key: Key("school-chat-remove-${x.id}"),
+                              tooltip: "Remove ${x.name}",
+                              icon: const Icon(
+                                Icons.person_remove_outlined,
+                                color: AppColors.danger,
+                              ),
+                              onPressed: m.members.length <= 2
+                                  ? null
+                                  : () async {
+                                      final ok = await _confirm(
+                                        "Remove ${x.name} from this group? They stop seeing it at once.",
+                                      );
+                                      if (!ok) return;
+                                      await _change(
+                                        "removeStaff",
+                                        staffIds: [x.id],
+                                        done: "${x.name} removed.",
+                                      );
+                                      setSheet(() {});
+                                    },
+                            )
+                          : null,
+                    ),
+                  if (m.canManage && m.members.length <= 2)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      child: Text(
+                        "A group needs at least two staff — add someone before removing anyone.",
+                        style: AppText.bodySmallMuted,
+                      ),
+                    ),
+                  if (m.canManage)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                      child: OutlinedButton.icon(
+                        key: const Key("school-chat-add-member"),
+                        icon: const Icon(Icons.person_add_alt_1_outlined),
+                        label: Text(_hindi ? "स्टाफ़ जोड़ें" : "Add staff"),
+                        onPressed: () async {
+                          await _addStaff();
+                          setSheet(() {});
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _addStaff() async {
+    final m = _thread?.manage;
+    if (m == null) return;
+    SchoolChatGroupPicker picker;
+    try {
+      picker = await widget.api.fetchSchoolChatGroupPicker();
+    } on ApiException catch (e) {
+      _snack(e.message);
+      return;
+    }
+    if (!mounted) return;
+    final inGroup = m.members.map((x) => x.id).toSet();
+    final options = picker.staff.where((s) => !inGroup.contains(s.id)).toList();
+    final picked = await showModalBottomSheet<List<String>>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _StaffPickerSheet(staff: options),
+    );
+    if (picked == null || picked.isEmpty) return;
+    await _change(
+      "addStaff",
+      staffIds: picked,
+      done: picked.length == 1
+          ? "1 person added."
+          : "${picked.length} people added.",
+    );
+  }
+
+  Future<void> _section() async {
+    final m = _thread?.manage;
+    if (m == null) return;
+    SchoolChatGroupPicker picker;
+    try {
+      picker = await widget.api.fetchSchoolChatGroupPicker();
+    } on ApiException catch (e) {
+      _snack(e.message);
+      return;
+    }
+    if (!mounted) return;
+    // "" = staff only; else "classId|sectionId".
+    final pick = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheet) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheet).height * 0.8,
+          ),
+          child: ListView(
+            key: const Key("school-chat-sections"),
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                title: Text(
+                  _hindi ? "कक्षा अनुभाग" : "Class section",
+                  style: AppText.titleMedium,
+                ),
+                subtitle: Text(
+                  m.sectionLabel.isEmpty
+                      ? "Now: staff only. A section's families can read the group (they cannot post)."
+                      : "Now: ${m.sectionLabel} — its families can read the group.",
+                ),
+              ),
+              if (m.sectionLabel.isNotEmpty)
+                ListTile(
+                  key: const Key("school-chat-section-clear"),
+                  leading: const Icon(Icons.lock_outline),
+                  title: const Text("Make staff only"),
+                  onTap: () => Navigator.pop(sheet, ""),
+                ),
+              if (picker.sections.isEmpty)
+                const ListTile(
+                  title: Text("You can add only a class section you teach."),
+                ),
+              for (final sec in picker.sections)
+                ListTile(
+                  key: Key(
+                    "school-chat-section-${sec.classId}-${sec.sectionId}",
+                  ),
+                  leading: const Icon(Icons.groups_outlined),
+                  title: Text(sec.label),
+                  onTap: () =>
+                      Navigator.pop(sheet, "${sec.classId}|${sec.sectionId}"),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (pick == null) return;
+    if (pick.isEmpty) {
+      await _change("clearSection", done: "The group is staff only now.");
+      return;
+    }
+    final parts = pick.split("|");
+    await _change(
+      "setSection",
+      section: (classId: parts[0], sectionId: parts[1]),
+      done: "Class section saved.",
+    );
+  }
+
+  Future<bool> _confirm(String text) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          content: Text(text),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(_hindi ? "रद्द करें" : "Cancel"),
+            ),
+            FilledButton(
+              key: const Key("school-chat-confirm"),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("OK"),
+            ),
+          ],
+        ),
+      ) ==
+      true;
+
+  Future<void> _leave() async {
+    final m = _thread?.manage;
+    if (m == null) return;
+    final maker = m.canManage && !m.creatorLeft;
+    final ok = await _confirm(
+      "Leave \"${_thread?.title ?? widget.title}\"? You stop seeing it at once.${maker ? " If you made this group, only a chat moderator can change it after you leave." : ""}",
+    );
+    if (!ok) return;
+    if (await _change("leave", done: "You left the group.") && mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
     final t = _thread;
     final family = widget.studentId != null;
+    final manage = t?.manage;
     return Scaffold(
       appBar: AppBar(
         actions: [
@@ -443,11 +749,58 @@ class _SchoolChatThreadScreenState extends State<SchoolChatThreadScreen> {
               onPressed: () => _postWork(t!.compose!),
               icon: const Icon(Icons.post_add, color: Colors.white),
             ),
+          if (manage != null)
+            PopupMenuButton<String>(
+              key: const Key("school-chat-group-menu"),
+              tooltip: "Group menu",
+              icon: const Icon(Icons.more_vert, color: Colors.white),
+              onSelected: (v) {
+                switch (v) {
+                  case "name":
+                    _rename();
+                  case "members":
+                    _members();
+                  case "section":
+                    _section();
+                  case "leave":
+                    _leave();
+                }
+              },
+              itemBuilder: (_) => [
+                if (manage.canManage)
+                  PopupMenuItem(
+                    value: "name",
+                    child: Text(_hindi ? "नाम बदलें" : "Edit name"),
+                  ),
+                PopupMenuItem(
+                  value: "members",
+                  child: Text(
+                    "${_hindi ? "सदस्य" : "Members"} (${manage.members.length})",
+                  ),
+                ),
+                if (manage.canManage)
+                  PopupMenuItem(
+                    value: "section",
+                    child: Text(_hindi ? "कक्षा अनुभाग" : "Class section"),
+                  ),
+                if (manage.canLeave)
+                  PopupMenuItem(
+                    value: "leave",
+                    child: Text(
+                      _hindi ? "समूह छोड़ें" : "Leave group",
+                      style: const TextStyle(color: AppColors.danger),
+                    ),
+                  ),
+              ],
+            ),
         ],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(widget.title, style: AppText.titleMedium),
+            Text(
+              (t?.title.isNotEmpty ?? false) ? t!.title : widget.title,
+              style: AppText.titleMedium,
+            ),
             if (family)
               Text(
                 widget.isGroup
@@ -599,6 +952,17 @@ class _Bubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = context.l10n;
+    if (m.system) {
+      return Padding(
+        key: Key("school-chat-note-${m.id}"),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 24),
+        child: Text(
+          "${m.body} · ${formatTimeLabel(m.createdAt)}",
+          textAlign: TextAlign.center,
+          style: AppText.bodySmallMuted,
+        ),
+      );
+    }
     final mineVisible = m.mine && !m.held && !m.removed;
     final bg = m.held
         ? AppColors.warning.withValues(alpha: 0.14)
@@ -873,6 +1237,96 @@ class _WorkSheetState extends State<_WorkSheet> {
             child: Text(_busy ? "Posting…" : "Post"),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Members → Add: the staff not yet in the group, with a search box.
+class _StaffPickerSheet extends StatefulWidget {
+  const _StaffPickerSheet({required this.staff});
+  final List<({String id, String name})> staff;
+
+  @override
+  State<_StaffPickerSheet> createState() => _StaffPickerSheetState();
+}
+
+class _StaffPickerSheetState extends State<_StaffPickerSheet> {
+  final _picked = <String>{};
+  String _filter = "";
+
+  @override
+  Widget build(BuildContext context) {
+    final f = _filter.trim().toLowerCase();
+    final shown = widget.staff
+        .where(
+          (s) =>
+              f.isEmpty ||
+              s.name.toLowerCase().contains(f) ||
+              _picked.contains(s.id),
+        )
+        .take(120)
+        .toList();
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.8,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: TextField(
+                  key: const Key("school-chat-staff-search"),
+                  decoration: const InputDecoration(
+                    hintText: "Search staff",
+                    prefixIcon: Icon(Icons.search),
+                  ),
+                  onChanged: (v) => setState(() => _filter = v),
+                ),
+              ),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final s in shown)
+                      CheckboxListTile(
+                        key: Key("school-chat-pick-${s.id}"),
+                        dense: true,
+                        value: _picked.contains(s.id),
+                        title: Text(s.name),
+                        onChanged: (v) => setState(
+                          () => v == true
+                              ? _picked.add(s.id)
+                              : _picked.remove(s.id),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    key: const Key("school-chat-add-picked"),
+                    onPressed: _picked.isEmpty
+                        ? null
+                        : () => Navigator.pop(context, _picked.toList()),
+                    child: Text(
+                      _picked.isEmpty ? "Add" : "Add ${_picked.length}",
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

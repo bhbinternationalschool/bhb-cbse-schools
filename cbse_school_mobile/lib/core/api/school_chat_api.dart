@@ -6,6 +6,9 @@ part of "api_client.dart";
 //   POST /api/v1/school-chat/send   {conversationId, body, studentId?}
 //   POST /api/v1/school-chat/direct {with: {kind, id|studentId}, studentId?}
 //   GET  /api/v1/school-chat/contacts[?studentId=]
+//   POST /api/v1/school-chat/groups {op, conversationId, rev, …} — change a
+//        staff-made group (rename / addStaff / removeStaff / setSection /
+//        clearSection / leave); 409 = someone else changed it first
 // The server decides who is in which conversation; the parent app always
 // says which child it is acting for (the home screen's child picker). In a
 // class / subject group the family speaks as that child; in a direct chat
@@ -62,6 +65,7 @@ class SchoolChatMessage {
       mine = _b(j, "mine"),
       status = j["status"] as String? ?? "visible",
       notice = j["notice"] as String?,
+      system = _b(j, "system"),
       card = j["card"] is Map<String, dynamic>
           ? SchoolChatCard.fromJson(j["card"] as Map<String, dynamic>)
           : null;
@@ -76,6 +80,10 @@ class SchoolChatMessage {
   /// visible / held (waiting for review) / removed
   final String status;
   final String? notice;
+
+  /// A group's history line written by the server ("Asha added Ravi") —
+  /// drawn as a note, not a bubble.
+  final bool system;
 
   /// A homework / classwork card: the Homework module's own record.
   final SchoolChatCard? card;
@@ -148,15 +156,77 @@ class SchoolChatThread {
                   as Map<String, dynamic>,
             )
           : null,
+      manage =
+          ((j["conversation"] as Map<String, dynamic>?)?["manage"])
+              is Map<String, dynamic>
+          ? SchoolChatGroupManage.fromJson(
+              (j["conversation"] as Map<String, dynamic>)["manage"]
+                  as Map<String, dynamic>,
+            )
+          : null,
       messages = _list(j, "messages").map(SchoolChatMessage.fromJson).toList();
 
   final String title;
+
+  /// A staff-made group, for staff: members and what this person may change.
+  final SchoolChatGroupManage? manage;
   final bool canSend;
   final bool muted;
 
   /// null = this person cannot post homework / classwork / notices here.
   final SchoolChatCompose? compose;
   final List<SchoolChatMessage> messages;
+}
+
+/// A staff-made group's settings as the server reads them now.
+class SchoolChatGroupManage {
+  SchoolChatGroupManage.fromJson(Map<String, dynamic> j)
+    : rev = _s(j, "rev"),
+      members = _list(
+        j,
+        "members",
+      ).map((m) => (id: _s(m, "id"), name: _s(m, "name"))).toList(),
+      creatorName = _s(j, "creatorName"),
+      creatorLeft = _b(j, "creatorLeft"),
+      canManage = _b(j, "canManage"),
+      canLeave = _b(j, "canLeave"),
+      sectionLabel = _s(j, "sectionLabel"),
+      me = _s(j, "me");
+
+  /// The version every change is made against (409 if it moved on).
+  final String rev;
+  final List<({String id, String name})> members;
+  final String creatorName;
+
+  /// The maker has left: only chat moderators can change the group now.
+  final bool creatorLeft;
+
+  /// Rename, add / remove staff, class section: the maker or a moderator.
+  final bool canManage;
+  final bool canLeave;
+  final String sectionLabel;
+  final String me;
+}
+
+/// The staff and class sections a member of staff may put in a group.
+class SchoolChatGroupPicker {
+  SchoolChatGroupPicker.fromJson(Map<String, dynamic> j)
+    : staff = _list(
+        j,
+        "staff",
+      ).map((s) => (id: _s(s, "id"), name: _s(s, "name"))).toList(),
+      sections = _list(j, "sections")
+          .map(
+            (s) => (
+              classId: _s(s, "classId"),
+              sectionId: _s(s, "sectionId"),
+              label: _s(s, "label"),
+            ),
+          )
+          .toList();
+
+  final List<({String id, String name})> staff;
+  final List<({String classId, String sectionId, String label})> sections;
 }
 
 class SchoolChatSendResult {
@@ -187,13 +257,12 @@ String _chatQs(Map<String, String?> q) {
 
 extension SchoolChatApi on ApiClient {
   /// Unread messages across the caller's conversations (the chat button's badge).
-  Future<int> fetchSchoolChatUnread({String? studentId}) async =>
-      _i(
-        await _getData(
-          "/api/v1/school-chat/unread${_chatQs({"studentId": studentId})}",
-        ),
-        "unread",
-      );
+  Future<int> fetchSchoolChatUnread({String? studentId}) async => _i(
+    await _getData(
+      "/api/v1/school-chat/unread${_chatQs({"studentId": studentId})}",
+    ),
+    "unread",
+  );
 
   Future<SchoolChatList> fetchSchoolChats({
     String? studentId,
@@ -253,6 +322,33 @@ extension SchoolChatApi on ApiClient {
       "studentId": ?studentId,
     });
     return _s(d, "id");
+  }
+
+  /// Staff and sections for a group's Members → Add and Class section.
+  Future<SchoolChatGroupPicker> fetchSchoolChatGroupPicker() async =>
+      SchoolChatGroupPicker.fromJson(
+        await _getData("/api/v1/school-chat/contacts"),
+      );
+
+  /// Change a staff-made group. [rev] is [SchoolChatGroupManage.rev] as
+  /// last read; a group someone else changed since answers 409.
+  Future<void> changeSchoolChatGroup({
+    required String conversationId,
+    required String rev,
+    required String op,
+    String? title,
+    List<String>? staffIds,
+    ({String classId, String sectionId})? section,
+  }) async {
+    await _postData("/api/v1/school-chat/groups", {
+      "op": op,
+      "conversationId": conversationId,
+      "rev": rev,
+      "title": ?title,
+      "staffIds": ?staffIds,
+      if (section != null)
+        "section": {"classId": section.classId, "sectionId": section.sectionId},
+    });
   }
 
   Future<List<SchoolChatContact>> fetchSchoolChatContacts({
