@@ -1360,4 +1360,4 @@ function RemovedStaffPanel({
       )}
     </ErpPanel>
   );
-  }
+}
