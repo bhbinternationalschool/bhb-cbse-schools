@@ -8,6 +8,7 @@ import type {
   ChatMessageOut,
   ConversationAccess,
   ConversationSummary,
+  GroupManage,
   QueueItem,
 } from "@/lib/schoolChat.server";
 import type { ChatBlock } from "@/lib/schoolChat";
@@ -26,6 +27,8 @@ export type MessagesView = {
     moderator: boolean;
     /** Homework / classwork / notice composer: null = this person cannot post work here. */
     compose: { subjects: { id: string; name: string }[]; fixedSubject: string } | null;
+    /** A staff-made group, for staff: members and what this person may change (null otherwise). */
+    manage: GroupManage | null;
   };
   messages: ChatMessageOut[];
 };

@@ -1121,6 +1121,8 @@ export type GroupManage = {
   canLeave: boolean;
   /** "Class-Sec" of the group's section, or "". */
   sectionLabel: string;
+  /** The caller's own staff id (their row in members). */
+  me: string;
 };
 
 /**
@@ -1148,6 +1150,7 @@ function groupManageFor(actor: Extract<ChatActor, { kind: "staff" }>, access: Co
     canManage: actor.moderator || (member && isGroupMaker(actor, access.createdBy)),
     canLeave: member,
     sectionLabel: access.section ? sectionLabel(roster, access.section.classId, access.section.sectionId) : "",
+    me: actor.staffId,
   };
 }
 
