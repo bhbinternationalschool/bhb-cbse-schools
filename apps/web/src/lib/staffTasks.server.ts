@@ -421,4 +421,4 @@ export async function staffTasksPatch(req: Request, deps: StaffTasksDeps, taskId
   ]);
   if (!isWriteOk(wr)) return writeFailure(503, wr);
   return ok({ task: { ...task, status: "cancelled", rev: nowIso, updatedAt: nowIso } });
-             }
+}
