@@ -235,9 +235,7 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
       "Assign tracked work to staff (deadline, priority, evidence), watch progress, and review completion — accept or return with a note.",
     actions: ["view", "create", "edit", "approve"],
     tabs: ["tasks"],
-    // Routes land with the screens PR: /api/staff/tasks and
-    // /api/staff/tasks/[id]. Listing them now would fail the catalog
-    // completeness selftest (route must exist).
+    routes: ["/api/staff/tasks", "/api/staff/tasks/[id]", "/api/data/views/staff-tasks"],
   },
   {
     id: "staff.duty_roster",
