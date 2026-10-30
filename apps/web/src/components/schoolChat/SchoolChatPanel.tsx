@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from "react";
 import { QueryError } from "@/components/data/QueryError";
 import { useErpQuery } from "@/lib/data/client/hooks";
 import { chatPost, type ContactsView, type ConversationsView, type MessagesView } from "@/lib/schoolChatClient";
+import { changeGroup, GroupMenu, GroupSettings, StaffChecklist, type GroupPane } from "./GroupSettings";
 
 const POLL_MS = 5_000;
 
@@ -177,6 +178,7 @@ function Thread({ id, studentId, compact, onBack, onSent }: { id: string; studen
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [composing, setComposing] = useState(false);
+  const [pane, setPane] = useState<GroupPane | null>(null);
   // Opening a conversation marks it read on the server: the list's badge follows.
   useEffect(() => {
     if (q.data) void onSent();
@@ -207,6 +209,21 @@ function Thread({ id, studentId, compact, onBack, onSent }: { id: string; studen
     void q.refetch();
     void onSent();
   }
+  async function leave() {
+    const m = v?.conversation.manage;
+    if (!m) return;
+    const last = m.canManage && !v.conversation.moderator && !m.creatorLeft;
+    const ask = `Leave "${v.conversation.title}"? You stop seeing it at once.${last ? " You made this group — after you leave, only a chat moderator can change it." : ""}`;
+    if (!window.confirm(ask)) return;
+    const r = await changeGroup(id, m.rev, { op: "leave" });
+    if (!r.ok) {
+      setNotice({ kind: "error", text: r.error });
+      void q.refetch();
+      return;
+    }
+    void onSent();
+    onBack();
+  }
   async function restrict(subject: { kind: string; id: string }, label: string, mode: "mute" | "block") {
     const reason = window.prompt(`${mode === "mute" ? "Mute" : "Block"} ${label} school-wide — why? (kept in the log)`) || "";
     if (!reason.trim()) return;
@@ -219,19 +236,45 @@ function Thread({ id, studentId, compact, onBack, onSent }: { id: string; studen
         <button type="button" className={`${btn} ${compact ? "" : "md:hidden"}`} onClick={onBack}>
           Back
         </button>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-[var(--ink)]">{v?.conversation.title ?? "…"}</p>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-semibold text-[var(--ink)]" data-testid="school-chat-thread-title">{v?.conversation.title ?? "…"}</p>
           {v?.conversation.oversight ? <p className="text-xs text-[var(--warning)]">Moderator view — you are not a member, you can read but not post.</p> : null}
           {v?.conversation.readOnly ? <p className="text-xs text-[var(--muted)]">The staff who made this group post here. To reply, message a teacher.</p> : null}
+          {v?.conversation.manage ? (
+            <p className="truncate text-xs text-[var(--muted)]">
+              {v.conversation.manage.members.length} staff{v.conversation.manage.sectionLabel ? ` · ${v.conversation.manage.sectionLabel} families read it` : ""}
+            </p>
+          ) : null}
         </div>
+        {v?.conversation.manage ? <GroupMenu manage={v.conversation.manage} onPick={setPane} onLeave={() => void leave()} /> : null}
       </div>
-      <div className="flex-1 space-y-2 overflow-y-auto p-3">
+      {v?.conversation.manage && pane ? (
+        <GroupSettings
+          key={v.conversation.manage.rev}
+          conversationId={id}
+          title={v.conversation.title}
+          manage={v.conversation.manage}
+          pane={pane}
+          onPane={setPane}
+          onClose={() => setPane(null)}
+          onChanged={() => {
+            void q.refetch();
+            void onSent();
+          }}
+        />
+      ) : null}
+      <div className={`flex-1 space-y-2 overflow-y-auto p-3 ${pane && v?.conversation.manage ? "hidden" : ""}`}>
         {!v ? (
           <p className="text-sm text-[var(--muted)]">Loading…</p>
         ) : v.messages.length === 0 ? (
           <p className="text-sm text-[var(--muted)]">No messages yet.</p>
         ) : (
-          v.messages.map((m) => (
+          v.messages.map((m) =>
+            m.system ? (
+              <p key={m.id} className="mx-auto max-w-[90%] text-center text-xs text-[var(--muted)]" data-testid="school-chat-group-note">
+                {m.body} · {fmt(m.createdAt)}
+              </p>
+            ) : (
             <div key={m.id} className={`flex ${m.mine ? "justify-end" : "justify-start"}`}>
               <div
                 className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
@@ -274,7 +317,8 @@ function Thread({ id, studentId, compact, onBack, onSent }: { id: string; studen
                 <p className={`mt-0.5 text-[10px] ${m.mine && m.status === "visible" ? "text-white/70" : "text-[var(--muted)]"}`}>{fmt(m.createdAt)}</p>
               </div>
             </div>
-          ))
+            ),
+          )
         )}
       </div>
       {notice ? (
@@ -282,7 +326,7 @@ function Thread({ id, studentId, compact, onBack, onSent }: { id: string; studen
           {notice.text}
         </p>
       ) : null}
-      {v && v.conversation.compose && composing ? (
+      {pane && v?.conversation.manage ? null : v && v.conversation.compose && composing ? (
         <WorkComposer
           conversationId={id}
           compose={v.conversation.compose}
@@ -302,7 +346,7 @@ function Thread({ id, studentId, compact, onBack, onSent }: { id: string; studen
           </button>
         </div>
       ) : null}
-      {v && v.conversation.canSend && !composing ? (
+      {v && v.conversation.canSend && !composing && !(pane && v.conversation.manage) ? (
         <div className="flex gap-2 border-t border-[var(--border)] p-3">
           <textarea
             aria-label="Message"
@@ -392,11 +436,9 @@ function GroupMaker({ compact, onClose, onMade }: { compact: boolean; onClose: (
   const [title, setTitle] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [section, setSection] = useState("");
-  const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (q.isError) return <QueryError what="the staff list" error={q.error} retry={q.refetch} />;
-  const f = filter.trim().toLowerCase();
   const staff = q.data?.staff ?? [];
   const sections = q.data?.sections ?? [];
   const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
@@ -455,26 +497,7 @@ function GroupMaker({ compact, onClose, onMade }: { compact: boolean; onClose: (
           <span className="mb-1 block text-xs font-semibold uppercase text-[var(--muted)]">
             Staff ({picked.length} picked — you are in it too)
           </span>
-          <input
-            className="mb-2 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-sm text-[var(--ink)]"
-            placeholder="Search staff"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
-          {q.isLoading ? <p className="text-[var(--muted)]">Loading staff…</p> : null}
-          <ul className="space-y-0.5">
-            {staff
-              .filter((s) => !f || s.name.toLowerCase().includes(f) || picked.includes(s.id))
-              .slice(0, 120)
-              .map((s) => (
-                <li key={s.id}>
-                  <label className="flex items-center gap-2 rounded px-2 py-1 text-[var(--ink)] hover:bg-[var(--muted-surface)]">
-                    <input type="checkbox" checked={picked.includes(s.id)} onChange={() => toggle(s.id)} />
-                    {s.name}
-                  </label>
-                </li>
-              ))}
-          </ul>
+          <StaffChecklist staff={staff} picked={picked} onToggle={toggle} loading={q.isLoading} />
         </div>
       </div>
       {error ? <p className="px-3 pb-1 text-xs text-[var(--danger)]" role="alert">{error}</p> : null}

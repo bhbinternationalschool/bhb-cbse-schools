@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 /**
  * School chat — the server side (director's request, 15 Oct 2026).
  *
@@ -288,9 +290,10 @@ type ConvRow = {
   academic_year_code?: string;
   class_id?: string;
   section_id?: string;
+  created_by?: string;
 };
 
-const CONV_COLS = "id, kind, staff_ids, household_id, student_id, title, last_message_at, academic_year_code, class_id, section_id";
+const CONV_COLS = "id, kind, staff_ids, household_id, student_id, title, last_message_at, academic_year_code, class_id, section_id, created_by";
 
 export type ConversationAccess = {
   id: string;
@@ -311,6 +314,8 @@ export type ConversationAccess = {
   oversight: boolean;
   /** How the caller speaks here. */
   speakAs: "staff" | "student" | "parent";
+  /** A staff-made group's maker (its actor key, "staff:<id>"); "" otherwise. */
+  createdBy: string;
 };
 
 /** Group rows this process has already made sure of (they are never deleted). */
@@ -383,7 +388,7 @@ export async function accessConversation(
     await ensureGroupRow(t, group, roster.ay, actorKey(actor));
     return {
       roster,
-      access: { id: group.id, kind: group.kind, title: group.title, staffIds: group.staffIds, group, section: null, readOnly: false, householdId: "", studentId: "", oversight, speakAs },
+      access: { id: group.id, kind: group.kind, title: group.title, staffIds: group.staffIds, group, section: null, readOnly: false, householdId: "", studentId: "", oversight, speakAs, createdBy: "" },
     };
   }
 
@@ -407,7 +412,7 @@ export async function accessConversation(
     }
     return {
       roster,
-      access: { id: row.id, kind: "group", title: row.title, staffIds: row.staff_ids, group: null, section, readOnly: actor.kind === "family", householdId: "", studentId: "", oversight, speakAs },
+      access: { id: row.id, kind: "group", title: row.title, staffIds: row.staff_ids, group: null, section, readOnly: actor.kind === "family", householdId: "", studentId: "", oversight, speakAs, createdBy: row.created_by || "" },
     };
   }
   if (parsed.kind === "dm_staff") {
@@ -417,7 +422,7 @@ export async function accessConversation(
     if (!member && !a.moderator) refuse();
     return {
       roster,
-      access: { id: row.id, kind: "dm_staff", title: member ? otherStaffTitle(roster, row, a.staffId) : row.title, staffIds: row.staff_ids, group: null, section: null, readOnly: false, householdId: "", studentId: "", oversight: !member, speakAs: "staff" },
+      access: { id: row.id, kind: "dm_staff", title: member ? otherStaffTitle(roster, row, a.staffId) : row.title, staffIds: row.staff_ids, group: null, section: null, readOnly: false, householdId: "", studentId: "", oversight: !member, speakAs: "staff", createdBy: "" },
     };
   }
   // dm_parent
@@ -442,6 +447,7 @@ export async function accessConversation(
       studentId: row.student_id,
       oversight,
       speakAs: actor.kind === "family" ? "parent" : "staff",
+      createdBy: "",
     },
   };
 }
@@ -554,6 +560,8 @@ export async function listConversations(
     for (const m of (msgs ?? []) as { conversation_id: string; body: string; created_at: string; sender_kind: string; sender_id: string; household_id: string }[]) {
       if (!last.has(m.conversation_id)) last.set(m.conversation_id, { body: m.body, at: m.created_at });
       const mine = actor.kind === "staff" ? m.sender_kind === "staff" && m.sender_id === actor.staffId : m.household_id === actor.householdId;
+      // A group's history line ("Asha added Ravi") is shown, never counted unread.
+      if (isGroupNote(m)) continue;
       if (!mine && m.created_at > (readAt.get(m.conversation_id) || "")) unread.set(m.conversation_id, (unread.get(m.conversation_id) || 0) + 1);
     }
     // Homework / classwork cards count as messages of their groups (the
@@ -616,7 +624,19 @@ export type ChatMessageOut = {
    * app that does not draw cards.
    */
   card?: WorkCard;
+  /** A staff-made group's history line ("Asha added Ravi"), written by the server — drawn as a note, not a bubble. */
+  system?: true;
 };
+
+/**
+ * A group's history lines are rows of school_chat_messages written by the
+ * server (manageStaffGroup), not by a person: sender_kind 'staff' (the
+ * table's check allows no other kind for them) with the reserved sender id
+ * GROUP_NOTE_SENDER, which no staff row has — so the per-sender rate limit,
+ * "mine" and mute / block never see them as anybody's message.
+ */
+export const GROUP_NOTE_SENDER = "system";
+const isGroupNote = (m: { sender_kind: string; sender_id: string }) => m.sender_kind === "staff" && m.sender_id === GROUP_NOTE_SENDER;
 
 function isMine(actor: ChatActor, m: Pick<MsgRow, "sender_kind" | "sender_id" | "household_id">): boolean {
   return actor.kind === "staff" ? m.sender_kind === "staff" && m.sender_id === actor.staffId : m.sender_kind !== "staff" && m.household_id === actor.householdId;
@@ -627,7 +647,14 @@ export async function readMessages(
   actor: ChatActor,
   conversationId: string,
 ): Promise<{
-  conversation: ConversationAccess & { canSend: boolean; muted: boolean; moderator: boolean; compose: { subjects: { id: string; name: string }[]; fixedSubject: string } | null };
+  conversation: ConversationAccess & {
+    canSend: boolean;
+    muted: boolean;
+    moderator: boolean;
+    compose: { subjects: { id: string; name: string }[]; fixedSubject: string } | null;
+    /** A staff-made group, for staff: its members and what this person may change. */
+    manage: GroupManage | null;
+  };
   messages: ChatMessageOut[];
 }> {
   const t = await chatTenant();
@@ -652,6 +679,10 @@ export async function readMessages(
   const g = access.group;
   const work: WorkItem[] = g ? workForGroup(await readWorkForSections(ctx.masters, roster.ay, [g.sectionId]), g) : [];
   for (const m of rows) {
+    if (isGroupNote(m)) {
+      if (m.status === "visible") messages.push({ id: m.id, senderLabel: m.sender_label, senderKind: "staff", body: m.body, createdAt: m.created_at, mine: false, status: "visible", system: true });
+      continue;
+    }
     const mine = isMine(actor, m);
     if (m.status !== "visible" && !mine && !seeAll) continue;
     messages.push({
@@ -704,6 +735,8 @@ export async function readMessages(
       moderator: seeAll,
       // null = this person cannot post homework / classwork here.
       compose: compose && g ? { subjects: g.kind === "subject" ? compose.subjects.filter((x) => x.id === g.subjectId) : compose.subjects, fixedSubject: g.kind === "subject" ? g.subjectId : "" } : null,
+      createdBy: actor.kind === "staff" ? access.createdBy : "",
+      manage: access.kind === "group" && actor.kind === "staff" ? groupManageFor(actor, access, roster) : null,
     },
     messages,
   };
@@ -1070,6 +1103,209 @@ export async function createStaffGroup(
     dbFail("group", error, true);
   }
   return { id, title };
+}
+
+// ── Changing a staff-made group ──────────────────────────────────────────
+
+/** What the group screen shows a member of staff (readMessages → conversation.manage). */
+export type GroupManage = {
+  /** The group as this person read it; every change sends it back (409 if the group changed since). */
+  rev: string;
+  members: { id: string; name: string }[];
+  creatorName: string;
+  /** The maker has left (or was removed): only moderators can change it now. */
+  creatorLeft: boolean;
+  /** Rename, add / remove members, the class section: the maker (while in it) or a moderator. */
+  canManage: boolean;
+  /** Any member of staff in it, for themselves. */
+  canLeave: boolean;
+  /** "Class-Sec" of the group's section, or "". */
+  sectionLabel: string;
+  /** The caller's own staff id (their row in members). */
+  me: string;
+};
+
+/**
+ * The version of a group a change is made against: its staff, name and
+ * section. Two people editing at once both send the version they read; the
+ * second one's no longer matches → 409, nothing overwritten.
+ */
+export function groupRev(g: { staff_ids: string[]; title: string; class_id?: string; section_id?: string }): string {
+  const key = JSON.stringify([[...g.staff_ids].sort(), g.title, g.class_id || "", g.section_id || ""]);
+  return createHash("sha256").update(key).digest("hex").slice(0, 16);
+}
+
+const isGroupMaker = (actor: Extract<ChatActor, { kind: "staff" }>, createdBy: string) => createdBy === `staff:${actor.staffId}`;
+
+function groupManageFor(actor: Extract<ChatActor, { kind: "staff" }>, access: ConversationAccess, roster: ChatRoster): GroupManage {
+  const makerId = access.createdBy.startsWith("staff:") ? access.createdBy.slice(6) : "";
+  const member = access.staffIds.includes(actor.staffId);
+  const creatorLeft = !makerId || !access.staffIds.includes(makerId);
+  const name = (id: string) => (id === actor.staffId ? actor.name || staffName(roster, id) : roster.staff.find((s) => s.id === id)?.fullName || "Staff (no staff record)");
+  return {
+    rev: groupRev({ staff_ids: access.staffIds, title: access.title, class_id: access.section?.classId, section_id: access.section?.sectionId }),
+    members: access.staffIds.map((id) => ({ id, name: name(id) })).sort((a, b) => a.name.localeCompare(b.name)),
+    creatorName: makerId ? name(makerId) : "",
+    creatorLeft,
+    canManage: actor.moderator || (member && isGroupMaker(actor, access.createdBy)),
+    canLeave: member,
+    sectionLabel: access.section ? sectionLabel(roster, access.section.classId, access.section.sectionId) : "",
+    me: actor.staffId,
+  };
+}
+
+export type GroupOp = "rename" | "addStaff" | "removeStaff" | "setSection" | "clearSection" | "leave";
+const GROUP_OPS: GroupOp[] = ["rename", "addStaff", "removeStaff", "setSection", "clearSection", "leave"];
+
+const TOO_FEW = "A group needs at least two staff. Add someone else first, or ask a moderator to close it.";
+const CHANGED = "This group was changed by someone else — reload it and try again.";
+
+/**
+ * Change a staff-made group (director, 30 Oct 2026: "after making chat
+ * groups there is no option to edit the group and remove or add members").
+ *
+ *  - rename, addStaff, removeStaff, setSection, clearSection: the group's
+ *    maker (while still in it) or a chat moderator; anyone else 403.
+ *  - leave: any member of staff in it, for themselves. When the maker
+ *    leaves, only moderators can change the group.
+ *  - Staff added: active staff only (as createStaffGroup). A section: only
+ *    one the person teaches, or a moderator (as createStaffGroup).
+ *  - At least 2 staff, at most GROUP_MAX_STAFF (the DB check too).
+ *  - One UPDATE, made only if the row still holds what this request read
+ *    (staff, name, section) — and the caller's `rev` must be the version
+ *    they saw. Otherwise 409, nothing changed.
+ *  - Membership is read from staff_ids on every request, so whoever is
+ *    removed loses read, send and push at once; whoever is added gains them.
+ *  - Each change leaves a history line in the group ("Asha added Ravi"),
+ *    best-effort: the change stands if the line cannot be written.
+ */
+export async function manageStaffGroup(
+  ctx: ApiAuthContext,
+  actor: ChatActor,
+  input: { op?: unknown; conversationId?: unknown; rev?: unknown; title?: unknown; staffIds?: unknown; section?: unknown },
+): Promise<{ id: string; title: string; rev: string; staffIds: string[]; section: { classId: string; sectionId: string } | null; left: boolean }> {
+  if (actor.kind !== "staff") throw new ApiError("forbidden", "Only staff can change a group.", 403);
+  const op = String(input.op ?? "") as GroupOp;
+  if (!GROUP_OPS.includes(op)) throw new ApiError("bad_request", "Say what to change (rename, addStaff, removeStaff, setSection, clearSection or leave).", 400);
+  const id = String(input.conversationId ?? "").trim();
+  if (parseConversationId(id)?.kind !== "group") throw new ApiError("not_found", "No such group", 404);
+  const rev = String(input.rev ?? "").trim();
+  if (!rev) throw new ApiError("bad_request", "Reload the group first (rev missing).", 400);
+
+  const t = await chatTenant();
+  const row = await readConvRow(t, id);
+  if (!row || row.kind !== "group") throw new ApiError("not_found", "No such group", 404);
+  const member = row.staff_ids.includes(actor.staffId);
+  if (op === "leave") {
+    if (!member) throw new ApiError("bad_request", "You are not in this group.", 400);
+  } else if (!actor.moderator && !(member && isGroupMaker(actor, row.created_by || ""))) {
+    throw new ApiError("forbidden", "Only the staff member who made this group, or a chat moderator, can change it.", 403);
+  }
+  if (rev !== groupRev(row)) throw new ApiError("conflict", CHANGED, 409);
+
+  const roster = await loadChatRoster(ctx, actor.ay);
+  const who = (sid: string) => (sid === actor.staffId ? actor.name || staffName(roster, sid) : roster.staff.find((s) => s.id === sid)?.fullName || "a staff member");
+  const me = actor.name || staffName(roster, actor.staffId);
+  const picked = Array.isArray(input.staffIds) ? [...new Set(input.staffIds.map((x) => String(x ?? "").trim()).filter(Boolean))] : [];
+  const names = (ids: string[]) => ids.map(who).join(", ");
+
+  let staffIds = row.staff_ids;
+  let title = row.title;
+  let classId = row.class_id || "";
+  let sectionId = row.section_id || "";
+  let ay = row.academic_year_code || "";
+  let note: string;
+  switch (op) {
+    case "rename": {
+      title = String(input.title ?? "").replace(/\s+/g, " ").trim();
+      if (!title) throw new ApiError("bad_request", "Give the group a name.", 400);
+      if (title.length > 120) throw new ApiError("bad_request", "That name is too long (120 characters at most).", 400);
+      if (title === row.title) throw new ApiError("bad_request", "That is already the group's name.", 400);
+      note = `${me} renamed the group to "${title}"`;
+      break;
+    }
+    case "addStaff": {
+      const active = new Set(roster.staff.filter((s) => s.status !== "inactive").map((s) => s.id));
+      const fresh = picked.filter((sid) => !row.staff_ids.includes(sid));
+      if (!fresh.length) throw new ApiError("bad_request", picked.length ? "They are already in the group." : "Pick someone to add.", 400);
+      for (const sid of fresh) if (!active.has(sid)) throw new ApiError("not_found", "One of the staff picked was not found (or has left).", 404);
+      staffIds = [...row.staff_ids, ...fresh].sort();
+      if (staffIds.length > GROUP_MAX_STAFF) throw new ApiError("bad_request", `A group can have ${GROUP_MAX_STAFF} staff at most.`, 400);
+      note = `${me} added ${names(fresh)}`;
+      break;
+    }
+    case "removeStaff": {
+      if (!picked.length) throw new ApiError("bad_request", "Pick someone to remove.", 400);
+      for (const sid of picked) if (!row.staff_ids.includes(sid)) throw new ApiError("bad_request", "One of them is not in the group.", 400);
+      staffIds = row.staff_ids.filter((sid) => !picked.includes(sid));
+      if (staffIds.length < 2) throw new ApiError("bad_request", TOO_FEW, 400);
+      note = picked.length === 1 && picked[0] === actor.staffId ? `${me} left` : `${me} removed ${names(picked)}`;
+      break;
+    }
+    case "leave": {
+      staffIds = row.staff_ids.filter((sid) => sid !== actor.staffId);
+      if (staffIds.length < 2) throw new ApiError("bad_request", TOO_FEW, 400);
+      note = `${me} left`;
+      break;
+    }
+    case "setSection": {
+      const sec = (input.section ?? {}) as { classId?: unknown; sectionId?: unknown };
+      classId = String(sec.classId ?? "");
+      sectionId = String(sec.sectionId ?? "");
+      const hit = groupSectionsFor(roster, actor.staffId, actor.moderator).find((x) => x.classId === classId && x.sectionId === sectionId);
+      if (!hit) throw new ApiError("forbidden", "You can add only a class section you teach.", 403);
+      if (classId === row.class_id && sectionId === row.section_id && ay === actor.ay) throw new ApiError("bad_request", "That is already the group's class section.", 400);
+      ay = actor.ay;
+      note = `${me} opened the group to ${hit.label} families (they can read it)`;
+      break;
+    }
+    case "clearSection": {
+      if (!row.class_id) throw new ApiError("bad_request", "This group has no class section.", 400);
+      note = `${me} made the group staff only (${sectionLabel(roster, row.class_id, row.section_id || "")} families no longer see it)`;
+      classId = "";
+      sectionId = "";
+      break;
+    }
+  }
+
+  const now = new Date().toISOString();
+  // One UPDATE, only if the row still holds exactly what was read above:
+  // the same staff (as a set), name and section.
+  const { data: upd, error } = await t.sb
+    .from("school_chat_conversations")
+    .update({ staff_ids: staffIds, title, class_id: classId, section_id: sectionId, academic_year_code: ay, last_message_at: now })
+    .eq("tenant_id", t.tenantId)
+    .eq("id", id)
+    .eq("kind", "group")
+    .contains("staff_ids", row.staff_ids)
+    .containedBy("staff_ids", row.staff_ids)
+    .eq("title", row.title)
+    .eq("class_id", row.class_id || "")
+    .eq("section_id", row.section_id || "")
+    .select("id");
+  if (error) {
+    if (error.code === "23514") throw new ApiError("bad_request", TOO_FEW, 400);
+    dbFail("group change", error, true);
+  }
+  if (!((upd ?? []) as { id: string }[]).length) throw new ApiError("conflict", CHANGED, 409);
+
+  // The history line (best-effort; the change above already stands).
+  const { error: nErr } = await t.sb.from("school_chat_messages").insert({
+    tenant_id: t.tenantId,
+    conversation_id: id,
+    sender_kind: "staff",
+    sender_id: GROUP_NOTE_SENDER,
+    household_id: "",
+    sender_label: "Group",
+    body: note.slice(0, 2000),
+    status: "visible",
+    moderation: { by: "none", note: true, op, actor: actorKey(actor) },
+    created_at: now,
+  });
+  if (nErr) console.warn(`[school-chat] group note not written (${op} on ${id}): ${nErr.message}`);
+
+  const section = classId ? { classId, sectionId } : null;
+  return { id, title, staffIds, section, rev: groupRev({ staff_ids: staffIds, title, class_id: classId, section_id: sectionId }), left: member && !staffIds.includes(actor.staffId) };
 }
 
 /** Who the caller can start a direct chat with. */
