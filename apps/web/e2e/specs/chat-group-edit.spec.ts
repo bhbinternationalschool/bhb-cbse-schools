@@ -368,10 +368,23 @@ test.describe.serial("chat-group-edit: rename, members, section, leave", () => {
         expect(overflow, "no sideways scroll").toBeLessThanOrEqual(1);
         await page.screenshot({ path: testInfo.outputPath(`group-history-${v.name}.png`) });
         await testInfo.attach(`group-history-${v.name}`, { path: testInfo.outputPath(`group-history-${v.name}.png`), contentType: "image/png" });
+
+        // A group whose maker has left: a member is told only moderators can change it.
+        const orphan = await maker.post("/api/v1/school-chat/groups", { title: `Maker left ${v.name} ${tag}`, staffIds: [ct.staffId!, sid(P28)] });
+        expect(orphan.status).toBe(200);
+        expect((await change(maker, orphan.body.data.id, await revOf(maker, orphan.body.data.id), { op: "leave" })).status).toBe(200);
+        await thread.getByRole("button", { name: "Back" }).click();
+        await drawer.getByText(`Maker left ${v.name} ${tag}`).click();
+        await thread.getByTestId("school-chat-group-menu").click();
+        await expect(thread.getByRole("menuitem", { name: "Edit name" }), "not the maker: no Edit name").toHaveCount(0);
+        await thread.getByRole("menuitem", { name: /Members/ }).click();
+        await expect(thread.getByTestId("school-chat-creator-left")).toContainText("only a chat moderator can change it now");
+        await expect(thread.getByRole("button", { name: /^Remove / })).toHaveCount(0);
+        await page.screenshot({ path: testInfo.outputPath(`group-maker-left-${v.name}.png`) });
+        await testInfo.attach(`group-maker-left-${v.name}`, { path: testInfo.outputPath(`group-maker-left-${v.name}.png`), contentType: "image/png" });
       } finally {
         await context.close();
       }
     }
-    void ct;
   });
 });
