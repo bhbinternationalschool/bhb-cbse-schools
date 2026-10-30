@@ -220,6 +220,26 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
     tabs: ["agreements"],
   },
   {
+    // Staff tasks (director, 30 Oct 2026): tracked work assigned to staff —
+    // deadline, progress, completion evidence and the assigner's review.
+    // Who may assign and review: the director and the principal (both hold
+    // the whole Staff module), plus anyone granted THIS function in the
+    // RBAC editor — no automatic office grant. An assignee sees and updates
+    // only their own tasks through the module's routes; the generic
+    // collection entries carry teacherScope "deny".
+    id: "staff.tasks",
+    module: "staff",
+    group: "Tasks",
+    label: "Staff tasks",
+    blurb:
+      "Assign tracked work to staff (deadline, priority, evidence), watch progress, and review completion — accept or return with a note.",
+    actions: ["view", "create", "edit", "approve"],
+    tabs: ["tasks"],
+    // Routes land with the screens PR: /api/staff/tasks and
+    // /api/staff/tasks/[id]. Listing them now would fail the catalog
+    // completeness selftest (route must exist).
+  },
+  {
     id: "staff.duty_roster",
     module: "staff",
     label: "Duty roster",
