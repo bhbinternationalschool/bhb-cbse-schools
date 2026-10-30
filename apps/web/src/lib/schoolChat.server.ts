@@ -1305,7 +1305,7 @@ export async function manageStaffGroup(
   if (nErr) console.warn(`[school-chat] group note not written (${op} on ${id}): ${nErr.message}`);
 
   const section = classId ? { classId, sectionId } : null;
-  return { id, title, staffIds, section, rev: groupRev({ staff_ids: staffIds, title, class_id: classId, section_id: sectionId }), left: !staffIds.includes(actor.staffId) };
+  return { id, title, staffIds, section, rev: groupRev({ staff_ids: staffIds, title, class_id: classId, section_id: sectionId }), left: member && !staffIds.includes(actor.staffId) };
 }
 
 /** Who the caller can start a direct chat with. */
