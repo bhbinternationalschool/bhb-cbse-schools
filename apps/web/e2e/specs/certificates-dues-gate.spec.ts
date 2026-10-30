@@ -91,7 +91,16 @@ async function openAs(browser: Browser, who: Who, shot: Shot): Promise<Page> {
 async function toIssueStep(page: Page, child: { fullName: string; admissionNo: string }, kind: "tc" | "fee_clearance") {
   await page.goto("/certificates");
   await page.getByPlaceholder("Name, admission no, or mobile…").fill(child.fullName, { timeout: 30_000 });
-  await page.getByRole("button", { name: new RegExp(child.fullName) }).first().click({ timeout: 20_000 });
+  // The search hit, never a "Recent issues" row: the fixture's E2E-BON-1 is
+  // a bonafide for the voucher child, and while the register is still
+  // landing ("Loading students…") a bare name match is that row — clicking it
+  // opens an old certificate and picks no one (PR #751's gate, 30 Oct 2026).
+  // A hit, and only a hit, carries the child's dues line.
+  await page
+    .getByRole("button", { name: new RegExp(child.fullName) })
+    .filter({ hasText: /open dues|dues: not shown for your role/ })
+    .first()
+    .click({ timeout: 20_000 });
   await page.getByRole("tab", { name: /Certificate type/ }).click();
   await page.locator("label", { hasText: "Certificate type" }).locator("select").selectOption(kind);
   await page.getByRole("tab", { name: /Preview & issue/ }).click();
