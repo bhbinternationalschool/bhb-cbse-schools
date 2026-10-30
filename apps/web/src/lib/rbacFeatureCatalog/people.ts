@@ -235,7 +235,7 @@ export const PEOPLE_FEATURES: RbacFeatureDef[] = [
       "Assign tracked work to staff (deadline, priority, evidence), watch progress, and review completion — accept or return with a note.",
     actions: ["view", "create", "edit", "approve"],
     tabs: ["tasks"],
-    routes: ["/api/staff/tasks", "/api/staff/tasks/[id]", "/api/data/views/staff-tasks"],
+    routes: ["/api/staff/tasks", "/api/staff/tasks/[id]", "/api/staff/tasks/evidence", "/api/staff/tasks/evidence/[...path]", "/api/data/views/staff-tasks"],
   },
   {
     id: "staff.duty_roster",
