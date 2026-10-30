@@ -66,6 +66,7 @@ type Json = {
     title: string;
     rev: string;
     staffIds: string[];
+    left: boolean;
     conversations: { id: string; title: string }[];
     messages: { body: string; system?: boolean }[];
     conversation: { title: string; manage: Manage | null; canSend: boolean };
