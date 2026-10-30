@@ -24,8 +24,9 @@ export function geminiModel(tier: "flash" | "pro" = "flash"): string {
   if (tier === "pro") {
     return (
       process.env.GEMINI_PRO_MODEL ||
-      // Available on the prod key as of 2026-08-18 (see docs/AI_ROADMAP_2026-08.md §1b).
-      "gemini-2.5-pro"
+      // gemini-2.5-pro was retired for new users on 2026-10-30; replaced with 3.1
+      // (https://ai.google.dev/gemini-api/docs/models/gemini-api#gemini-3.1)
+      "gemini-3.1-pro"
     ).trim();
   }
   return (
