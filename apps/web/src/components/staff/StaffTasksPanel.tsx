@@ -23,8 +23,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { loadMasters } from "@/lib/masters";
-import { isStaffActive, type StaffRecord } from "@/lib/foundationMasters";
+import { useStaffList } from "@/lib/data/client/hooks";
 import { ErpPanel } from "@/components/ui/erp-roster";
 import { field, btn, btnOutline } from "@/components/ui/erp-ui";
 import {
@@ -225,12 +224,16 @@ export function StaffTasksPanel({ staffOptions }: StaffTasksPanelProps) {
   const [sub, setSub] = useState<"board" | "assign" | "review">("board");
   const [openId, setOpenId] = useState<string | null>(null);
 
+  // The roster comes from the server-backed staff-list view (the data-layer
+  // 2.1c pattern every sibling panel uses), never from the browser's masters
+  // copy — reading the tab copy here would grow the retired-pattern budget.
+  const staffList = useStaffList();
   const roster = useMemo(() => {
     if (staffOptions) return staffOptions;
-    const m = loadMasters();
-    const staff: StaffRecord[] = (m?.staff ?? []) as StaffRecord[];
-    return staff.filter((s) => isStaffActive(s)).map((s) => ({ id: s.id, label: s.fullName || s.empCode || s.id }));
-  }, [staffOptions]);
+    return (staffList.data?.staff ?? [])
+      .filter((s) => s.status === "active")
+      .map((s) => ({ id: s.id, label: s.fullName || s.empCode || s.id }));
+  }, [staffOptions, staffList.data]);
   const labelFor = useCallback(
     (staffId: string) => roster.find((s) => s.id === staffId)?.label ?? staffId,
     [roster],
