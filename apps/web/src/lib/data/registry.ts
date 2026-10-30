@@ -362,6 +362,22 @@ export const COLLECTIONS: readonly CollectionDef[] = [
     }),
   ),
 
+  // ── Staff tasks (30 Oct 2026, migration 20261030120000) ───────────────
+  // Director/principal assigns, the assignee reports progress with evidence,
+  // the director reviews. staff_tasks is deliberately NOT a collection: the
+  // generic kernel route would let any Staff · edit holder (admin, office)
+  // create tasks or move assignee/due/evidence/text fields, widening the
+  // 30 Oct assignment rule (director + principal + explicit staff.tasks
+  // grant only) and bypassing the own-task/assign/review checks. Every read
+  // and write runs on the module's own routes (/api/staff/tasks,
+  // /api/data/views/staff-tasks; lib/staffTasks.server.ts) against the
+  // desk_writable_tables allowlist. Same treatment as the log below.
+  // The append-only progress log (staff_task_updates) is deliberately NOT a
+  // collection: evidence and progress history must never be writable through
+  // the generic kernel route (30 Oct review). The module routes write it
+  // (desk_write_guarded) and serve it: GET /api/staff/tasks/<id>.
+
+
   // ── Website (Phase 1) ──────────────────────────────────────────────────
   // Server-authoritative from the first commit, unlike most desks here. A
   // parent, a search engine and an admissions enquiry all read the public
