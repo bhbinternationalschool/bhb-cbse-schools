@@ -32,6 +32,14 @@ export async function GET(request: Request, ctx: RouteCtx) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // Staff-task evidence is NOT staff-wide: it serves only through
+  // /api/staff/tasks/evidence/..., which applies the task-level read rule
+  // (assignee, assigner, manager, reviewer) on every download. A guessed or
+  // copied URL must not open another staff member's evidence here.
+  if (path.startsWith("staff-tasks/")) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   // Only types this bucket is allowed to hold can come back out of it, so a
   // file smuggled in by some other route cannot be served as something the
   // browser will execute.
