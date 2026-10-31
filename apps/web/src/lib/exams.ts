@@ -3030,6 +3030,14 @@ export type ReportCardComponentLine = {
   maxMarks: number;
   marksObtained: number | null;
   requiredOnMarksheet: boolean;
+  /** This component exam's own grade on the class's scale — an HPC's
+   * per-exam descriptor column never derives from the weighted total. */
+  grade: string;
+  gradeLabel: string;
+  /** Split parts as entered on THIS exam's sheet (Written/Oral …). */
+  parts: ReportCardLine["parts"];
+  /** Graded parts as entered on THIS exam's sheet (Rhymes, Handwriting). */
+  gradedParts: NonNullable<ReportCardLine["gradedParts"]>;
 };
 
 export type ReportCard = {
@@ -3070,6 +3078,14 @@ export type ReportCard = {
     rating: CoScholasticRating | null;
     ratingLabel: string;
   }[];
+  /** Aggregate cards only: each contributing exam's OWN co-scholastic
+   * ratings, so a card can show one column per exam. Ratings are never
+   * averaged across exams — each column is that exam's sheet as saved. */
+  coScholasticByExam?: {
+    examTermId: string;
+    examLabel: string;
+    ratings: ReportCard["coScholastic"];
+  }[];
   /** Class teacher's overall remark from THIS term's own sheet (never
    * aggregated across component exams). null when none was written. */
   overallRemark: { text: string; textHi: string; source: RemarkSource } | null;
@@ -3077,6 +3093,9 @@ export type ReportCard = {
   schemeId: string;
   schemeName: string;
   displayMode: AssessmentScheme["displayMode"];
+  /** The scheme's full grade scale, so the printed legend can list every
+   * band — not only the grades this student happened to earn. */
+  gradeBands?: { grade: string; label: string }[];
   /** Set by buildClassResultSheet when the scheme shows them; null otherwise. */
   rank: number | null;
   classSize: number | null;
@@ -3383,6 +3402,7 @@ export function buildReportCard(input: {
     schemeId: scheme.id,
     schemeName: scheme.name,
     displayMode: scheme.displayMode,
+    gradeBands: scheme.gradeBands.map((b) => ({ grade: b.grade, label: b.label })),
     rank: null,
     classSize: null,
     classAverage: null,
@@ -3488,6 +3508,7 @@ export function buildReportCard(input: {
         const max = standing.maxMarks;
         const obtained = absence ? null : standing.obtained;
         if (c.requiredOnMarksheet || obtained != null) {
+          const compGrade = gradeOf(obtained, max);
           components.push({
             examTermId: c.id,
             examCode: c.code,
@@ -3497,6 +3518,10 @@ export function buildReportCard(input: {
             maxMarks: max,
             marksObtained: obtained,
             requiredOnMarksheet: c.requiredOnMarksheet,
+            grade: compGrade,
+            gradeLabel: gradeLabel(compGrade, scheme),
+            parts: standing.parts,
+            gradedParts: standing.gradedParts,
           });
         }
         if (obtained != null && weight > 0 && max > 0) {
@@ -3608,6 +3633,20 @@ export function buildReportCard(input: {
         input.student.classId,
         masters,
       ),
+      coScholasticByExam: contributors.map((c) => ({
+        examTermId: c.id,
+        examLabel: c.label,
+        ratings: coScholasticForReportCard(
+          ay,
+          c.id,
+          input.student.sectionId,
+          input.student.id,
+          state,
+          policy,
+          input.student.classId,
+          masters,
+        ),
+      })),
       overallRemark: overallRemarkForReportCard(
         ay,
         term.id,

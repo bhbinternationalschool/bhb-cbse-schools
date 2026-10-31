@@ -312,6 +312,21 @@ if [[ ! -f "$DEPLOY_SA_KEY" ]]; then
   gcloud config set account "${GCLOUD_ACCOUNT:-director@bhbinternational.school}" >/dev/null 2>&1 || true
 fi
 
+# cloudbuild.yaml now binds REVIEW_LOGIN_CODE from Secret Manager. A missing
+# or unreadable secret fails the deploy AFTER the full image build - check
+# now, before spending the build. cloudbuild.yaml binds the alias "latest",
+# which resolves to the newest version whatever its state, so that exact
+# version must be ENABLED. Metadata only; the value is never read.
+rlc_state=$(gcloud secrets versions list school-erp-review-login-code \
+  --project="$PROJECT_ID" --sort-by='~createTime' --limit=1 \
+  --format='value(state)' 2>/dev/null || true)
+if [[ "$rlc_state" != "ENABLED" ]]; then
+  echo "school-erp-review-login-code: latest version state is '${rlc_state:-unknown}', not ENABLED, in $PROJECT_ID."
+  echo "cloudbuild.yaml binds it for the Play reviewer login; create it first"
+  echo "(docs/DEPLOY_GITHUB_ACTIONS_WIF.md) or the deploy fails at the final step."
+  exit 1
+fi
+
 SUBSTITUTIONS="^@^"
 SUBSTITUTIONS+="_NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}"
 SUBSTITUTIONS+="@_NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON}"
@@ -347,7 +362,10 @@ SUBSTITUTIONS+="@_CASHFREE_PAYOUT_CLIENT_ID=${CASHFREE_PAYOUT_CLIENT_ID}"
 SUBSTITUTIONS+="@_CASHFREE_PAYOUT_ENV=${CASHFREE_PAYOUT_ENV:-sandbox}"
 SUBSTITUTIONS+="@_CASHFREE_PAYOUTS_ARMED=${CASHFREE_PAYOUTS_ARMED:-false}"
 SUBSTITUTIONS+="@_REVIEW_LOGIN_MOBILE=${REVIEW_LOGIN_MOBILE}"
-SUBSTITUTIONS+="@_REVIEW_LOGIN_CODE=${REVIEW_LOGIN_CODE}"
+# REVIEW_LOGIN_CODE is no longer a substitution: cloudbuild.yaml binds it
+# from Secret Manager (school-erp-review-login-code) so it never lands in a
+# build record. The local read above still gates the 'Play review login:
+# configured' deploy-log line.
 SUBSTITUTIONS+="@_REVIEW_LOGIN_HOUSEHOLD_ID=${REVIEW_LOGIN_HOUSEHOLD_ID}"
 SUBSTITUTIONS+="@_COMMIT_SHA=${COMMIT_SHA}"
 # BigQuery settings and the desk-cutover flags are part of the single

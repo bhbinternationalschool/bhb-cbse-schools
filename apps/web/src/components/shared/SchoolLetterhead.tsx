@@ -30,6 +30,7 @@ export function SchoolLetterhead({
   showContact = true,
   masters,
   className = "",
+  nameSans = false,
 }: {
   /** The document's own name, under the rule — "Salary slip", "Report card". */
   title?: string;
@@ -42,6 +43,10 @@ export function SchoolLetterhead({
   showContact?: boolean;
   masters?: MastersState | null;
   className?: string;
+  /** The new report-card designs print the school name in a clean sans,
+      matching their approved previews; every existing sheet keeps the
+      brand serif it has always used. */
+  nameSans?: boolean;
 }) {
   const sm = size === "sm";
   // The crest on both sides, not the full logo: the logo is a lockup with the
@@ -67,7 +72,7 @@ export function SchoolLetterhead({
         />
         <div className="min-w-0 flex-1 text-center">
           <p
-            className={`font-brand-name font-bold leading-tight text-[var(--brand-deep)] ${sm ? "text-[14px]" : "text-[19px]"}`}
+            className={`${nameSans ? "font-sans font-extrabold tracking-[0.01em]" : "font-brand-name font-bold"} leading-tight text-[var(--brand-deep)] ${sm ? "text-[14px]" : "text-[19px]"}`}
           >
             {schoolPrintName(masters)}
           </p>
