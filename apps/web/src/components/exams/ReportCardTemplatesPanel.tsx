@@ -320,6 +320,34 @@ function TemplateEditor({
             ))}
           </select>
         </label>
+        {draft.layout === "hpc" ? (
+          <>
+            <label className="block text-sm">
+              <span className={label}>Card style</span>
+              <select
+                className="field !py-1.5"
+                value={draft.cardTheme}
+                onChange={(e) => set("cardTheme", e.target.value as ReportCardTemplate["cardTheme"])}
+                aria-label="Card style"
+              >
+                <option value="standard">Standard</option>
+                <option value="kids">Kids — playful frame and decorations</option>
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className={label}>Remarks position</span>
+              <select
+                className="field !py-1.5"
+                value={draft.remarksPosition}
+                onChange={(e) => set("remarksPosition", e.target.value as ReportCardTemplate["remarksPosition"])}
+                aria-label="Remarks position"
+              >
+                <option value="first">Above the learning areas (HPC convention)</option>
+                <option value="after_tables">Below the tables, above signatures</option>
+              </select>
+            </label>
+          </>
+        ) : null}
         <label className="block text-sm">
           <span className={label}>Card title</span>
           <input className="field !py-1.5" value={draft.title} onChange={(e) => set("title", e.target.value)} maxLength={60} />
@@ -409,6 +437,20 @@ function TemplateEditor({
         <div className="mt-2 grid gap-2 sm:grid-cols-3">
           <TriSelect label="Attendance" value={draft.showAttendance} onChange={(v) => set("showAttendance", v)} />
           <TriSelect label="Rank in class" value={draft.showRank} onChange={(v) => set("showRank", v)} />
+          <label className="block text-sm">
+            <span className={label}>Rank printed for</span>
+            <select
+              className="field !py-1.5"
+              value={draft.rankTopOnly == null ? "all" : String(draft.rankTopOnly)}
+              onChange={(e) => set("rankTopOnly", e.target.value === "all" ? null : Number(e.target.value))}
+              aria-label="Rank printed for"
+            >
+              <option value="all">Every student (shows “of N”)</option>
+              <option value="3">Top 3 only (no “of N”)</option>
+              <option value="5">Top 5 only (no “of N”)</option>
+              <option value="10">Top 10 only (no “of N”)</option>
+            </select>
+          </label>
           <TriSelect label="Class average" value={draft.showClassAverage} onChange={(v) => set("showClassAverage", v)} />
           <TriSelect label="Result (promoted / detained)" value={draft.showResult} onChange={(v) => set("showResult", v)} />
           <div className="space-y-1.5 sm:col-span-2 sm:pt-5">
@@ -467,6 +509,20 @@ function TemplateEditor({
             <input className="field !py-1.5" value={draft.footerNote} onChange={(e) => set("footerNote", e.target.value)} maxLength={300} />
           </label>
           <Check label="School watermark" checked={draft.showWatermark} onChange={(v) => set("showWatermark", v)} />
+          {draft.showWatermark ? (
+            <label className="block text-sm">
+              <span className={label}>Watermark style</span>
+              <select
+                className="field !py-1.5"
+                value={draft.watermarkStyle}
+                onChange={(e) => set("watermarkStyle", e.target.value as ReportCardTemplate["watermarkStyle"])}
+                aria-label="Watermark style"
+              >
+                <option value="center">School initials, centred</option>
+                <option value="tile">School name repeated across the page + crest</option>
+              </select>
+            </label>
+          ) : null}
         </div>
       </div>
 
@@ -480,4 +536,4 @@ function TemplateEditor({
       </div>
     </div>
   );
-}
+    }
