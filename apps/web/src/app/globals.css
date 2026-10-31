@@ -1039,6 +1039,13 @@ h3,
     overflow: visible !important;
   }
 
+  /* The playful pre-primary report card keeps its pastel frame on paper —
+     the shared rule above strips sheet borders for every other document. */
+  body.printing-certificate .certificate-sheet.print-target.certificate-kids {
+    border: 2px solid #8fc8e8 !important;
+    border-radius: 24px !important;
+  }
+
   body.printing-certificate .certificate-sheet .print-hide,
   body.printing-certificate .print-hide {
     display: none !important;
