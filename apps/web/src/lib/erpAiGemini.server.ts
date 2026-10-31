@@ -15,6 +15,19 @@ export function geminiApiKey(): string {
 }
 
 /**
+ * Map deprecated Gemini models to their current replacements.
+ * When an env var holds a retired model, swap to the current stable model.
+ */
+function mapRetiredGeminiModel(model: string): string {
+  const retiredModels: Record<string, string> = {
+    "gemini-2.5-pro": "gemini-3.1-pro",
+    "gemini-2.5-flash": "gemini-3.6-flash",
+    "gemini-2.0-flash": "gemini-3.6-flash",
+  };
+  return retiredModels[model] || model;
+}
+
+/**
  * Model per tier. "flash" is the default for every route; "pro" is opted
  * into per call (exam papers, marking schemes — anything where a plausible
  * but wrong answer costs more than the tokens). Both overridable by env so
@@ -22,20 +35,22 @@ export function geminiApiKey(): string {
  */
 export function geminiModel(tier: "flash" | "pro" = "flash"): string {
   if (tier === "pro") {
-    return (
+    const model = (
       process.env.GEMINI_PRO_MODEL ||
       // gemini-2.5-pro was retired for new users on 2026-10-30; replaced with 3.1
       // (https://ai.google.dev/gemini-api/docs/models/gemini-api#gemini-3.1)
       "gemini-3.1-pro"
     ).trim();
+    return mapRetiredGeminiModel(model);
   }
-  return (
+  const model = (
     process.env.GEMINI_MODEL ||
     process.env.GOOGLE_GEMINI_MODEL ||
     // gemini-2.0/2.5-flash were retired for new users (404 as of 2026-08-18);
     // Google names 3.6-flash as the replacement.
     "gemini-3.6-flash"
   ).trim();
+  return mapRetiredGeminiModel(model);
 }
 
 export type LlmUsage = {

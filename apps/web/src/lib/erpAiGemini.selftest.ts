@@ -31,7 +31,33 @@ export async function runSelftest() {
     `Explicit pro tier should match pro() result`,
   );
 
-  console.log(`✓ erpAiGemini: model defaults are correct (flash: ${flashModel}, pro: ${proModel})`);
+  // Test 4: env var with deprecated model (gemini-2.5-pro) is mapped to 3.1-pro
+  const originalProModel = process.env.GEMINI_PRO_MODEL;
+  const originalFlashModel = process.env.GEMINI_MODEL;
+  try {
+    process.env.GEMINI_PRO_MODEL = "gemini-2.5-pro";
+    const mappedPro = geminiModel("pro");
+    assert(
+      mappedPro === "gemini-3.1-pro",
+      `Deprecated gemini-2.5-pro should map to gemini-3.1-pro, got: ${mappedPro}`,
+    );
+
+    // Test 5: deprecated flash model mapping
+    process.env.GEMINI_MODEL = "gemini-2.5-flash";
+    const mappedFlash = geminiModel();
+    assert(
+      mappedFlash === "gemini-3.6-flash",
+      `Deprecated gemini-2.5-flash should map to gemini-3.6-flash, got: ${mappedFlash}`,
+    );
+  } finally {
+    // Restore original env vars
+    if (originalProModel !== undefined) process.env.GEMINI_PRO_MODEL = originalProModel;
+    else delete process.env.GEMINI_PRO_MODEL;
+    if (originalFlashModel !== undefined) process.env.GEMINI_MODEL = originalFlashModel;
+    else delete process.env.GEMINI_MODEL;
+  }
+
+  console.log(`✓ erpAiGemini: model defaults are correct (flash: ${flashModel}, pro: ${proModel}) and deprecated models are mapped`);
 }
 
 if (require.main === module) {
