@@ -5,7 +5,10 @@
 #
 # Set up once — see docs/DEPLOY_GITHUB_ACTIONS_WIF.md. Nothing here is secret:
 # the real credentials live in Secret Manager and are bound by cloudbuild.yaml;
-# the eight substitution values below are non-secret repo *variables*.
+# the substitution values below are non-secret repo *variables* plus one
+# literal (demo auth pinned off). The one credential this deploy
+# needs - the Play reviewer code - never enters this file or the
+# build record: cloudbuild.yaml binds it from Secret Manager.
 
 name: Deploy to production
 
@@ -46,6 +49,60 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
+      # cloudbuild.yaml's --set-env-vars REPLACES the whole Cloud Run
+      # environment: a setting not passed here is erased from the live
+      # service. So every substitution this workflow passes must have a
+      # value before the build starts; demo auth is pinned false below as a
+      # literal (cloudbuild.yaml's default is "true", which would bake the
+      # credential-free /api/auth/demo login into the client bundle).
+      #
+      # What this preflight proves: each repo variable this workflow passes
+      # is non-empty, and the reviewer-code secret exists with an enabled
+      # version. What it CANNOT prove: that the values match the live
+      # service, or that IAM lets Cloud Build/Cloud Run use the secret -
+      # compare against the live service (gcloud run services describe)
+      # before relying on a first run.
+      - name: Preflight - required settings present
+        env:
+          V_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL }}
+          V_SUPABASE_ANON: ${{ vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          V_VAPID: ${{ vars.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}
+          V_WA_PHONE: ${{ vars.WHATSAPP_PHONE_ID }}
+          V_WA_WABA: ${{ vars.WHATSAPP_WABA_ID }}
+          V_OAUTH: ${{ vars.GOOGLE_OAUTH_CLIENT_ID }}
+          V_FLEET_IPS: ${{ vars.FLEET_EDGE_ALLOWED_IPS }}
+          V_FLEET_SOS: ${{ vars.FLEET_EDGE_SOS_NOTIFY_MOBILE }}
+          V_RL_MOBILE: ${{ vars.REVIEW_LOGIN_MOBILE }}
+          V_RL_HOUSEHOLD: ${{ vars.REVIEW_LOGIN_HOUSEHOLD_ID }}
+          V_CF_APP: ${{ vars.CASHFREE_APP_ID }}
+          V_CF_VER_APP: ${{ vars.CASHFREE_VERIFICATION_APP_ID }}
+          V_CF_PAYOUT: ${{ vars.CASHFREE_PAYOUT_CLIENT_ID }}
+          V_PG: ${{ vars.NEXT_PUBLIC_PAYMENT_GATEWAY }}
+          V_BQ_PROJECT: ${{ vars.BIGQUERY_PROJECT_ID }}
+        run: |
+          missing=""
+          for pair in "NEXT_PUBLIC_SUPABASE_URL:$V_SUPABASE_URL" "NEXT_PUBLIC_SUPABASE_ANON_KEY:$V_SUPABASE_ANON" "NEXT_PUBLIC_VAPID_PUBLIC_KEY:$V_VAPID" "WHATSAPP_PHONE_ID:$V_WA_PHONE" "WHATSAPP_WABA_ID:$V_WA_WABA" "GOOGLE_OAUTH_CLIENT_ID:$V_OAUTH" "FLEET_EDGE_ALLOWED_IPS:$V_FLEET_IPS" "FLEET_EDGE_SOS_NOTIFY_MOBILE:$V_FLEET_SOS" "REVIEW_LOGIN_MOBILE:$V_RL_MOBILE" "REVIEW_LOGIN_HOUSEHOLD_ID:$V_RL_HOUSEHOLD" "CASHFREE_APP_ID:$V_CF_APP" "CASHFREE_VERIFICATION_APP_ID:$V_CF_VER_APP" "CASHFREE_PAYOUT_CLIENT_ID:$V_CF_PAYOUT" "NEXT_PUBLIC_PAYMENT_GATEWAY:$V_PG" "BIGQUERY_PROJECT_ID:$V_BQ_PROJECT"; do
+            name="${pair%%:*}"; value="${pair#*:}"
+            [ -n "$value" ] || missing="$missing $name(repo-variable)"
+          done
+          # Secret metadata only - the value is never read or printed.
+          gcloud secrets describe school-erp-review-login-code \
+            --project=school-erp-prod-493619 --format='value(name)' > /dev/null 2>&1 \
+            || missing="$missing school-erp-review-login-code(secret missing or unreadable)"
+          # cloudbuild.yaml binds the version alias "latest", which resolves
+          # to the NEWEST version whatever its state - so check that exact
+          # version's state, not merely that some enabled version exists.
+          latest_state=$(gcloud secrets versions list school-erp-review-login-code \
+            --project=school-erp-prod-493619 --sort-by='~createTime' --limit=1 \
+            --format='value(state)' 2>/dev/null || true)
+          [ "$latest_state" = "ENABLED" ] \
+            || missing="$missing school-erp-review-login-code(latest version state: ${latest_state:-unknown})"
+          if [ -n "$missing" ]; then
+            echo "REFUSING TO DEPLOY - missing:$missing"
+            echo "See docs/DEPLOY_GITHUB_ACTIONS_WIF.md for where each value comes from."
+            exit 1
+          fi
+
       - name: Build, push, and deploy
         run: |
           gcloud builds submit \
@@ -59,7 +116,16 @@ jobs:
           _WHATSAPP_WABA_ID=${{ vars.WHATSAPP_WABA_ID }},\
           _GOOGLE_OAUTH_CLIENT_ID=${{ vars.GOOGLE_OAUTH_CLIENT_ID }},\
           _FLEET_EDGE_ALLOWED_IPS=${{ vars.FLEET_EDGE_ALLOWED_IPS }},\
-          _FLEET_EDGE_SOS_NOTIFY_MOBILE=${{ vars.FLEET_EDGE_SOS_NOTIFY_MOBILE }}"
+          _FLEET_EDGE_SOS_NOTIFY_MOBILE=${{ vars.FLEET_EDGE_SOS_NOTIFY_MOBILE }},\
+          _NEXT_PUBLIC_DEMO_AUTH=false,\
+          _COMMIT_SHA=${{ github.sha }},\
+          _REVIEW_LOGIN_MOBILE=${{ vars.REVIEW_LOGIN_MOBILE }},\
+          _REVIEW_LOGIN_HOUSEHOLD_ID=${{ vars.REVIEW_LOGIN_HOUSEHOLD_ID }},\
+          _CASHFREE_APP_ID=${{ vars.CASHFREE_APP_ID }},\
+          _CASHFREE_VERIFICATION_APP_ID=${{ vars.CASHFREE_VERIFICATION_APP_ID }},\
+          _CASHFREE_PAYOUT_CLIENT_ID=${{ vars.CASHFREE_PAYOUT_CLIENT_ID }},\
+          _NEXT_PUBLIC_PAYMENT_GATEWAY=${{ vars.NEXT_PUBLIC_PAYMENT_GATEWAY }},\
+          _BIGQUERY_PROJECT_ID=${{ vars.BIGQUERY_PROJECT_ID }}"
 
       - name: Report the serving revision
         run: |
