@@ -128,7 +128,7 @@ export function ReportCardSheet({
   const gridTh = `${gridB} bg-[var(--brand-deep)] px-2 py-1 text-left text-[9.5px] font-bold uppercase tracking-wide text-white`;
   const gridThC = `${gridB} bg-[var(--brand-deep)] px-2 py-1 text-center text-[9.5px] font-bold uppercase tracking-wide text-white`;
   const gridTd = `${gridB} px-2 py-[2px]`;
-  const sumK = `${gridB} bg-[#f8f8f0] px-2 py-[3px] text-center text-[9px] font-bold uppercase tracking-wide text-[var(--muted)]`;
+  const sumK = `${gridB} bg-[var(--print-rc-cream)] px-2 py-[3px] text-center text-[9px] font-bold uppercase tracking-wide text-[var(--muted)]`;
   const sumV = `${gridB} px-2 py-[3px] text-center font-bold text-[var(--brand-deep)]`;
   const perExam = gridExams.length > 0 || hpcExamColumns.length > 0;
   // Marks parts of one subject: from the contributing exams' sheets on an
@@ -194,7 +194,7 @@ export function ReportCardSheet({
   const remarksBlock =
     p.showRemarks && card.overallRemark ? (
       <div className={compact || kids || grid ? "mt-2" : "mt-5"}>
-        <p className={headClass("bg-[#e3f3e6]")}>Class teacher&apos;s remarks</p>
+        <p className={headClass("bg-[var(--print-rc-mint)]")}>Class teacher&apos;s remarks</p>
         {card.overallRemark.text ? (
           <p className={`${kids || grid ? "mt-1" : "mt-1.5"} ${grid ? "leading-snug" : "leading-relaxed"} text-[var(--brand-deep)] ${grid ? "text-xs" : text}`}>{card.overallRemark.text}</p>
         ) : null}
@@ -211,7 +211,7 @@ export function ReportCardSheet({
       id={`report-card-${card.student.id}-${card.examTerm.id}`}
       className={`certificate-sheet relative overflow-hidden bg-white ${
         kids
-          ? "certificate-kids rounded-3xl border-2 border-[#8fc8e8]"
+          ? "certificate-kids rounded-3xl border-2 border-[var(--print-rc-kids-sky)]"
           : "rounded-xl border border-[rgba(32,48,80,0.18)]"
       }`}
     >
@@ -251,7 +251,7 @@ export function ReportCardSheet({
       ) : null}
       {kids ? (
         <>
-          <div className="pointer-events-none absolute inset-2 rounded-2xl border border-dashed border-[#f0b8d0]" />
+          <div className="pointer-events-none absolute inset-2 rounded-2xl border border-dashed border-[var(--print-rc-kids-dash)]" />
           <svg className="pointer-events-none absolute left-4 top-4 h-9 w-14" viewBox="0 0 70 42" aria-hidden="true">
             <g fill="#dceffb" stroke="#8fc8e8" strokeWidth="2">
               <ellipse cx="24" cy="28" rx="16" ry="11" />
@@ -324,7 +324,7 @@ export function ReportCardSheet({
                     {row.map((f, fi) => (
                       <Fragment key={fi}>
                         <td
-                          className={`${gridB} bg-[#f8f8f0] px-2 ${grid ? "py-[2px]" : "py-1"} text-[9px] font-bold uppercase tracking-wide text-[var(--muted)]`}
+                          className={`${gridB} bg-[var(--print-rc-cream)] px-2 ${grid ? "py-[2px]" : "py-1"} text-[9px] font-bold uppercase tracking-wide text-[var(--muted)]`}
                           style={{ width: "16%" }}
                         >
                           {f.label}
@@ -417,14 +417,14 @@ export function ReportCardSheet({
 
         {hpc ? (
           <div className={kids ? "mt-2" : "mt-5"}>
-            <p className={headClass("bg-[#dceffb]")}>Learning areas</p>
+            <p className={headClass("bg-[var(--print-rc-sky-bg)]")}>Learning areas</p>
             {hpcExamColumns.length > 0 ? (
-              <table className={`mt-2 w-full ${text} ${kids ? "border-separate border-spacing-0 overflow-hidden rounded-xl border-[1.5px] border-[#8fc8e8]" : "border-collapse"}`}>
+              <table className={`mt-2 w-full ${text} ${kids ? "border-separate border-spacing-0 overflow-hidden rounded-xl border-[1.5px] border-[var(--print-rc-kids-sky)]" : "border-collapse"}`}>
                 <thead>
                   <tr className={kids ? "" : "border-b border-[rgba(32,48,80,0.2)] text-left text-[10px] uppercase tracking-wide text-[var(--muted)]"}>
-                    <th className={kids ? "border-b border-r border-[#cfe5f0] bg-[var(--brand-deep)] px-2 py-[2px] text-left text-[9.5px] font-bold uppercase tracking-wide text-white" : cell}>Learning area</th>
+                    <th className={kids ? "border-b border-r border-[var(--print-rc-kids-sky-soft)] bg-[var(--brand-deep)] px-2 py-[2px] text-left text-[9.5px] font-bold uppercase tracking-wide text-white" : cell}>Learning area</th>
                     {hpcExamColumns.map((c) => (
-                      <th key={c.id} className={kids ? "border-b border-r border-[#cfe5f0] bg-[var(--brand-deep)] px-2 py-[2px] text-center text-[9.5px] font-bold uppercase tracking-wide text-white last:border-r-0" : `${cell} text-center`}>
+                      <th key={c.id} className={kids ? "border-b border-r border-[var(--print-rc-kids-sky-soft)] bg-[var(--brand-deep)] px-2 py-[2px] text-center text-[9.5px] font-bold uppercase tracking-wide text-white last:border-r-0" : `${cell} text-center`}>
                         {c.label}
                       </th>
                     ))}
@@ -433,8 +433,8 @@ export function ReportCardSheet({
                 <tbody>
                   {card.lines.map((line, li) => (
                     <Fragment key={line.subjectId}>
-                      <tr className={kids ? (li % 2 === 1 ? "bg-[#f2f8fd]" : "") : "border-b border-[rgba(32,48,80,0.08)]"}>
-                        <td className={kids ? "border-b border-r border-[#cfe5f0] px-2 py-[2px] font-bold text-[var(--brand-deep)]" : `${cell} font-medium text-[var(--brand-deep)]`}>
+                      <tr className={kids ? (li % 2 === 1 ? "bg-[var(--print-rc-sky-row)]" : "") : "border-b border-[rgba(32,48,80,0.08)]"}>
+                        <td className={kids ? "border-b border-r border-[var(--print-rc-kids-sky-soft)] px-2 py-[2px] font-bold text-[var(--brand-deep)]" : `${cell} font-medium text-[var(--brand-deep)]`}>
                           {line.subjectName}
                           <span className="block text-[10px] font-normal text-[var(--muted)]">
                             {partsForLine(line).map((pt) => pt.label).join(" · ")}
@@ -443,7 +443,7 @@ export function ReportCardSheet({
                         {hpcExamColumns.map((c) => {
                           const comp = card.components.find((x) => x.examTermId === c.id && x.subjectId === line.subjectId);
                           return (
-                            <td key={c.id} className={kids ? "border-b border-r border-[#cfe5f0] px-2 py-[2px] text-center last:border-r-0" : `${cell} text-center`}>
+                            <td key={c.id} className={kids ? "border-b border-r border-[var(--print-rc-kids-sky-soft)] px-2 py-[2px] text-center last:border-r-0" : `${cell} text-center`}>
                               {comp ? (
                                 <>
                                   <span className="font-bold text-[var(--brand-deep)]">{comp.grade}</span>
@@ -459,14 +459,14 @@ export function ReportCardSheet({
                         })}
                       </tr>
                       {gradedForLine(line).map((g) => (
-                        <tr key={g.code} className={kids ? "bg-[#fdf6e3]" : "border-b border-[rgba(32,48,80,0.08)]"}>
-                          <td className={kids ? "border-b border-r border-[#cfe5f0] px-2 py-[2px] pl-5 text-[#384870]" : `${cell} pl-5 text-[var(--muted)]`}>&#8627; {g.label} (graded)</td>
+                        <tr key={g.code} className={kids ? "bg-[var(--print-rc-parchment)]" : "border-b border-[rgba(32,48,80,0.08)]"}>
+                          <td className={kids ? "border-b border-r border-[var(--print-rc-kids-sky-soft)] px-2 py-[2px] pl-5 text-[var(--print-rc-kids-ink)]" : `${cell} pl-5 text-[var(--muted)]`}>&#8627; {g.label} (graded)</td>
                           {hpcExamColumns.map((c) => {
                             const cg = card.components
                               .find((x) => x.examTermId === c.id && x.subjectId === line.subjectId)
                               ?.gradedParts.find((y) => y.code === g.code);
                             return (
-                              <td key={c.id} className={kids ? "border-b border-r border-[#cfe5f0] px-2 py-[2px] text-center font-semibold last:border-r-0" : `${cell} text-center font-semibold`}>
+                              <td key={c.id} className={kids ? "border-b border-r border-[var(--print-rc-kids-sky-soft)] px-2 py-[2px] text-center font-semibold last:border-r-0" : `${cell} text-center font-semibold`}>
                                 {cg?.grade ?? "—"}
                               </td>
                             );
@@ -574,7 +574,7 @@ export function ReportCardSheet({
                     )}
                   </tr>
                   {partsForLine(line).map((pt) => (
-                    <tr key={pt.code} className="bg-[#fbfbf7]">
+                    <tr key={pt.code} className="bg-[var(--print-rc-cream-soft)]">
                       <td className={`${gridTd} pl-5 text-[var(--muted)]`}>&#8627; {pt.label}</td>
                       {gridExams.length > 0 ? (
                         <>
@@ -617,7 +617,7 @@ export function ReportCardSheet({
                     </tr>
                   ))}
                   {gradedForLine(line).map((g) => (
-                    <tr key={g.code} className="bg-[#fbfbf7]">
+                    <tr key={g.code} className="bg-[var(--print-rc-cream-soft)]">
                       <td className={`${gridTd} pl-5 text-[var(--muted)]`}>&#8627; {g.label} (graded)</td>
                       {gridExams.length > 0 ? (
                         <>
@@ -653,7 +653,7 @@ export function ReportCardSheet({
             </tbody>
             {showTotals ? (
               <tfoot>
-                <tr className="bg-[#f8f8f0] font-bold">
+                <tr className="bg-[var(--print-rc-cream)] font-bold">
                   <td className={gridTd}>Total</td>
                   {gridExams.length > 0 ? (
                     <>
@@ -922,16 +922,16 @@ export function ReportCardSheet({
         {p.showCoScholastic && card.coScholastic.length > 0 ? (
           kids || grid ? (
             <div className={`${compact || kids ? "mt-2" : grid ? "mt-2" : "mt-5"} break-inside-avoid`}>
-              <p className={headClass("bg-[#fde3ee]")}>Co-scholastic areas</p>
-              <table className={`mt-2 w-full ${grid ? "text-[11px]" : text} ${kids ? "border-separate border-spacing-0 overflow-hidden rounded-xl border-[1.5px] border-[#f2a9c4]" : "border-collapse"}`}>
+              <p className={headClass("bg-[var(--print-rc-kids-rose-bg)]")}>Co-scholastic areas</p>
+              <table className={`mt-2 w-full ${grid ? "text-[11px]" : text} ${kids ? "border-separate border-spacing-0 overflow-hidden rounded-xl border-[1.5px] border-[var(--print-rc-kids-pink)]" : "border-collapse"}`}>
                 <thead>
                   <tr>
-                    <th className={kids ? "border-b border-r border-[#f6d4e0] bg-[#ffe4ee] px-2 py-[2px] text-left text-[9px] font-bold uppercase tracking-[0.06em] text-[#96466a]" : gridTh}>Area</th>
+                    <th className={kids ? "border-b border-r border-[var(--print-rc-kids-pink-soft)] bg-[var(--print-rc-kids-pink-bg)] px-2 py-[2px] text-left text-[9px] font-bold uppercase tracking-[0.06em] text-[var(--print-rc-kids-rose)]" : gridTh}>Area</th>
                     {(kids && card.coScholasticByExam?.length
                       ? card.coScholasticByExam
                       : [{ examTermId: card.examTerm.id, examLabel: kids ? card.examTerm.label : "Grade", ratings: card.coScholastic }]
                     ).map((x) => (
-                      <th key={x.examTermId} className={kids ? "border-b border-[#f6d4e0] bg-[#ffe4ee] px-2 py-[2px] text-center text-[9px] font-bold uppercase tracking-[0.06em] text-[#96466a]" : gridThC}>
+                      <th key={x.examTermId} className={kids ? "border-b border-[var(--print-rc-kids-pink-soft)] bg-[var(--print-rc-kids-pink-bg)] px-2 py-[2px] text-center text-[9px] font-bold uppercase tracking-[0.06em] text-[var(--print-rc-kids-rose)]" : gridThC}>
                         {x.examLabel}
                       </th>
                     ))}
@@ -940,14 +940,14 @@ export function ReportCardSheet({
                 <tbody>
                   {card.coScholastic.map((cs) => (
                     <tr key={cs.domain}>
-                      <td className={kids ? "border-b border-r border-[#f6d4e0] px-2 py-[2px] font-semibold text-[var(--brand-deep)]" : `${gridTd} font-medium text-[var(--brand-deep)]`}>{cs.domainLabel}</td>
+                      <td className={kids ? "border-b border-r border-[var(--print-rc-kids-pink-soft)] px-2 py-[2px] font-semibold text-[var(--brand-deep)]" : `${gridTd} font-medium text-[var(--brand-deep)]`}>{cs.domainLabel}</td>
                       {(kids && card.coScholasticByExam?.length
                         ? card.coScholasticByExam
                         : [{ examTermId: card.examTerm.id, examLabel: card.examTerm.label, ratings: card.coScholastic }]
                       ).map((x) => {
                         const r = x.ratings.find((y) => y.domain === cs.domain);
                         return (
-                          <td key={x.examTermId} className={kids ? "border-b border-[#f6d4e0] px-2 py-[2px] text-center font-semibold" : `${gridTd} text-center font-semibold`}>
+                          <td key={x.examTermId} className={kids ? "border-b border-[var(--print-rc-kids-pink-soft)] px-2 py-[2px] text-center font-semibold" : `${gridTd} text-center font-semibold`}>
                             {r?.rating ?? "—"}
                             {!kids && r?.rating && r.ratingLabel ? ` — ${r.ratingLabel}` : ""}
                           </td>
@@ -960,7 +960,7 @@ export function ReportCardSheet({
             </div>
           ) : (
           <div className={compact ? "mt-3" : "mt-5"}>
-            <p className={headClass("bg-[#fde3ee]")}>Co-scholastic areas</p>
+            <p className={headClass("bg-[var(--print-rc-kids-rose-bg)]")}>Co-scholastic areas</p>
             <div className={`mt-2 flex flex-wrap gap-x-6 gap-y-1 ${text}`}>
               {card.coScholastic.map((c) => (
                 <div key={c.domain}>
@@ -996,4 +996,4 @@ export function ReportCardSheet({
       </div>
     </div>
   );
-                  }
+}
