@@ -827,6 +827,29 @@ h3,
 }
 
 /* Fee Take — print only the selected receipt, not the whole page */
+
+/* Fixed print palette for the report-card sheets. These documents print on
+   white stock, so their colours must NOT follow the theme tokens, which
+   invert in dark mode and would print wrong ink. ReportCardSheet.tsx reaches
+   these through Tailwind's var() form, e.g. bg-[var(--print-rc-cream)]. */
+:root {
+  --print-rc-cream: #f8f8f0;
+  --print-rc-cream-soft: #fbfbf7;
+  --print-rc-parchment: #fdf6e3;
+  --print-rc-mint: #e3f3e6;
+  --print-rc-sky-bg: #dceffb;
+  --print-rc-sky-row: #f2f8fd;
+  --print-rc-kids-sky: #8fc8e8;
+  --print-rc-kids-sky-soft: #cfe5f0;
+  --print-rc-kids-dash: #f0b8d0;
+  --print-rc-kids-pink: #f2a9c4;
+  --print-rc-kids-pink-soft: #f6d4e0;
+  --print-rc-kids-pink-bg: #ffe4ee;
+  --print-rc-kids-rose-bg: #fde3ee;
+  --print-rc-kids-rose: #96466a;
+  --print-rc-kids-ink: #384870;
+}
+
 @media print {
   @page {
     margin: 6mm;
@@ -1042,7 +1065,7 @@ h3,
   /* The playful pre-primary report card keeps its pastel frame on paper —
      the shared rule above strips sheet borders for every other document. */
   body.printing-certificate .certificate-sheet.print-target.certificate-kids {
-    border: 2px solid #8fc8e8 !important;
+    border: 2px solid var(--print-rc-kids-sky) !important;
     border-radius: 24px !important;
   }
 
@@ -2019,4 +2042,4 @@ h3,
  */
 .bhashini-plugin-container .bhashini-dropdown-btn {
   color: inherit;
-}
+      }
