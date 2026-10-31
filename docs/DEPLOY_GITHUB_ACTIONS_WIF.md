@@ -72,9 +72,45 @@ each with the value from your `apps/web/.env.local`:
 | `GOOGLE_OAUTH_CLIENT_ID` | `GOOGLE_OAUTH_CLIENT_ID` |
 | `FLEET_EDGE_ALLOWED_IPS` | `FLEET_EDGE_ALLOWED_IPS` |
 | `FLEET_EDGE_SOS_NOTIFY_MOBILE` | `FLEET_EDGE_SOS_NOTIFY_MOBILE` |
+| `REVIEW_LOGIN_MOBILE` | `REVIEW_LOGIN_MOBILE` |
+| `REVIEW_LOGIN_HOUSEHOLD_ID` | `REVIEW_LOGIN_HOUSEHOLD_ID` |
+| `CASHFREE_APP_ID` | `CASHFREE_APP_ID` |
+| `CASHFREE_VERIFICATION_APP_ID` | `CASHFREE_VERIFICATION_APP_ID` |
+| `CASHFREE_PAYOUT_CLIENT_ID` | `CASHFREE_PAYOUT_CLIENT_ID` |
+| `NEXT_PUBLIC_PAYMENT_GATEWAY` | `NEXT_PUBLIC_PAYMENT_GATEWAY` |
+| `BIGQUERY_PROJECT_ID` | `BIGQUERY_PROJECT_ID`, else the live service's value |
 
-The real secrets are already in Secret Manager and bound by `cloudbuild.yaml`;
-none of them go into GitHub.
+**One value is NOT a repo variable: the Play reviewer code**
+(`REVIEW_LOGIN_CODE`). It is a password - for one fictional household, but a
+password - so it must never appear in a workflow file, a substitutions list,
+a build record, a shell history, or a chat message. `cloudbuild.yaml` binds
+it from Secret Manager like every other credential.
+
+Create it in the Google Cloud Console (no command line involved): Secret
+Manager > **Create secret** > name `school-erp-review-login-code`, project
+`school-erp-prod-493619`, and paste the value of `REVIEW_LOGIN_CODE` from
+`apps/web/.env.local` exactly - no surrounding quotes, no trailing newline.
+
+Then grant `roles/secretmanager.secretAccessor` on it to the same service
+accounts that read the other `school-erp-*` secrets: the Cloud Build service
+account (binds it at deploy) and the Cloud Run runtime service account
+(reads it at request time). Until this secret exists, every deploy through
+`cloudbuild.yaml` - from GitHub Actions or `scripts/deploy-online.sh` -
+fails; the script checks for it before starting the build.
+
+The workflow refuses to deploy when any of the fifteen variables above is
+empty or the secret's latest version is not ENABLED, because
+`cloudbuild.yaml`'s `--set-env-vars` replaces the whole Cloud Run
+environment: a missing value is not left alone, it is erased from the live
+service. Demo auth is pinned `false` in the workflow as a literal. Passing
+this preflight does NOT make a deploy safe on its own: it does not verify
+that the variable values match the live service (compare with
+`gcloud run services describe` before the first run) or that the IAM grants
+above are in place - both stay release blockers until checked by someone
+with Cloud access.
+
+The real credentials are already in Secret Manager and bound by
+`cloudbuild.yaml`; none of them go into GitHub.
 
 ## The identity chain, and one permission to verify
 
