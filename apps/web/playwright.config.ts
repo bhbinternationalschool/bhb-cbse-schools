@@ -65,8 +65,16 @@ export default defineConfig<GateOptions>({
   projects: [
     {
       name: "desktop",
-      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|chat-one|chat-logs|chat-homework|chat-group-edit|masters-overlay|masters-element-writes|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens|staff-locked-validation|staff-editor-writes|staff-followups|fee-writes|masters-push-gone|subject-request-approval)\.spec\.ts/,
+      testIgnore: /(propagation|transport-paid-month|dues-screens-transport|dues-transport-desk|parent-web-dues|payroll|staff-month-register|notifications|student-upgrade|school-chat|chat-one|chat-logs|chat-homework|chat-group-edit|masters-overlay|masters-element-writes|parent-web-tabs|fuel-per-bus-range|certificates-dues-gate|staff-editor-save|print-signatures|staff-sensitive-screens|staff-locked-validation|staff-editor-writes|staff-followups|fee-writes|masters-push-gone|subject-request-approval|staff-tasks)\.spec\.ts/,
       use: { ...desktop },
+    },
+    {
+      // The staff task module end to end: real routes, real tables, the
+      // in-memory bucket. Writes staff_tasks / staff_task_updates, so it runs
+      // after the read-only gate like the other writing projects.
+      name: "staff-tasks-writes",
+      testMatch: /staff-tasks\.spec\.ts/,
+      dependencies: ["desktop", "phone-375-cpu4x"],
     },
     {
       // A phone: 375 px wide, touch, and the CPU slowed 4× through CDP

@@ -77,6 +77,7 @@ import { StaffLeavePanel } from "@/components/staff/StaffLeavePanel";
 import { StaffLeaveRulesPanel } from "@/components/staff/StaffLeaveRulesPanel";
 import { StaffRequestsPanel } from "@/components/staff/StaffRequestsPanel";
 import { StaffOutdoorDutyPanel } from "@/components/staff/StaffOutdoorDutyPanel";
+import { StaffTasksPanel } from "@/components/staff/StaffTasksPanel";
 import { StaffLeaveReportsPanel } from "@/components/staff/StaffLeaveReportsPanel";
 import { StaffAppraisalPanel } from "@/components/staff/StaffAppraisalPanel";
 import { StaffPayslipsPanel } from "@/components/staff/StaffPayslipsPanel";
@@ -123,6 +124,7 @@ type StaffMainTab =
   | "dashboard"
   | "roster"
   | "duty_roster"
+  | "tasks"
   | "allocate"
   | "assignments"
   | "leave"
@@ -143,6 +145,7 @@ const STAFF_TABS: ModuleTabItem[] = [
   { id: "dashboard", label: "Dashboard", tone: "navy" },
   { id: "roster", label: "Roster", tone: "navy" },
   { id: "duty_roster", label: "Duty roster", tone: "coral" },
+  { id: "tasks", label: "Tasks", tone: "violet" },
   { id: "allocate", label: "Allocate teaching", tone: "violet" },
   { id: "assignments", label: "Who teaches what", tone: "sky" },
   { id: "my_docs", label: "My docs", tone: "sky" },
@@ -173,6 +176,7 @@ export function StaffWorkspace() {
       "dashboard",
       "roster",
       "duty_roster",
+      "tasks",
       "allocate",
       "assignments",
       "leave",
@@ -567,6 +571,8 @@ export function StaffWorkspace() {
           <DutyRosterPanel masters={state} />
         </ErpPanel>
       ) : null}
+
+      {tab === "tasks" ? <StaffTasksPanel /> : null}
 
       {tab === "my_docs" ? (
         <ErpPanel>
