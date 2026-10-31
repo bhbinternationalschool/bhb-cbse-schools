@@ -51,6 +51,9 @@ export type ReportCardTemplate = {
   showOverallGrade: boolean;
   showAttendance: boolean | null;
   showRank: boolean | null;
+  /** Print the rank only at or above this place (3 = top 3), without
+   * "of N"; null = every rank prints, with the class size. */
+  rankTopOnly: number | null;
   showClassAverage: boolean | null;
   showResult: boolean | null;
   showCoScholastic: boolean;
@@ -60,6 +63,18 @@ export type ReportCardTemplate = {
   signatureLabels: string[];
   footerNote: string;
   showWatermark: boolean;
+  /** "center" = the initials in the middle; "tile" = the school name
+   * repeated in horizontal rows across the page, with a faint crest. */
+  watermarkStyle: "center" | "tile";
+  /** "kids" = a playful rounded frame and decorations (HPC layouts). */
+  cardTheme: "standard" | "kids";
+  /** HPC only: remarks above the learning areas ("first", the HPC
+   * convention) or below the tables, just over the signatures. */
+  remarksPosition: "first" | "after_tables";
+  /** Classic layouts: boxed grid tables (bordered cells, navy header,
+   * split subjects as sub-rows, per-exam Max/Obt columns on aggregate
+   * cards) instead of the open ruled look. */
+  gridTables: boolean;
 };
 
 export const DEFAULT_TEMPLATE_ID = "tpl_classic";
@@ -98,6 +113,7 @@ export function defaultReportCardTemplate(): ReportCardTemplate {
     showOverallGrade: true,
     showAttendance: null,
     showRank: null,
+    rankTopOnly: null,
     showClassAverage: null,
     showResult: null,
     showCoScholastic: true,
@@ -106,6 +122,10 @@ export function defaultReportCardTemplate(): ReportCardTemplate {
     signatureLabels: ["Class teacher", "Examination in-charge", "Principal"],
     footerNote: "",
     showWatermark: true,
+    watermarkStyle: "center",
+    cardTheme: "standard",
+    remarksPosition: "first",
+    gridTables: false,
   };
 }
 
@@ -142,6 +162,10 @@ export function normalizeReportCardTemplate(
     showOverallGrade: raw.showOverallGrade !== false,
     showAttendance: tri(raw.showAttendance),
     showRank: tri(raw.showRank),
+    rankTopOnly:
+      typeof raw.rankTopOnly === "number" && Number.isFinite(raw.rankTopOnly) && raw.rankTopOnly >= 1
+        ? Math.min(50, Math.round(raw.rankTopOnly))
+        : null,
     showClassAverage: tri(raw.showClassAverage),
     showResult: tri(raw.showResult),
     showCoScholastic: raw.showCoScholastic !== false,
@@ -150,6 +174,10 @@ export function normalizeReportCardTemplate(
     signatureLabels: labels.length ? labels : d.signatureLabels,
     footerNote: String(raw.footerNote ?? "").trim().slice(0, 300),
     showWatermark: raw.showWatermark !== false,
+    watermarkStyle: raw.watermarkStyle === "tile" ? "tile" : "center",
+    cardTheme: raw.cardTheme === "kids" ? "kids" : "standard",
+    remarksPosition: raw.remarksPosition === "after_tables" ? "after_tables" : "first",
+    gridTables: !!raw.gridTables,
   };
 }
 
@@ -277,6 +305,58 @@ export const TEMPLATE_PRESETS: TemplatePreset[] = [
     }),
   },
   {
+    key: "classic_top3",
+    label: "Classic card (photo, attendance, top-3 rank)",
+    band: "ALL",
+    summary:
+      "Classic table with photo, attendance and the school name watermarked across the page; rank prints for the top 3 only; a parent signs the third line.",
+    build: () => ({
+      name: "Classic card (top-3 rank)",
+      layout: "classic",
+      showPhoto: true,
+      showRollNo: true,
+      showDob: true,
+      showAttendance: true,
+      showRank: true,
+      rankTopOnly: 3,
+      showGradeLegend: true,
+      gridTables: true,
+      watermarkStyle: "tile",
+      signatureLabels: ["Class teacher", "Parent's signature", "Principal"],
+    }),
+  },
+  {
+    key: "hpc_kids",
+    label: "Kids HPC (pre-primary, playful)",
+    band: "PRE_PRIMARY",
+    summary:
+      "Holistic Progress Card in a child-friendly style: descriptors only, one column per exam on aggregate cards, attendance, remarks below the tables, parent signature line.",
+    build: () => ({
+      name: "Kids Holistic Progress Card",
+      layout: "hpc",
+      title: "Holistic Progress Card",
+      cardTheme: "kids",
+      remarksPosition: "after_tables",
+      showPhoto: true,
+      showRollNo: false,
+      showDob: true,
+      showHealth: true,
+      showComponents: false,
+      showGradeLegend: true,
+      showPercent: false,
+      showOverallGrade: false,
+      showRank: false,
+      showClassAverage: false,
+      showAttendance: true,
+      showCoScholastic: true,
+      showRemarks: true,
+      showWatermark: true,
+      watermarkStyle: "tile",
+      signatureLabels: ["Class teacher", "Parent's signature", "Principal"],
+      footerNote: "This card records the child's progress across learning areas; it is not a ranking.",
+    }),
+  },
+  {
     key: "compact",
     label: "Compact one-page",
     band: "ALL",
@@ -353,6 +433,7 @@ export type CardPresentation = {
   showOverallGrade: boolean;
   showAttendance: boolean;
   showRank: boolean;
+  rankTopOnly: number | null;
   showClassAverage: boolean;
   showResult: boolean;
   showCoScholastic: boolean;
@@ -361,6 +442,10 @@ export type CardPresentation = {
   signatureLabels: string[];
   footerNote: string;
   showWatermark: boolean;
+  watermarkStyle: "center" | "tile";
+  cardTheme: "standard" | "kids";
+  remarksPosition: "first" | "after_tables";
+  gridTables: boolean;
 };
 
 export function resolvePresentation(
@@ -392,6 +477,7 @@ export function resolvePresentation(
     showOverallGrade: template.showOverallGrade,
     showAttendance: template.showAttendance ?? fallback.showAttendance,
     showRank: template.showRank ?? fallback.showRank,
+    rankTopOnly: template.rankTopOnly,
     showClassAverage: template.showClassAverage ?? fallback.showClassAverage,
     showResult: template.showResult ?? fallback.showResult,
     showCoScholastic: template.showCoScholastic,
@@ -400,6 +486,10 @@ export function resolvePresentation(
     signatureLabels: template.signatureLabels,
     footerNote: template.footerNote,
     showWatermark: template.showWatermark,
+    watermarkStyle: template.watermarkStyle,
+    cardTheme: template.cardTheme,
+    remarksPosition: template.remarksPosition,
+    gridTables: template.gridTables,
   };
 }
 
@@ -408,10 +498,13 @@ export function templateSummary(t: ReportCardTemplate): string {
   const bits = [layoutLabel(t.layout).toLowerCase()];
   if (t.showPhoto === true) bits.push("photo");
   if (t.showGradeLegend) bits.push("grade legend");
-  if (t.showRank === true) bits.push("rank");
+  if (t.showRank === true) bits.push(t.rankTopOnly != null ? `top ${t.rankTopOnly} rank` : "rank");
   if (t.showResult === true) bits.push("result");
   if (!t.showRemarks) bits.push("no remarks");
   if (!t.showWatermark) bits.push("no watermark");
+  if (t.showWatermark && t.watermarkStyle === "tile") bits.push("name watermark");
+  if (t.cardTheme === "kids") bits.push("kids style");
+  if (t.gridTables) bits.push("grid tables");
   bits.push(`${t.showSignatures ? t.signatureLabels.length : 0} signatures`);
   return bits.join(" · ");
 }

@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 
 import {
   defaultReportCardTemplate,
+  normalizeReportCardTemplate,
   normalizeReportCardTemplates,
   reportCardTemplateForClass,
   resolvePresentation,
@@ -70,6 +71,60 @@ console.log("examReportTemplates.selftest.ts");
   const policy = normalizeExamPolicy({ ...defaultExamPolicy(), reportTemplates: undefined as never });
   assert.equal(policy.reportTemplates.length, 1, "an old policy blob gets the classic template");
   assert.ok(reportTemplateForClassId("cls_any", policy).isDefault);
+}
+
+{
+  // The director's print choices (31 Oct 2026): topper rank, tiled school-name
+  // watermark, playful HPC, parent signature line.
+  const t = defaultReportCardTemplate();
+  assert.equal(t.rankTopOnly, null, "classic prints every rank, with the class size");
+  assert.equal(t.watermarkStyle, "center");
+  assert.equal(t.cardTheme, "standard");
+  assert.equal(t.remarksPosition, "first");
+  assert.equal(t.gridTables, false, "the classic card keeps its open ruled look");
+
+  const top3 = templateFromPreset(TEMPLATE_PRESETS.find((p) => p.key === "classic_top3")!, ["cls_viii"]);
+  assert.equal(top3.rankTopOnly, 3);
+  assert.equal(top3.watermarkStyle, "tile");
+  assert.equal(top3.showPhoto, true);
+  assert.equal(top3.showAttendance, true);
+  assert.deepEqual(top3.signatureLabels, ["Class teacher", "Parent's signature", "Principal"]);
+  assert.ok(/top 3 rank/.test(templateSummary(top3)));
+  assert.equal(top3.gridTables, true, "the approved classic design is the boxed grid");
+  assert.ok(/grid tables/.test(templateSummary(top3)));
+
+  const kids = templateFromPreset(TEMPLATE_PRESETS.find((p) => p.key === "hpc_kids")!, ["cls_nur"]);
+  assert.equal(kids.cardTheme, "kids");
+  assert.equal(kids.remarksPosition, "after_tables");
+  assert.equal(kids.showAttendance, true);
+  assert.equal(kids.showPercent, false, "the kids HPC never prints numbers");
+  assert.equal(kids.showRank, false);
+  assert.equal(kids.watermarkStyle, "tile");
+
+  // A bad stored value normalises away rather than breaking the card.
+  const fixed = normalizeReportCardTemplate({
+    rankTopOnly: 0,
+    watermarkStyle: "diagonal" as never,
+    cardTheme: "dark" as never,
+    remarksPosition: "middle" as never,
+  });
+  assert.equal(fixed.rankTopOnly, null);
+  assert.equal(fixed.watermarkStyle, "center");
+  assert.equal(fixed.cardTheme, "standard");
+  assert.equal(fixed.remarksPosition, "first");
+
+  const pres = resolvePresentation(kids, {
+    showPhoto: false,
+    showAttendance: false,
+    showRank: true,
+    showClassAverage: false,
+    showResult: false,
+  });
+  assert.equal(pres.cardTheme, "kids");
+  assert.equal(pres.remarksPosition, "after_tables");
+  assert.equal(pres.watermarkStyle, "tile");
+  assert.equal(pres.rankTopOnly, null);
+  assert.equal(pres.showAttendance, true, "the template's own switch still wins");
 }
 
 console.log("OK — examReportTemplates.selftest.ts");
